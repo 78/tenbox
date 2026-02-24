@@ -11,11 +11,14 @@
 #include "device/acpi/acpi_pm.h"
 #include "device/virtio/virtio_mmio.h"
 #include "device/virtio/virtio_blk.h"
+#include "device/virtio/virtio_net.h"
+#include "net/net_backend.h"
 #include "arch/x86_64/acpi.h"
 #include <memory>
 #include <string>
 #include <atomic>
 #include <thread>
+#include <vector>
 
 struct VmConfig {
     std::string kernel_path;
@@ -24,6 +27,8 @@ struct VmConfig {
     std::string cmdline = "console=ttyS0 earlyprintk=serial lapic no_timer_check tsc=reliable";
     uint64_t memory_mb = 256;
     uint32_t cpu_count = 1;
+    bool net_enabled = false;
+    std::vector<PortForward> port_forwards;
 };
 
 class Vm {
@@ -42,6 +47,7 @@ private:
     bool AllocateMemory(uint64_t size);
     bool SetupDevices();
     bool SetupVirtioBlk(const std::string& disk_path);
+    bool SetupVirtioNet(const std::vector<PortForward>& forwards);
     bool LoadKernel(const VmConfig& config);
 
     void InputThreadFunc();
@@ -64,6 +70,12 @@ private:
     // VirtIO block device (optional)
     std::unique_ptr<VirtioBlkDevice> virtio_blk_;
     std::unique_ptr<VirtioMmioDevice> virtio_mmio_;
+
+    // VirtIO net device (optional)
+    std::unique_ptr<VirtioNetDevice> virtio_net_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_net_;
+    std::unique_ptr<NetBackend> net_backend_;
+
     std::vector<x86::VirtioMmioAcpiInfo> virtio_acpi_devs_;
 
     std::atomic<bool> running_{false};

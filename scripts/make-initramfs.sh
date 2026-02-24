@@ -42,12 +42,15 @@ dpkg-deb -x linux-image-*.deb kmod_extract/
 MODDIR="kmod_extract/lib/modules/$KVER/kernel"
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
-# Modules needed for virtio block device + ext4 filesystem support
+# Modules needed for virtio block/net devices + ext4 filesystem support
 VIRTIO_MODS=(
     "drivers/virtio/virtio.ko"
     "drivers/virtio/virtio_ring.ko"
     "drivers/virtio/virtio_mmio.ko"
     "drivers/block/virtio_blk.ko"
+    "net/core/failover.ko"
+    "drivers/net/net_failover.ko"
+    "drivers/net/virtio_net.ko"
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
@@ -85,7 +88,7 @@ cat > "$WORKDIR/initramfs/init" << 'EOF'
 
 # Load virtio modules — device discovery is handled by ACPI DSDT
 MODDIR=/lib/modules
-for mod in virtio virtio_ring virtio_mmio virtio_blk; do
+for mod in virtio virtio_ring virtio_mmio virtio_blk failover net_failover virtio_net; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"

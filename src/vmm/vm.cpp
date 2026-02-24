@@ -1,8 +1,10 @@
 #include "vmm/vm.h"
 #include "arch/x86_64/boot.h"
 
-static constexpr uint64_t kVirtioMmioBase = 0xd0000000;
-static constexpr uint8_t  kVirtioBlkIrq   = 5;
+static constexpr uint64_t kVirtioMmioBase    = 0xd0000000;
+static constexpr uint8_t  kVirtioBlkIrq      = 5;
+static constexpr uint64_t kVirtioNetMmioBase = 0xd0000200;
+static constexpr uint8_t  kVirtioNetIrq      = 6;
 
 Vm::~Vm() {
     running_ = false;
@@ -37,6 +39,10 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
         if (!vm->SetupVirtioBlk(config.disk_path)) return nullptr;
     }
 
+    if (config.net_enabled) {
+        if (!vm->SetupVirtioNet(config.port_forwards)) return nullptr;
+    }
+
     // Register virtio-mmio devices for ACPI DSDT so the kernel discovers
     // them via the "LNRO0005" HID in the virtio_mmio driver.
     if (vm->virtio_mmio_) {
@@ -44,6 +50,12 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
             kVirtioMmioBase,
             static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
             kVirtioBlkIrq});
+    }
+    if (vm->virtio_mmio_net_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioNetMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioNetIrq});
     }
 
     if (!vm->LoadKernel(config)) return nullptr;
@@ -120,6 +132,31 @@ bool Vm::SetupVirtioBlk(const std::string& disk_path) {
 
     addr_space_.AddMmioDevice(
         kVirtioMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_.get());
+    return true;
+}
+
+bool Vm::SetupVirtioNet(const std::vector<PortForward>& forwards) {
+    net_backend_ = std::make_unique<NetBackend>();
+    virtio_net_ = std::make_unique<VirtioNetDevice>();
+
+    virtio_mmio_net_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_net_->Init(virtio_net_.get(), ram_, ram_size_);
+    virtio_mmio_net_->SetIrqCallback([this]() { InjectIrq(kVirtioNetIrq); });
+    virtio_net_->SetMmioDevice(virtio_mmio_net_.get());
+
+    virtio_net_->SetTxCallback([this](const uint8_t* frame, uint32_t len) {
+        net_backend_->EnqueueTx(frame, len);
+    });
+
+    addr_space_.AddMmioDevice(
+        kVirtioNetMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_net_.get());
+
+    if (!net_backend_->Start(virtio_net_.get(),
+                              [this]() { InjectIrq(kVirtioNetIrq); },
+                              forwards)) {
+        LOG_ERROR("Failed to start network backend");
+        return false;
+    }
     return true;
 }
 

@@ -39,6 +39,10 @@ public:
     // Called by the backend device to signal a used buffer notification.
     void NotifyUsedBuffer();
 
+    VirtQueue* GetQueue(uint32_t idx) {
+        return idx < queues_.size() ? &queues_[idx] : nullptr;
+    }
+
 private:
     void DoReset();
 

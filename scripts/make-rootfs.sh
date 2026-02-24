@@ -6,7 +6,7 @@ set -e
 ROOTFS_SIZE="2G"
 SUITE="bookworm"
 MIRROR="http://deb.debian.org/debian"
-INCLUDE_PKGS="systemd-sysv,udev,iproute2,iputils-ping,curl"
+INCLUDE_PKGS="systemd-sysv,udev,iproute2,iputils-ping,curl,ifupdown,isc-dhcp-client"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../build"
@@ -91,6 +91,8 @@ iface lo inet loopback
 auto eth0
 iface eth0 inet dhcp
 NET
+
+systemctl enable networking.service 2>/dev/null || true
 
 # Verify init exists
 ls -la /sbin/init

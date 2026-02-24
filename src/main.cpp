@@ -13,6 +13,8 @@ static void PrintUsage(const char* prog) {
         "  --cmdline <str>    Kernel command line\n"
         "                     (default: \"console=ttyS0 earlyprintk=serial\")\n"
         "  --memory <MB>      Guest RAM in MB (default: 256)\n"
+        "  --net              Enable virtio-net with NAT networking\n"
+        "  --forward H:G      Port forward host:H -> guest:G (repeatable)\n"
         "  --help             Show this help\n",
         prog);
 }
@@ -45,6 +47,20 @@ int main(int argc, char* argv[]) {
         } else if (Arg("--memory")) {
             auto v = NextArg(); if (!v) return 1;
             config.memory_mb = atoi(v);
+        } else if (Arg("--net")) {
+            config.net_enabled = true;
+        } else if (Arg("--forward")) {
+            auto v = NextArg(); if (!v) return 1;
+            // Parse "hostPort:guestPort"
+            unsigned hp = 0, gp = 0;
+            if (sscanf(v, "%u:%u", &hp, &gp) == 2 && hp && gp) {
+                config.port_forwards.push_back({
+                    static_cast<uint16_t>(hp),
+                    static_cast<uint16_t>(gp)});
+            } else {
+                fprintf(stderr, "Invalid --forward format: %s (expected H:G)\n", v);
+                return 1;
+            }
         } else if (Arg("--help") || Arg("-h")) {
             PrintUsage(argv[0]);
             return 0;
@@ -72,6 +88,10 @@ int main(int argc, char* argv[]) {
         LOG_INFO("Initrd: %s", config.initrd_path.c_str());
     if (!config.disk_path.empty())
         LOG_INFO("Disk: %s", config.disk_path.c_str());
+    if (config.net_enabled)
+        LOG_INFO("Network: enabled (NAT)");
+    for (auto& f : config.port_forwards)
+        LOG_INFO("Forward: host:%u -> guest:%u", f.host_port, f.guest_port);
     LOG_INFO("Cmdline: %s", config.cmdline.c_str());
     LOG_INFO("Memory: %llu MB", config.memory_mb);
 
