@@ -127,8 +127,8 @@ uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
     LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%llX RAM]",
              ram_size - 1);
 
-    // Build ACPI tables and set RSDP address in boot_params
-    GPA rsdp_addr = BuildAcpiTables(ram, 1);
+    // Build ACPI tables (RSDP, XSDT, MADT, FADT, DSDT) and store RSDP GPA
+    GPA rsdp_addr = BuildAcpiTables(ram, 1, config.virtio_devs);
     *reinterpret_cast<uint64_t*>(bp + BootOffset::kAcpiRsdpAddr) = rsdp_addr;
 
     return kernel_size;

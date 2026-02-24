@@ -3,7 +3,8 @@
 # Run this in WSL2 or a Debian-based Linux environment.
 set -e
 
-OUTDIR="$(cd "${1:-.}" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../build}" && cd "${1:-$SCRIPT_DIR/../build}" && pwd)"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 

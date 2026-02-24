@@ -1,6 +1,9 @@
 #include "vmm/vm.h"
 #include "arch/x86_64/boot.h"
 
+static constexpr uint64_t kVirtioMmioBase = 0xd0000000;
+static constexpr uint8_t  kVirtioBlkIrq   = 5;
+
 Vm::~Vm() {
     running_ = false;
     if (input_thread_.joinable())
@@ -29,6 +32,19 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (!vm->AllocateMemory(ram_bytes)) return nullptr;
 
     if (!vm->SetupDevices()) return nullptr;
+
+    if (!config.disk_path.empty()) {
+        if (!vm->SetupVirtioBlk(config.disk_path)) return nullptr;
+    }
+
+    // Register virtio-mmio devices for ACPI DSDT so the kernel discovers
+    // them via the "LNRO0005" HID in the virtio_mmio driver.
+    if (vm->virtio_mmio_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioBlkIrq});
+    }
 
     if (!vm->LoadKernel(config)) return nullptr;
 
@@ -87,6 +103,23 @@ bool Vm::SetupDevices() {
         CmosRtc::kBasePort, CmosRtc::kRegCount, &rtc_);
     addr_space_.AddMmioDevice(
         IoApic::kBaseAddress, IoApic::kSize, &ioapic_);
+    acpi_pm_.SetShutdownCallback([this]() { RequestStop(); });
+    addr_space_.AddPioDevice(
+        AcpiPm::kBasePort, AcpiPm::kRegCount, &acpi_pm_);
+    return true;
+}
+
+bool Vm::SetupVirtioBlk(const std::string& disk_path) {
+    virtio_blk_ = std::make_unique<VirtioBlkDevice>();
+    if (!virtio_blk_->Open(disk_path)) return false;
+
+    virtio_mmio_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_->Init(virtio_blk_.get(), ram_, ram_size_);
+    virtio_mmio_->SetIrqCallback([this]() { InjectIrq(kVirtioBlkIrq); });
+    virtio_blk_->SetMmioDevice(virtio_mmio_.get());
+
+    addr_space_.AddMmioDevice(
+        kVirtioMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_.get());
     return true;
 }
 
@@ -96,6 +129,7 @@ bool Vm::LoadKernel(const VmConfig& config) {
     boot_cfg.initrd_path = config.initrd_path;
     boot_cfg.cmdline = config.cmdline;
     boot_cfg.ram_size = ram_size_;
+    boot_cfg.virtio_devs = virtio_acpi_devs_;
 
     uint64_t kernel_size = x86::LoadLinuxKernel(boot_cfg, ram_, ram_size_);
     if (kernel_size == 0) {

@@ -9,6 +9,7 @@ static void PrintUsage(const char* prog) {
         "Options:\n"
         "  --kernel <path>    Path to vmlinuz (required)\n"
         "  --initrd <path>    Path to initramfs\n"
+        "  --disk <path>      Path to raw / qcow2 disk image\n"
         "  --cmdline <str>    Kernel command line\n"
         "                     (default: \"console=ttyS0 earlyprintk=serial\")\n"
         "  --memory <MB>      Guest RAM in MB (default: 256)\n"
@@ -35,6 +36,9 @@ int main(int argc, char* argv[]) {
         } else if (Arg("--initrd")) {
             auto v = NextArg(); if (!v) return 1;
             config.initrd_path = v;
+        } else if (Arg("--disk")) {
+            auto v = NextArg(); if (!v) return 1;
+            config.disk_path = v;
         } else if (Arg("--cmdline")) {
             auto v = NextArg(); if (!v) return 1;
             config.cmdline = v;
@@ -66,6 +70,8 @@ int main(int argc, char* argv[]) {
     LOG_INFO("Kernel: %s", config.kernel_path.c_str());
     if (!config.initrd_path.empty())
         LOG_INFO("Initrd: %s", config.initrd_path.c_str());
+    if (!config.disk_path.empty())
+        LOG_INFO("Disk: %s", config.disk_path.c_str());
     LOG_INFO("Cmdline: %s", config.cmdline.c_str());
     LOG_INFO("Memory: %llu MB", config.memory_mb);
 

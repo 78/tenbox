@@ -3,6 +3,7 @@
 #include "vmm/types.h"
 #include <windows.h>
 #include <WinHvPlatform.h>
+#include "arch/x86_64/acpi.h"
 #include <string>
 #include <vector>
 
@@ -61,6 +62,7 @@ struct BootConfig {
     std::string initrd_path;
     std::string cmdline;
     uint64_t ram_size;
+    std::vector<VirtioMmioAcpiInfo> virtio_devs;
 };
 
 // Load kernel, initrd, set up boot_params in guest RAM.

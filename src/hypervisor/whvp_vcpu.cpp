@@ -88,8 +88,16 @@ VCpuExitAction WhvpVCpu::RunOnce() {
     case WHvRunVpExitReasonMemoryAccess:
         return HandleMmio(exit_ctx.VpContext, exit_ctx.MemoryAccess);
 
-    case WHvRunVpExitReasonX64Halt:
+    case WHvRunVpExitReasonX64Halt: {
+        WHV_REGISTER_NAME rfl_name = WHvX64RegisterRflags;
+        WHV_REGISTER_VALUE rfl_val{};
+        GetRegisters(&rfl_name, &rfl_val, 1);
+        if (!(rfl_val.Reg64 & 0x200)) {
+            LOG_INFO("CPU halted with interrupts disabled — treating as shutdown");
+            return VCpuExitAction::kShutdown;
+        }
         return VCpuExitAction::kHalt;
+    }
 
     case WHvRunVpExitReasonCanceled:
         return VCpuExitAction::kContinue;
