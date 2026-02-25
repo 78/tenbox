@@ -1,17 +1,15 @@
 #include "device/virtio/virtio_mmio.h"
 
-void VirtioMmioDevice::Init(VirtioDeviceOps* ops,
-                              uint8_t* ram, uint64_t ram_size) {
+void VirtioMmioDevice::Init(VirtioDeviceOps* ops, const GuestMemMap& mem) {
     ops_ = ops;
-    ram_ = ram;
-    ram_size_ = ram_size;
+    mem_ = mem;
 
     uint32_t num_queues = ops_->GetNumQueues();
     queues_.resize(num_queues);
     queue_configs_.resize(num_queues);
 
     for (uint32_t i = 0; i < num_queues; i++) {
-        queues_[i].Setup(ops_->GetQueueMaxSize(i), ram_, ram_size_);
+        queues_[i].Setup(ops_->GetQueueMaxSize(i), mem_);
     }
 }
 
@@ -119,7 +117,7 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
                 auto& vq = queues_[queue_sel_];
                 uint32_t qs = cfg.num ? cfg.num
                                       : ops_->GetQueueMaxSize(queue_sel_);
-                vq.Setup(qs, ram_, ram_size_);
+                vq.Setup(qs, mem_);
                 vq.SetDescAddr(cfg.desc_addr);
                 vq.SetDriverAddr(cfg.driver_addr);
                 vq.SetDeviceAddr(cfg.device_addr);

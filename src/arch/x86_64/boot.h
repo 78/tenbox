@@ -61,17 +61,15 @@ struct BootConfig {
     std::string kernel_path;
     std::string initrd_path;
     std::string cmdline;
-    uint64_t ram_size;
+    GuestMemMap mem;
     uint32_t cpu_count = 1;
     std::vector<VirtioMmioAcpiInfo> virtio_devs;
 };
 
 // Load kernel, initrd, set up boot_params in guest RAM.
 // Returns the number of bytes used by protected-mode kernel, or 0 on error.
-// |ram| points to the beginning of guest physical memory.
 // After success, caller should call SetupBootRegisters on the vCPU.
-uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
-                          uint64_t ram_size);
+uint64_t LoadLinuxKernel(const BootConfig& config);
 
 // GDT layout written at kGdtBase
 struct GdtEntry {

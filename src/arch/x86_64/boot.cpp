@@ -16,8 +16,10 @@ static std::vector<uint8_t> ReadFile(const std::string& path) {
     return buf;
 }
 
-uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
-                          uint64_t ram_size) {
+uint64_t LoadLinuxKernel(const BootConfig& config) {
+    const auto& mem = config.mem;
+    uint8_t* ram = mem.base;
+
     auto kernel = ReadFile(config.kernel_path);
     if (kernel.size() < 1024) {
         LOG_ERROR("Kernel file too small or not found: %s",
@@ -47,7 +49,7 @@ uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
     uint32_t setup_size = (1 + setup_sects) * 512;
     uint32_t kernel_size = static_cast<uint32_t>(kernel.size()) - setup_size;
 
-    if (Layout::kKernelBase + kernel_size > ram_size) {
+    if (Layout::kKernelBase + kernel_size > mem.low_size) {
         LOG_ERROR("Kernel too large for guest RAM");
         return 0;
     }
@@ -62,8 +64,6 @@ uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
     memset(bp, 0, 4096);
 
     // Copy setup header from bzImage into boot_params
-    // The setup_header starts at file offset 0x1F1 and its size varies
-    // We copy from 0x1F1 to the end of the setup data
     uint32_t header_offset = BootOffset::kSetupSects;  // 0x1F1
     uint32_t header_end = std::min(setup_size, (uint32_t)0x290);
     if (header_end > header_offset) {
@@ -86,7 +86,8 @@ uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
             static_cast<uint32_t>(Layout::kCmdlineBase);
     }
 
-    // Load initrd
+    // Load initrd — always place in low RAM so the 32-bit ramdisk_image
+    // field in boot_params can represent the address.
     if (!config.initrd_path.empty()) {
         auto initrd = ReadFile(config.initrd_path);
         if (initrd.empty()) {
@@ -94,9 +95,8 @@ uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
             return 0;
         }
 
-        // Place initrd at the highest aligned address that fits
         uint64_t initrd_addr = AlignDown(
-            ram_size - initrd.size(), kPageSize);
+            mem.low_size - initrd.size(), kPageSize);
 
         if (initrd_addr <= Layout::kKernelBase + kernel_size) {
             LOG_ERROR("Not enough RAM for initrd (%zu bytes)", initrd.size());
@@ -114,18 +114,27 @@ uint64_t LoadLinuxKernel(const BootConfig& config, uint8_t* ram,
                  initrd_addr, initrd.size());
     }
 
-    // E820 memory map
-    // Entry 0: 0 - 0x9FFFF (640 KB, conventional memory)
-    // Entry 1: 0x100000 - (ram_size - 1) (extended memory)
+    // --- E820 memory map ---
     E820Entry* e820 = reinterpret_cast<E820Entry*>(
         bp + BootOffset::kE820Table);
+    uint8_t e820_count = 0;
 
-    e820[0] = {0, 0xA0000, kE820Ram};
-    e820[1] = {0x100000, ram_size - 0x100000, kE820Ram};
-    bp[BootOffset::kE820Entries] = 2;
-
-    LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%llX RAM]",
-             ram_size - 1);
+    // Entry 0: conventional memory (640 KB)
+    e820[e820_count++] = {0, 0xA0000, kE820Ram};
+    // Entry 1: extended memory below the MMIO gap
+    e820[e820_count++] = {0x100000, mem.low_size - 0x100000, kE820Ram};
+    // Entry 2 (optional): high memory above 4 GiB
+    if (mem.high_size > 0) {
+        e820[e820_count++] = {mem.high_base, mem.high_size, kE820Ram};
+        LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%llX RAM] "
+                 "[0x%llX-0x%llX RAM]",
+                 mem.low_size - 1,
+                 mem.high_base, mem.high_base + mem.high_size - 1);
+    } else {
+        LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%llX RAM]",
+                 mem.low_size - 1);
+    }
+    bp[BootOffset::kE820Entries] = e820_count;
 
     // Build ACPI tables (RSDP, XSDT, MADT, FADT, DSDT) and store RSDP GPA
     GPA rsdp_addr = BuildAcpiTables(ram, config.cpu_count, config.virtio_devs);

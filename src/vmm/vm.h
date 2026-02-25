@@ -62,8 +62,7 @@ private:
     std::vector<std::thread> vcpu_threads_;
     std::atomic<int> exit_code_{0};
 
-    uint8_t* ram_ = nullptr;
-    uint64_t ram_size_ = 0;
+    GuestMemMap mem_;
 
     AddressSpace addr_space_;
     Uart16550 uart_;

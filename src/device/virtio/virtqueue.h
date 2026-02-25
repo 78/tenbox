@@ -56,7 +56,7 @@ struct VirtqChainElem {
 
 class VirtQueue {
 public:
-    void Setup(uint32_t queue_size, uint8_t* ram, uint64_t ram_size);
+    void Setup(uint32_t queue_size, const GuestMemMap& mem);
 
     void SetDescAddr(uint64_t gpa)   { desc_gpa_ = gpa; }
     void SetDriverAddr(uint64_t gpa) { driver_gpa_ = gpa; }
@@ -89,8 +89,7 @@ private:
     VirtqUsed* Used() const;
 
     uint32_t queue_size_ = 0;
-    uint8_t* ram_ = nullptr;
-    uint64_t ram_size_ = 0;
+    GuestMemMap mem_;
 
     uint64_t desc_gpa_ = 0;
     uint64_t driver_gpa_ = 0;

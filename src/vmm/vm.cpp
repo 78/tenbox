@@ -1,5 +1,6 @@
 #include "vmm/vm.h"
 #include "arch/x86_64/boot.h"
+#include <algorithm>
 
 static constexpr uint64_t kVirtioMmioBase    = 0xd0000000;
 static constexpr uint8_t  kVirtioBlkIrq      = 5;
@@ -15,9 +16,9 @@ Vm::~Vm() {
     }
     vcpus_.clear();
     whvp_vm_.reset();
-    if (ram_) {
-        VirtualFree(ram_, 0, MEM_RELEASE);
-        ram_ = nullptr;
+    if (mem_.base) {
+        VirtualFree(mem_.base, 0, MEM_RELEASE);
+        mem_.base = nullptr;
     }
 }
 
@@ -75,7 +76,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     WHV_REGISTER_NAME names[64]{};
     WHV_REGISTER_VALUE values[64]{};
     uint32_t count = 0;
-    x86::BuildInitialRegisters(vm->ram_, names, values, &count);
+    x86::BuildInitialRegisters(vm->mem_.base, names, values, &count);
 
     if (!vm->vcpus_[0]->SetRegisters(names, values, count)) {
         LOG_ERROR("Failed to set initial vCPU registers");
@@ -87,26 +88,47 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
 }
 
 bool Vm::AllocateMemory(uint64_t size) {
-    ram_size_ = AlignUp(size, kPageSize);
-    ram_ = static_cast<uint8_t*>(
-        VirtualAlloc(nullptr, ram_size_,
+    uint64_t alloc = AlignUp(size, kPageSize);
+
+    uint8_t* base = static_cast<uint8_t*>(
+        VirtualAlloc(nullptr, alloc,
                      MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-    if (!ram_) {
-        LOG_ERROR("VirtualAlloc(%llu MB) failed", ram_size_ / (1024 * 1024));
+    if (!base) {
+        LOG_ERROR("VirtualAlloc(%llu MB) failed", alloc / (1024 * 1024));
         return false;
     }
-    memset(ram_, 0, ram_size_);
+    memset(base, 0, alloc);
+
+    mem_.base = base;
+    mem_.alloc_size = alloc;
+
+    // If total RAM fits below the MMIO gap there is no split needed.
+    mem_.low_size  = std::min(alloc, kMmioGapStart);
+    mem_.high_size = (alloc > kMmioGapStart) ? (alloc - kMmioGapStart) : 0;
+    mem_.high_base = mem_.high_size ? kMmioGapEnd : 0;
 
     WHV_MAP_GPA_RANGE_FLAGS flags =
         WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite |
         WHvMapGpaRangeFlagExecute;
 
-    if (!whvp_vm_->MapMemory(0, ram_, ram_size_, flags)) {
+    // Map the low region: GPA [0, low_size) -> HVA [base, base+low_size)
+    if (!whvp_vm_->MapMemory(0, base, mem_.low_size, flags))
         return false;
-    }
 
-    LOG_INFO("Guest RAM: %llu MB at HVA %p",
-             ram_size_ / (1024 * 1024), ram_);
+    // Map the high region above the 4 GiB boundary if present.
+    if (mem_.high_size) {
+        if (!whvp_vm_->MapMemory(kMmioGapEnd, base + mem_.low_size,
+                                  mem_.high_size, flags))
+            return false;
+        LOG_INFO("Guest RAM: %llu MB  [0-0x%llX] + [0x%llX-0x%llX] at HVA %p",
+                 alloc / (1024 * 1024),
+                 mem_.low_size - 1,
+                 kMmioGapEnd, kMmioGapEnd + mem_.high_size - 1,
+                 base);
+    } else {
+        LOG_INFO("Guest RAM: %llu MB at HVA %p",
+                 alloc / (1024 * 1024), base);
+    }
     return true;
 }
 
@@ -152,7 +174,7 @@ bool Vm::SetupVirtioBlk(const std::string& disk_path) {
     if (!virtio_blk_->Open(disk_path)) return false;
 
     virtio_mmio_ = std::make_unique<VirtioMmioDevice>();
-    virtio_mmio_->Init(virtio_blk_.get(), ram_, ram_size_);
+    virtio_mmio_->Init(virtio_blk_.get(), mem_);
     virtio_mmio_->SetIrqCallback([this]() { InjectIrq(kVirtioBlkIrq); });
     virtio_blk_->SetMmioDevice(virtio_mmio_.get());
 
@@ -166,7 +188,7 @@ bool Vm::SetupVirtioNet(const std::vector<PortForward>& forwards) {
     virtio_net_ = std::make_unique<VirtioNetDevice>();
 
     virtio_mmio_net_ = std::make_unique<VirtioMmioDevice>();
-    virtio_mmio_net_->Init(virtio_net_.get(), ram_, ram_size_);
+    virtio_mmio_net_->Init(virtio_net_.get(), mem_);
     virtio_mmio_net_->SetIrqCallback([this]() { InjectIrq(kVirtioNetIrq); });
     virtio_net_->SetMmioDevice(virtio_mmio_net_.get());
 
@@ -191,11 +213,11 @@ bool Vm::LoadKernel(const VmConfig& config) {
     boot_cfg.kernel_path = config.kernel_path;
     boot_cfg.initrd_path = config.initrd_path;
     boot_cfg.cmdline = config.cmdline;
-    boot_cfg.ram_size = ram_size_;
+    boot_cfg.mem = mem_;
     boot_cfg.cpu_count = config.cpu_count;
     boot_cfg.virtio_devs = virtio_acpi_devs_;
 
-    uint64_t kernel_size = x86::LoadLinuxKernel(boot_cfg, ram_, ram_size_);
+    uint64_t kernel_size = x86::LoadLinuxKernel(boot_cfg);
     if (kernel_size == 0) {
         return false;
     }

@@ -1,10 +1,9 @@
 #include "device/virtio/virtqueue.h"
 #include <cstring>
 
-void VirtQueue::Setup(uint32_t queue_size, uint8_t* ram, uint64_t ram_size) {
+void VirtQueue::Setup(uint32_t queue_size, const GuestMemMap& mem) {
     queue_size_ = queue_size;
-    ram_ = ram;
-    ram_size_ = ram_size;
+    mem_ = mem;
     last_avail_idx_ = 0;
 }
 
@@ -17,8 +16,7 @@ void VirtQueue::Reset() {
 }
 
 uint8_t* VirtQueue::GpaToHva(uint64_t gpa) const {
-    if (gpa >= ram_size_) return nullptr;
-    return ram_ + gpa;
+    return mem_.GpaToHva(gpa);
 }
 
 VirtqDesc* VirtQueue::DescAt(uint16_t idx) const {

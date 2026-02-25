@@ -30,7 +30,7 @@ public:
 
     using IrqCallback = std::function<void()>;
 
-    void Init(VirtioDeviceOps* ops, uint8_t* ram, uint64_t ram_size);
+    void Init(VirtioDeviceOps* ops, const GuestMemMap& mem);
     void SetIrqCallback(IrqCallback cb) { irq_callback_ = std::move(cb); }
 
     void MmioRead(uint64_t offset, uint8_t size, uint64_t* value) override;
@@ -75,8 +75,7 @@ private:
     };
 
     VirtioDeviceOps* ops_ = nullptr;
-    uint8_t* ram_ = nullptr;
-    uint64_t ram_size_ = 0;
+    GuestMemMap mem_;
     IrqCallback irq_callback_;
 
     // Transport state
