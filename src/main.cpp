@@ -19,6 +19,7 @@ static void PrintUsage(const char* prog) {
         "  --cmdline <str>    Kernel command line\n"
         "                     (default: \"console=ttyS0 earlyprintk=serial\")\n"
         "  --memory <MB>      Guest RAM in MB (default: 256)\n"
+        "  --cpus <N>         Number of vCPUs (default: 1, max: 128)\n"
         "  --net              Enable virtio-net with NAT networking\n"
         "  --forward H:G      Port forward host:H -> guest:G (repeatable)\n"
         "  --version          Show version\n"
@@ -54,6 +55,9 @@ int main(int argc, char* argv[]) {
         } else if (Arg("--memory")) {
             auto v = NextArg(); if (!v) return 1;
             config.memory_mb = atoi(v);
+        } else if (Arg("--cpus")) {
+            auto v = NextArg(); if (!v) return 1;
+            config.cpu_count = atoi(v);
         } else if (Arg("--net")) {
             config.net_enabled = true;
         } else if (Arg("--forward")) {
@@ -92,6 +96,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (config.cpu_count < 1 || config.cpu_count > 128) {
+        fprintf(stderr, "Error: --cpus must be between 1 and 128\n");
+        return 1;
+    }
+
     LOG_INFO("TenClaw VMM v" TENCLAW_VERSION);
     LOG_INFO("Kernel: %s", config.kernel_path.c_str());
     if (!config.initrd_path.empty())
@@ -104,6 +113,7 @@ int main(int argc, char* argv[]) {
         LOG_INFO("Forward: host:%u -> guest:%u", f.host_port, f.guest_port);
     LOG_INFO("Cmdline: %s", config.cmdline.c_str());
     LOG_INFO("Memory: %llu MB", config.memory_mb);
+    LOG_INFO("CPUs: %u", config.cpu_count);
 
     auto vm = Vm::Create(config);
     if (!vm) {

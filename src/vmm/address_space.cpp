@@ -29,6 +29,7 @@ Device* AddressSpace::FindMmioDevice(uint64_t addr, uint64_t* offset) const {
 }
 
 bool AddressSpace::HandlePortIn(uint16_t port, uint8_t size, uint32_t* value) {
+    std::lock_guard<std::mutex> lock(io_mutex_);
     uint16_t offset = 0;
     Device* dev = FindPioDevice(port, &offset);
     if (dev) {
@@ -41,6 +42,7 @@ bool AddressSpace::HandlePortIn(uint16_t port, uint8_t size, uint32_t* value) {
 }
 
 bool AddressSpace::HandlePortOut(uint16_t port, uint8_t size, uint32_t value) {
+    std::lock_guard<std::mutex> lock(io_mutex_);
     uint16_t offset = 0;
     Device* dev = FindPioDevice(port, &offset);
     if (dev) {
@@ -54,6 +56,7 @@ bool AddressSpace::HandlePortOut(uint16_t port, uint8_t size, uint32_t value) {
 
 bool AddressSpace::HandleMmioRead(uint64_t addr, uint8_t size,
                                    uint64_t* value) {
+    std::lock_guard<std::mutex> lock(io_mutex_);
     uint64_t offset = 0;
     Device* dev = FindMmioDevice(addr, &offset);
     if (dev) {
@@ -67,6 +70,7 @@ bool AddressSpace::HandleMmioRead(uint64_t addr, uint8_t size,
 
 bool AddressSpace::HandleMmioWrite(uint64_t addr, uint8_t size,
                                     uint64_t value) {
+    std::lock_guard<std::mutex> lock(io_mutex_);
     uint64_t offset = 0;
     Device* dev = FindMmioDevice(addr, &offset);
     if (dev) {

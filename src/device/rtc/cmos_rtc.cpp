@@ -7,7 +7,7 @@ uint8_t CmosRtc::ToBcd(int val) {
 uint8_t CmosRtc::ReadRegister(uint8_t reg) const {
     time_t now = time(nullptr);
     struct tm t;
-    localtime_s(&t, &now);
+    gmtime_s(&t, &now);
 
     switch (reg) {
     case kRegSeconds:    return ToBcd(t.tm_sec);

@@ -1,18 +1,27 @@
 #!/bin/bash
-# Build a minimal Debian rootfs as qcow2 for TenClaw Phase 2.
+# Build a Debian base rootfs as qcow2 for TenClaw Phase 2.
 # Requires: debootstrap, qemu-utils. Run as root in WSL2 or Linux.
 set -e
 
-ROOTFS_SIZE="2G"
+ROOTFS_SIZE="10G"
 SUITE="bookworm"
-MIRROR="http://deb.debian.org/debian"
-INCLUDE_PKGS="systemd-sysv,udev,iproute2,iputils-ping,curl,ifupdown,isc-dhcp-client"
+MIRROR="https://mirrors.tuna.tsinghua.edu.cn/debian"
+INCLUDE_PKGS="systemd-sysv,udev,dbus,\
+iproute2,iputils-ping,ifupdown,isc-dhcp-client,\
+ca-certificates,curl,wget,\
+procps,psmisc,\
+netcat-openbsd,net-tools,traceroute,dnsutils,\
+less,vim-tiny,bash-completion,\
+openssh-client,gnupg,apt-transport-https,\
+lsof,strace,sysstat,\
+kmod,pciutils,usbutils,\
+coreutils,findutils,grep,gawk,sed,tar,gzip,bzip2,xz-utils"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../build"
 mkdir -p "$BUILD_DIR"
 OUTPUT="$(realpath -m "${1:-$BUILD_DIR/rootfs.qcow2}")"
-CACHE_TAR="$BUILD_DIR/.debootstrap-${SUITE}.tar"
+CACHE_TAR="$BUILD_DIR/.debootstrap-${SUITE}-base.tar"
 
 # DrvFS (/mnt/*) does not support mknod through loop devices.
 # Build everything on the native Linux filesystem, copy result back.
@@ -42,13 +51,13 @@ mkdir -p "$MOUNT_DIR"
 sudo mount -o loop "$WORK_DIR/rootfs.raw" "$MOUNT_DIR"
 if [ -f "$CACHE_TAR" ]; then
     echo "  Using cached tarball: $CACHE_TAR"
-    sudo debootstrap --variant=minbase --include="$INCLUDE_PKGS" \
+    sudo debootstrap --include="$INCLUDE_PKGS" \
         --unpack-tarball="$CACHE_TAR" "$SUITE" "$MOUNT_DIR" "$MIRROR"
 else
     echo "  No cache found, downloading packages (first run)..."
-    sudo debootstrap --variant=minbase --include="$INCLUDE_PKGS" \
+    sudo debootstrap --include="$INCLUDE_PKGS" \
         --make-tarball="$CACHE_TAR" "$SUITE" "$WORK_DIR/tarball-tmp" "$MIRROR"
-    sudo debootstrap --variant=minbase --include="$INCLUDE_PKGS" \
+    sudo debootstrap --include="$INCLUDE_PKGS" \
         --unpack-tarball="$CACHE_TAR" "$SUITE" "$MOUNT_DIR" "$MIRROR"
 fi
 
@@ -74,6 +83,14 @@ echo "root:tenclaw" | chpasswd
 echo "tenclaw-vm" > /etc/hostname
 echo "/dev/vda / ext4 defaults 0 1" > /etc/fstab
 
+cat > /etc/apt/sources.list << 'APT'
+deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm main contrib non-free non-free-firmware
+deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm-updates main contrib non-free non-free-firmware
+deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware
+APT
+
+apt-get update
+update-ca-certificates --fresh 2>/dev/null || true
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 
@@ -83,6 +100,28 @@ cat > /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf << 'INNER'
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I 115200 linux
 INNER
+
+cat > /etc/profile.d/term-size.sh << 'RESIZE'
+# Provide a `resize` command for serial consoles and auto-detect
+# terminal size on login. Uses DSR (ESC[6n) cursor position query:
+# move cursor to far corner (999,999 → clamped to actual size),
+# query position, then set stty rows/cols.
+resize() {
+    [ -t 0 ] && [ -t 1 ] || return 0
+    local saved rows cols _
+    saved=$(stty -g 2>/dev/null)
+    stty raw -echo min 0 time 20 2>/dev/null
+    printf '\033[s\033[999;999H\033[6n\033[u'
+    IFS='[;' read -r -d R -t 2 _ rows cols 2>/dev/null
+    stty "$saved" 2>/dev/null
+    if [ -n "$rows" ] && [ "$rows" -gt 0 ] 2>/dev/null &&
+       [ -n "$cols" ] && [ "$cols" -gt 0 ] 2>/dev/null; then
+        stty rows "$rows" cols "$cols"
+        export LINES="$rows" COLUMNS="$cols"
+    fi
+}
+case "$(tty 2>/dev/null)" in /dev/ttyS*) resize ;; esac
+RESIZE
 
 mkdir -p /etc/network
 cat > /etc/network/interfaces << 'NET'
@@ -94,9 +133,14 @@ NET
 
 systemctl enable networking.service 2>/dev/null || true
 
-# Verify init exists
+# Verify key commands
 ls -la /sbin/init
 echo "init OK: $(readlink -f /sbin/init)"
+echo "nc:   $(which nc 2>/dev/null || echo MISSING)"
+echo "free: $(which free 2>/dev/null || echo MISSING)"
+echo "ps:   $(which ps 2>/dev/null || echo MISSING)"
+echo "curl: $(which curl 2>/dev/null || echo MISSING)"
+echo "wget: $(which wget 2>/dev/null || echo MISSING)"
 EOF
 
 sudo rm -f "$MOUNT_DIR/usr/sbin/policy-rc.d"

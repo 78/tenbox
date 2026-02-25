@@ -48,7 +48,9 @@ private:
                              uint32_t dst_ip, uint16_t dst_port,
                              uint8_t proto);
     void RemoveNatEntry(NatEntry* entry);
+    void CleanupStaleEntries();
     uint16_t AllocProxyPort();
+    bool IsProxyPortInUse(uint16_t port) const;
 
     void RewriteAndFeed(uint8_t* frame, uint32_t len, NatEntry* entry);
 
@@ -65,6 +67,7 @@ private:
     bool PollSockets();
     void HandleTcpReadable(NatEntry* entry);
     void HandleUdpReadable(NatEntry* entry);
+    void DrainTcpToGuest(NatEntry* entry);
 
     // ICMP relay
     void HandleIcmpOut(uint32_t src_ip, uint32_t dst_ip,
@@ -90,6 +93,10 @@ private:
     // lwIP netif (opaque pointer to avoid lwIP headers in .h)
     void* netif_ = nullptr;
 
+    // Listen PCBs to close after tcp_input returns (cannot close inside
+    // accept callback because lwIP still accesses pcb->listener afterward).
+    std::vector<void*> deferred_listen_close_;
+
     // NAT table
     struct NatEntry {
         uint8_t  proto;
@@ -103,6 +110,9 @@ private:
         uintptr_t host_socket = ~(uintptr_t)0;
         bool     connecting  = false;
         std::vector<uint8_t> pending_data;
+        std::vector<uint8_t> pending_to_guest;
+        uint64_t last_active_ms = 0;
+        bool     closed = false; // both sides done, pending removal
     };
     std::vector<std::unique_ptr<NatEntry>> nat_entries_;
     uint16_t next_proxy_port_ = 10000;
@@ -122,6 +132,7 @@ private:
         std::vector<Conn> conns;
     };
     std::vector<PfEntry> port_forwards_;
+    void DrainPfToGuest(PfEntry::Conn& conn);
 
 public:
     // Network addresses (public for use by lwIP callbacks)

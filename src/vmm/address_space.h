@@ -3,6 +3,7 @@
 #include "vmm/types.h"
 #include "device/device.h"
 #include <vector>
+#include <mutex>
 
 struct PioEntry {
     uint16_t base;
@@ -30,6 +31,7 @@ private:
     Device* FindPioDevice(uint16_t port, uint16_t* offset) const;
     Device* FindMmioDevice(uint64_t addr, uint64_t* offset) const;
 
+    mutable std::mutex io_mutex_;
     std::vector<PioEntry>  pio_devices_;
     std::vector<MmioEntry> mmio_devices_;
 };

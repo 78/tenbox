@@ -65,6 +65,7 @@ TenClaw.exe --kernel build/vmlinuz --initrd build/initramfs.cpio.gz --disk build
 | `--disk <path>` | Path to raw or qcow2 disk image |
 | `--cmdline <str>` | Kernel command line (default: `console=ttyS0 earlyprintk=serial`) |
 | `--memory <MB>` | Guest RAM in MB (default: 256, min: 16) |
+| `--cpus <N>` | Number of vCPUs (default: 1, max: 128) |
 | `--net` | Enable virtio-net with NAT networking |
 | `--forward H:G` | Port forward host port H to guest port G (repeatable) |
 

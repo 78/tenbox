@@ -62,6 +62,7 @@ struct BootConfig {
     std::string initrd_path;
     std::string cmdline;
     uint64_t ram_size;
+    uint32_t cpu_count = 1;
     std::vector<VirtioMmioAcpiInfo> virtio_devs;
 };
 

@@ -28,24 +28,34 @@
 
 // Memory configuration
 #define MEM_ALIGNMENT               4
-#define MEM_SIZE                    (256 * 1024)
-#define MEMP_NUM_PBUF               128
+#define MEM_SIZE                    (2 * 1024 * 1024)
+#define MEMP_NUM_PBUF               512
 #define MEMP_NUM_RAW_PCB            4
 #define MEMP_NUM_UDP_PCB            64
-#define MEMP_NUM_TCP_PCB            128
+#define MEMP_NUM_TCP_PCB            512
 #define MEMP_NUM_TCP_PCB_LISTEN     128
-#define MEMP_NUM_TCP_SEG            256
+#define MEMP_NUM_TCP_SEG            1024
 
 // Pbuf pool
-#define PBUF_POOL_SIZE              128
+#define PBUF_POOL_SIZE              512
 #define PBUF_POOL_BUFSIZE           1600
 
 // TCP tuning
 #define TCP_MSS                     1460
-#define TCP_WND                     (32 * TCP_MSS)
-#define TCP_SND_BUF                 (16 * TCP_MSS)
+#define LWIP_WND_SCALE              1
+#define TCP_RCV_SCALE               7
+#define TCP_WND                     (256 * 1024)
+#define TCP_SND_BUF                 (256 * 1024)
+#define TCP_SNDLOWAT                LWIP_MIN(LWIP_MAX(((TCP_SND_BUF)/2), (2 * TCP_MSS) + 1), (0xFFFFU - (4 * TCP_MSS) - 1))
 #define TCP_SND_QUEUELEN            ((4 * TCP_SND_BUF) / TCP_MSS)
-#define TCP_LISTEN_BACKLOG          1
+// Backlog tracking accesses pcb->listener after the accept callback,
+// but the NAT proxy closes the listener inside the callback.  Disable
+// to avoid use-after-free on the freed listen PCB.
+#define TCP_LISTEN_BACKLOG          0
+
+// NAT proxy doesn't need long TIME_WAIT; the real TIME_WAIT is
+// handled by the host-side Winsock socket, not the lwIP PCB.
+#define TCP_MSL                     5000
 
 // Checksum — lwIP generates outgoing, skip incoming verification
 // (we do our own incremental checksum updates for NAT rewriting)

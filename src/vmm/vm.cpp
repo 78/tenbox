@@ -10,7 +10,10 @@ Vm::~Vm() {
     running_ = false;
     if (input_thread_.joinable())
         input_thread_.join();
-    vcpu_.reset();
+    for (auto& t : vcpu_threads_) {
+        if (t.joinable()) t.join();
+    }
+    vcpus_.clear();
     whvp_vm_.reset();
     if (ram_) {
         VirtualFree(ram_, 0, MEM_RELEASE);
@@ -60,21 +63,26 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
 
     if (!vm->LoadKernel(config)) return nullptr;
 
-    vm->vcpu_ = whvp::WhvpVCpu::Create(
-        *vm->whvp_vm_, 0, &vm->addr_space_);
-    if (!vm->vcpu_) return nullptr;
+    vm->cpu_count_ = config.cpu_count;
+    for (uint32_t i = 0; i < config.cpu_count; i++) {
+        auto vcpu = whvp::WhvpVCpu::Create(
+            *vm->whvp_vm_, i, &vm->addr_space_);
+        if (!vcpu) return nullptr;
+        vm->vcpus_.push_back(std::move(vcpu));
+    }
 
+    // Only BSP (vCPU 0) gets initial registers; APs wait for SIPI.
     WHV_REGISTER_NAME names[64]{};
     WHV_REGISTER_VALUE values[64]{};
     uint32_t count = 0;
     x86::BuildInitialRegisters(vm->ram_, names, values, &count);
 
-    if (!vm->vcpu_->SetRegisters(names, values, count)) {
+    if (!vm->vcpus_[0]->SetRegisters(names, values, count)) {
         LOG_ERROR("Failed to set initial vCPU registers");
         return nullptr;
     }
 
-    LOG_INFO("VM created successfully");
+    LOG_INFO("VM created successfully (%u vCPUs)", config.cpu_count);
     return vm;
 }
 
@@ -184,6 +192,7 @@ bool Vm::LoadKernel(const VmConfig& config) {
     boot_cfg.initrd_path = config.initrd_path;
     boot_cfg.cmdline = config.cmdline;
     boot_cfg.ram_size = ram_size_;
+    boot_cfg.cpu_count = config.cpu_count;
     boot_cfg.virtio_devs = virtio_acpi_devs_;
 
     uint64_t kernel_size = x86::LoadLinuxKernel(boot_cfg, ram_, ram_size_);
@@ -195,13 +204,26 @@ bool Vm::LoadKernel(const VmConfig& config) {
 
 void Vm::InputThreadFunc() {
     HANDLE h_stdin = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
     if (h_stdin == INVALID_HANDLE_VALUE) return;
 
-    DWORD old_mode = 0;
-    BOOL is_console = GetConsoleMode(h_stdin, &old_mode);
+    DWORD old_in_mode = 0, old_out_mode = 0;
+    BOOL is_console = GetConsoleMode(h_stdin, &old_in_mode);
+    BOOL is_console_out = (h_stdout != INVALID_HANDLE_VALUE) &&
+                          GetConsoleMode(h_stdout, &old_out_mode);
+
+    UINT old_input_cp = GetConsoleCP();
+    UINT old_output_cp = GetConsoleOutputCP();
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
 
     if (is_console) {
         SetConsoleMode(h_stdin, ENABLE_WINDOW_INPUT);
+    }
+    if (is_console_out) {
+        SetConsoleMode(h_stdout,
+            old_out_mode | ENABLE_PROCESSED_OUTPUT |
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
 
     while (running_) {
@@ -220,9 +242,42 @@ void Vm::InputThreadFunc() {
             if (rec.EventType != KEY_EVENT || !rec.Event.KeyEvent.bKeyDown)
                 continue;
 
+            WORD vk = rec.Event.KeyEvent.wVirtualKeyCode;
+            const char* seq = nullptr;
+            switch (vk) {
+            case VK_UP:     seq = "\x1b[A"; break;
+            case VK_DOWN:   seq = "\x1b[B"; break;
+            case VK_RIGHT:  seq = "\x1b[C"; break;
+            case VK_LEFT:   seq = "\x1b[D"; break;
+            case VK_HOME:   seq = "\x1b[H"; break;
+            case VK_END:    seq = "\x1b[F"; break;
+            case VK_INSERT: seq = "\x1b[2~"; break;
+            case VK_DELETE: seq = "\x1b[3~"; break;
+            case VK_PRIOR:  seq = "\x1b[5~"; break;  // Page Up
+            case VK_NEXT:   seq = "\x1b[6~"; break;  // Page Down
+            case VK_F1:     seq = "\x1bOP";  break;
+            case VK_F2:     seq = "\x1bOQ";  break;
+            case VK_F3:     seq = "\x1bOR";  break;
+            case VK_F4:     seq = "\x1bOS";  break;
+            case VK_F5:     seq = "\x1b[15~"; break;
+            case VK_F6:     seq = "\x1b[17~"; break;
+            case VK_F7:     seq = "\x1b[18~"; break;
+            case VK_F8:     seq = "\x1b[19~"; break;
+            case VK_F9:     seq = "\x1b[20~"; break;
+            case VK_F10:    seq = "\x1b[21~"; break;
+            case VK_F11:    seq = "\x1b[23~"; break;
+            case VK_F12:    seq = "\x1b[24~"; break;
+            }
+
+            if (seq) {
+                for (const char* p = seq; *p; ++p)
+                    uart_.PushInput(static_cast<uint8_t>(*p));
+                InjectIrq(4);
+                continue;
+            }
+
             char ch = rec.Event.KeyEvent.uChar.AsciiChar;
             if (ch == 0) continue;
-            if (ch == '\r') ch = '\n';
 
             uart_.PushInput(static_cast<uint8_t>(ch));
             InjectIrq(4);
@@ -231,9 +286,7 @@ void Vm::InputThreadFunc() {
             char buf[1];
             DWORD bytes_read = 0;
             if (ReadFile(h_stdin, buf, 1, &bytes_read, nullptr) && bytes_read > 0) {
-                char ch = buf[0];
-                if (ch == '\r') ch = '\n';
-                uart_.PushInput(static_cast<uint8_t>(ch));
+                uart_.PushInput(static_cast<uint8_t>(buf[0]));
                 InjectIrq(4);
             } else {
                 Sleep(16);
@@ -242,8 +295,13 @@ void Vm::InputThreadFunc() {
     }
 
     if (is_console) {
-        SetConsoleMode(h_stdin, old_mode);
+        SetConsoleMode(h_stdin, old_in_mode);
     }
+    if (is_console_out) {
+        SetConsoleMode(h_stdout, old_out_mode);
+    }
+    SetConsoleCP(old_input_cp);
+    SetConsoleOutputCP(old_output_cp);
 }
 
 void Vm::InjectIrq(uint8_t irq) {
@@ -270,15 +328,12 @@ void Vm::InjectIrq(uint8_t irq) {
     WHvRequestInterrupt(whvp_vm_->Handle(), &ctrl, sizeof(ctrl));
 }
 
-int Vm::Run() {
-    running_ = true;
-    LOG_INFO("Starting VM execution...");
-
-    input_thread_ = std::thread(&Vm::InputThreadFunc, this);
-
+void Vm::VCpuThreadFunc(uint32_t vcpu_index) {
+    auto& vcpu = vcpus_[vcpu_index];
     uint64_t exit_count = 0;
+
     while (running_) {
-        auto action = vcpu_->RunOnce();
+        auto action = vcpu->RunOnce();
         exit_count++;
 
         switch (action) {
@@ -290,25 +345,42 @@ int Vm::Run() {
             break;
 
         case whvp::VCpuExitAction::kShutdown:
-            LOG_INFO("VM shutdown (after %llu exits)", exit_count);
-            running_ = false;
-            return 0;
+            LOG_INFO("vCPU %u: shutdown (after %llu exits)", vcpu_index, exit_count);
+            RequestStop();
+            return;
 
         case whvp::VCpuExitAction::kError:
-            LOG_ERROR("VM error (after %llu exits)", exit_count);
-            running_ = false;
-            return 1;
+            LOG_ERROR("vCPU %u: error (after %llu exits)", vcpu_index, exit_count);
+            exit_code_.store(1);
+            RequestStop();
+            return;
         }
     }
 
-    LOG_INFO("VM stopped (total exits: %llu)", exit_count);
-    return 0;
+    LOG_INFO("vCPU %u stopped (total exits: %llu)", vcpu_index, exit_count);
+}
+
+int Vm::Run() {
+    running_ = true;
+    LOG_INFO("Starting VM execution...");
+
+    input_thread_ = std::thread(&Vm::InputThreadFunc, this);
+
+    for (uint32_t i = 0; i < cpu_count_; i++) {
+        vcpu_threads_.emplace_back(&Vm::VCpuThreadFunc, this, i);
+    }
+
+    for (auto& t : vcpu_threads_) {
+        t.join();
+    }
+
+    return exit_code_.load();
 }
 
 void Vm::RequestStop() {
     running_ = false;
-    if (vcpu_) {
+    for (auto& vcpu : vcpus_) {
         WHvCancelRunVirtualProcessor(
-            whvp_vm_->Handle(), vcpu_->VpIndex(), 0);
+            whvp_vm_->Handle(), vcpu->VpIndex(), 0);
     }
 }

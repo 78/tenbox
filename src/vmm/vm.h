@@ -53,10 +53,14 @@ private:
     bool LoadKernel(const VmConfig& config);
 
     void InputThreadFunc();
+    void VCpuThreadFunc(uint32_t vcpu_index);
     void InjectIrq(uint8_t irq);
 
+    uint32_t cpu_count_ = 1;
     std::unique_ptr<whvp::WhvpVm> whvp_vm_;
-    std::unique_ptr<whvp::WhvpVCpu> vcpu_;
+    std::vector<std::unique_ptr<whvp::WhvpVCpu>> vcpus_;
+    std::vector<std::thread> vcpu_threads_;
+    std::atomic<int> exit_code_{0};
 
     uint8_t* ram_ = nullptr;
     uint64_t ram_size_ = 0;
