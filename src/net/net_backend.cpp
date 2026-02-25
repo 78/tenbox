@@ -850,10 +850,18 @@ void NetBackend::OnTcpAccepted(NatEntry* entry, void* new_pcb_v) {
         g_net_backend->OnTcpErr(e);
     });
 
-    // Create host socket and connect to real destination
+    // Create host socket and connect to real destination.
+    // IMPORTANT: do NOT call RemoveNatEntry / tcp_abort here — we are
+    // inside the accept callback and lwIP continues using the PCB after
+    // the callback returns.  Gracefully close and let cleanup handle it.
     SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == INVALID_SOCKET) {
-        RemoveNatEntry(entry);
+        tcp_arg(new_pcb, nullptr);
+        tcp_recv(new_pcb, nullptr);
+        tcp_err(new_pcb, nullptr);
+        tcp_close(new_pcb);
+        entry->conn_pcb = nullptr;
+        entry->closed = true;
         return;
     }
     u_long nonblock = 1;
@@ -867,7 +875,12 @@ void NetBackend::OnTcpAccepted(NatEntry* entry, void* new_pcb_v) {
     int ret = connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     if (ret == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK) {
         closesocket(s);
-        RemoveNatEntry(entry);
+        tcp_arg(new_pcb, nullptr);
+        tcp_recv(new_pcb, nullptr);
+        tcp_err(new_pcb, nullptr);
+        tcp_close(new_pcb);
+        entry->conn_pcb = nullptr;
+        entry->closed = true;
         return;
     }
 
@@ -884,10 +897,14 @@ void NetBackend::OnTcpRecv(NatEntry* entry, void* pcb_v, void* p_v) {
             closesocket(static_cast<SOCKET>(entry->host_socket));
             entry->host_socket = INVALID_SOCKET;
         }
+        // Clear callbacks before tcp_close: the PCB survives in lwIP's
+        // internal lists during the close handshake, but the NatEntry
+        // may be freed by CleanupStaleEntries before the PCB is gone.
+        tcp_arg(pcb, nullptr);
+        tcp_recv(pcb, nullptr);
+        tcp_err(pcb, nullptr);
         tcp_close(pcb);
         entry->conn_pcb = nullptr;
-        // Don't set closed here: the lwIP PCB is completing the
-        // close handshake and needs continued NAT routing.
         entry->last_active_ms = GetTickCount64();
         return;
     }
@@ -1040,9 +1057,14 @@ void NetBackend::HandleTcpReadable(NatEntry* entry) {
     if (n <= 0) {
         DrainTcpToGuest(entry);
         if (entry->conn_pcb) {
-            // Graceful FIN to guest; the lwIP PCB stays alive for
-            // the TCP close handshake (FIN/ACK exchange).
-            tcp_close(static_cast<struct tcp_pcb*>(entry->conn_pcb));
+            auto* pcb = static_cast<struct tcp_pcb*>(entry->conn_pcb);
+            // Detach callbacks before tcp_close: the PCB lives on inside
+            // lwIP during the close handshake, but the NatEntry may be
+            // freed before the PCB is.
+            tcp_arg(pcb, nullptr);
+            tcp_recv(pcb, nullptr);
+            tcp_err(pcb, nullptr);
+            tcp_close(pcb);
             entry->conn_pcb = nullptr;
         }
         closesocket(s);
@@ -1258,12 +1280,18 @@ void NetBackend::PollPortForwards() {
                 tcp_arg(pcb, conn_ptr);
                 tcp_recv(pcb, [](void* arg, struct tcp_pcb* pcb, struct pbuf* p, err_t err) -> err_t {
                     auto* c = static_cast<PfEntry::Conn*>(arg);
+                    if (!c) {
+                        if (p) pbuf_free(p);
+                        return ERR_OK;
+                    }
                     if (!p) {
-                        // Guest closed connection
                         if (c->host_sock != ~(uintptr_t)0) {
                             closesocket(static_cast<SOCKET>(c->host_sock));
                             c->host_sock = ~(uintptr_t)0;
                         }
+                        tcp_arg(pcb, nullptr);
+                        tcp_recv(pcb, nullptr);
+                        tcp_err(pcb, nullptr);
                         tcp_close(pcb);
                         c->guest_pcb = nullptr;
                         return ERR_OK;
@@ -1281,6 +1309,7 @@ void NetBackend::PollPortForwards() {
                 });
                 tcp_err(pcb, [](void* arg, err_t err) {
                     auto* c = static_cast<PfEntry::Conn*>(arg);
+                    if (!c) return;
                     c->guest_pcb = nullptr;
                     if (c->host_sock != ~(uintptr_t)0) {
                         closesocket(static_cast<SOCKET>(c->host_sock));
@@ -1291,6 +1320,7 @@ void NetBackend::PollPortForwards() {
                 tcp_connect(pcb, &guest_addr, pf.guest_port,
                     [](void* arg, struct tcp_pcb* pcb, err_t err) -> err_t {
                     auto* c = static_cast<PfEntry::Conn*>(arg);
+                    if (!c) return ERR_OK;
                     c->guest_connected = true;
                     if (!c->pending_to_guest.empty()) {
                         tcp_write(pcb, c->pending_to_guest.data(),
@@ -1323,7 +1353,11 @@ void NetBackend::PollPortForwards() {
                     closesocket(s);
                     c.host_sock = ~(uintptr_t)0;
                     if (c.guest_pcb) {
-                        tcp_close(static_cast<struct tcp_pcb*>(c.guest_pcb));
+                        auto* p = static_cast<struct tcp_pcb*>(c.guest_pcb);
+                        tcp_arg(p, nullptr);
+                        tcp_recv(p, nullptr);
+                        tcp_err(p, nullptr);
+                        tcp_close(p);
                         c.guest_pcb = nullptr;
                     }
                 } else {
@@ -1333,5 +1367,10 @@ void NetBackend::PollPortForwards() {
                 }
             }
         }
+
+        // Purge dead connections (both sides closed)
+        pf.conns.remove_if([](const PfEntry::Conn& c) {
+            return c.host_sock == ~(uintptr_t)0 && c.guest_pcb == nullptr;
+        });
     }
 }

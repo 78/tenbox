@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <list>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -129,7 +130,7 @@ private:
             std::vector<uint8_t> pending_to_guest;
             std::vector<uint8_t> pending_to_host;
         };
-        std::vector<Conn> conns;
+        std::list<Conn> conns;
     };
     std::vector<PfEntry> port_forwards_;
     void DrainPfToGuest(PfEntry::Conn& conn);
