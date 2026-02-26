@@ -111,7 +111,7 @@ std::optional<Kind> KindFromString(const std::string& value) {
     return std::nullopt;
 }
 
-std::string Encode(const Message& message) {
+std::string EncodeHeader(const Message& message) {
     std::ostringstream oss;
     oss << "version=" << message.version
         << '\t' << "channel=" << Escape(ChannelToString(message.channel))
@@ -123,8 +123,22 @@ std::string Encode(const Message& message) {
     for (const auto& [key, value] : message.fields) {
         oss << '\t' << Escape(key) << '=' << Escape(value);
     }
+
+    if (!message.payload.empty()) {
+        oss << '\t' << "payload_size=" << message.payload.size();
+    }
+
     oss << '\n';
     return oss.str();
+}
+
+std::string Encode(const Message& message) {
+    std::string out = EncodeHeader(message);
+    if (!message.payload.empty()) {
+        out.append(reinterpret_cast<const char*>(message.payload.data()),
+                   message.payload.size());
+    }
+    return out;
 }
 
 std::optional<Message> Decode(const std::string& raw) {

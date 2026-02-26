@@ -33,6 +33,30 @@ private:
     std::function<void(const uint8_t*, size_t)> write_handler_;
 };
 
+class ManagedInputPort final : public InputPort {
+public:
+    bool PollKeyboard(KeyboardEvent* event) override;
+    bool PollPointer(PointerEvent* event) override;
+
+    void PushKeyEvent(const KeyboardEvent& ev);
+    void PushPointerEvent(const PointerEvent& ev);
+
+private:
+    std::mutex mutex_;
+    std::deque<KeyboardEvent> key_queue_;
+    std::deque<PointerEvent> pointer_queue_;
+};
+
+class ManagedDisplayPort final : public DisplayPort {
+public:
+    void SubmitFrame(const DisplayFrame& frame) override;
+    void SetFrameHandler(std::function<void(const DisplayFrame&)> handler);
+
+private:
+    std::mutex mutex_;
+    std::function<void(const DisplayFrame&)> handler_;
+};
+
 class RuntimeControlService {
 public:
     RuntimeControlService(std::string vm_id, std::string pipe_name);
@@ -43,10 +67,13 @@ public:
 
     void AttachVm(Vm* vm);
     std::shared_ptr<ManagedConsolePort> ConsolePort() const { return console_port_; }
+    std::shared_ptr<ManagedInputPort> GetInputPort() const { return input_port_; }
+    std::shared_ptr<ManagedDisplayPort> GetDisplayPort() const { return display_port_; }
     void PublishState(const std::string& state, int exit_code = 0);
 
 private:
     bool Send(const ipc::Message& message);
+    bool SendWithPayload(const ipc::Message& message);
     void RunLoop();
     void HandleMessage(const ipc::Message& message);
     bool EnsureClientConnected();
@@ -55,6 +82,8 @@ private:
     std::string vm_id_;
     std::string pipe_name_;
     std::shared_ptr<ManagedConsolePort> console_port_ = std::make_shared<ManagedConsolePort>();
+    std::shared_ptr<ManagedInputPort> input_port_ = std::make_shared<ManagedInputPort>();
+    std::shared_ptr<ManagedDisplayPort> display_port_ = std::make_shared<ManagedDisplayPort>();
 
     std::atomic<bool> running_{false};
     std::thread thread_;

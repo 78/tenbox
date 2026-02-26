@@ -1,0 +1,63 @@
+#pragma once
+
+#include "common/ports.h"
+#include <cstdint>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+// A Win32 child window that renders a VM framebuffer via StretchDIBits.
+// When focused, captures keyboard and mouse input and forwards them to the VM.
+class DisplayPanel {
+public:
+    using KeyEventCallback = std::function<void(uint32_t evdev_code, bool pressed)>;
+    using PointerEventCallback = std::function<void(int32_t x, int32_t y, uint32_t buttons)>;
+
+    DisplayPanel();
+    ~DisplayPanel();
+
+    // Create the child window. Call once.
+    bool Create(HWND parent, HINSTANCE hinst, int x, int y, int w, int h);
+
+    void SetKeyCallback(KeyEventCallback cb);
+    void SetPointerCallback(PointerEventCallback cb);
+
+    // Update the internal framebuffer with a dirty-rect frame.
+    // Thread-safe; triggers InvalidateRect.
+    void UpdateFrame(const DisplayFrame& frame);
+
+    // Move/resize the window.
+    void SetBounds(int x, int y, int w, int h);
+
+    HWND Handle() const { return hwnd_; }
+    void SetVisible(bool visible);
+
+    // Whether keyboard/mouse capture is active (panel has focus).
+    bool IsCaptured() const { return captured_; }
+
+    static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+
+private:
+    void OnPaint();
+    void HandleKey(UINT msg, WPARAM wp, LPARAM lp);
+    void HandleMouse(UINT msg, WPARAM wp, LPARAM lp);
+    void CalcDisplayRect(int cw, int ch, RECT* out) const;
+
+    HWND hwnd_ = nullptr;
+    bool captured_ = false;
+    uint32_t mouse_buttons_ = 0;
+
+    // Host-side framebuffer (full resource size)
+    std::mutex fb_mutex_;
+    uint32_t fb_width_ = 0;
+    uint32_t fb_height_ = 0;
+    std::vector<uint8_t> framebuffer_;
+
+    KeyEventCallback key_cb_;
+    PointerEventCallback pointer_cb_;
+};

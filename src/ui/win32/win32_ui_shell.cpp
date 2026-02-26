@@ -1,5 +1,6 @@
 #include "ui/win32/win32_ui_shell.h"
 #include "ui/win32/win32_dialogs.h"
+#include "ui/win32/win32_display_panel.h"
 #include "manager/app_settings.h"
 
 #define NOMINMAX
@@ -43,6 +44,7 @@ enum CtlId : UINT {
     IDC_CONSOLE     = 2004,
     IDC_CONSOLE_IN  = 2005,
     IDC_SEND_BTN    = 2006,
+    IDC_TAB         = 2007,
 };
 
 // WM_APP range for cross-thread invoke
@@ -91,15 +93,19 @@ struct Win32UiShell::Impl {
     HWND console    = nullptr;
     HWND console_in = nullptr;
     HWND send_btn   = nullptr;
+    HWND tab        = nullptr;
     HMENU menu_bar  = nullptr;
 
-    // Detail statics (label : value pairs)
+    bool display_available = false;
+
     static constexpr int kDetailRows = 7;
     HWND detail_labels[kDetailRows] = {};
     HWND detail_values[kDetailRows] = {};
 
     HFONT ui_font     = nullptr;
     HFONT mono_font   = nullptr;
+
+    std::unique_ptr<DisplayPanel> display_panel;
 
     std::vector<VmRecord> records;
     int selected_index = -1;
@@ -234,6 +240,18 @@ static HWND CreateVmListBox(HWND parent, HINSTANCE hinst) {
 
 using Impl = Win32UiShell::Impl;
 
+static constexpr int kTabInfo    = 0;
+static constexpr int kTabConsole = 1;
+static constexpr int kTabDisplay = 2;
+
+static void ShowDetailControls(Impl* p, bool visible) {
+    int cmd = visible ? SW_SHOW : SW_HIDE;
+    for (int i = 0; i < Impl::kDetailRows; ++i) {
+        ShowWindow(p->detail_labels[i], cmd);
+        ShowWindow(p->detail_values[i], cmd);
+    }
+}
+
 static void LayoutControls(Impl* p) {
     if (!p->hwnd) return;
 
@@ -241,13 +259,11 @@ static void LayoutControls(Impl* p) {
     GetClientRect(p->hwnd, &rc);
     int cw = rc.right, ch = rc.bottom;
 
-    // Toolbar sizes itself
     SendMessage(p->toolbar, TB_AUTOSIZE, 0, 0);
     RECT tbr;
     GetWindowRect(p->toolbar, &tbr);
     int tb_h = tbr.bottom - tbr.top;
 
-    // Status bar sizes itself
     SendMessage(p->statusbar, WM_SIZE, 0, 0);
     RECT sbr;
     GetWindowRect(p->statusbar, &sbr);
@@ -257,70 +273,96 @@ static void LayoutControls(Impl* p) {
     int content_h   = ch - tb_h - sb_h;
     if (content_h < 0) content_h = 0;
 
-    // Left pane: listview
     MoveWindow(p->listview, 0, content_top, kLeftPaneWidth, content_h, TRUE);
 
-    // Right pane
     int rx = kLeftPaneWidth + 2;
     int rw = cw - rx;
     if (rw < 0) rw = 0;
 
-    // Detail rows — measure font for row height and label width
-    static const char* kLabels[] = {
-        "ID:", "Location:", "Kernel:", "Disk:", "Memory:", "vCPUs:", "NAT:"
-    };
+    MoveWindow(p->tab, rx, content_top, rw, content_h, TRUE);
 
-    HDC hdc = GetDC(p->hwnd);
-    HFONT old_font = static_cast<HFONT>(SelectObject(hdc, p->ui_font));
-    TEXTMETRICA tm{};
-    GetTextMetricsA(hdc, &tm);
+    RECT page_rc = {0, 0, rw, content_h};
+    SendMessage(p->tab, TCM_ADJUSTRECT, FALSE, reinterpret_cast<LPARAM>(&page_rc));
+    int px = rx + page_rc.left;
+    int py = content_top + page_rc.top;
+    int pw = page_rc.right - page_rc.left;
+    int ph = page_rc.bottom - page_rc.top;
+    if (pw < 0) pw = 0;
+    if (ph < 0) ph = 0;
 
-    int label_w = 0;
-    for (const char* lbl : kLabels) {
-        SIZE sz{};
-        GetTextExtentPoint32A(hdc, lbl, static_cast<int>(strlen(lbl)), &sz);
-        if (sz.cx > label_w) label_w = sz.cx;
+    int cur_tab = static_cast<int>(SendMessage(p->tab, TCM_GETCURSEL, 0, 0));
+
+    // Hide everything first, then show the active page
+    ShowDetailControls(p, false);
+    ShowWindow(p->console, SW_HIDE);
+    ShowWindow(p->console_in, SW_HIDE);
+    ShowWindow(p->send_btn, SW_HIDE);
+    if (p->display_panel) p->display_panel->SetVisible(false);
+
+    if (cur_tab == kTabInfo) {
+        ShowDetailControls(p, true);
+
+        HDC hdc = GetDC(p->hwnd);
+        HFONT old_font = static_cast<HFONT>(SelectObject(hdc, p->ui_font));
+        TEXTMETRICA tm{};
+        GetTextMetricsA(hdc, &tm);
+
+        static const char* kLabels[] = {
+            "ID:", "Location:", "Kernel:", "Disk:", "Memory:", "vCPUs:", "NAT:"
+        };
+        int label_w = 0;
+        for (const char* lbl : kLabels) {
+            SIZE sz{};
+            GetTextExtentPoint32A(hdc, lbl, static_cast<int>(strlen(lbl)), &sz);
+            if (sz.cx > label_w) label_w = sz.cx;
+        }
+        label_w += 12;
+        SelectObject(hdc, old_font);
+        ReleaseDC(p->hwnd, hdc);
+
+        int row_h = tm.tmHeight + tm.tmExternalLeading + 2;
+        int row_gap = row_h + 6;
+        int val_x = px + 8 + label_w + 8;
+        int val_w = pw - (label_w + 24);
+        if (val_w < 40) val_w = 40;
+
+        int dy = py + 8;
+        for (int i = 0; i < Impl::kDetailRows; ++i) {
+            MoveWindow(p->detail_labels[i], px + 8, dy, label_w, row_h, TRUE);
+            MoveWindow(p->detail_values[i], val_x, dy, val_w, row_h, TRUE);
+            dy += row_gap;
+        }
+    } else if (cur_tab == kTabConsole) {
+        ShowWindow(p->console, SW_SHOW);
+        ShowWindow(p->console_in, SW_SHOW);
+        ShowWindow(p->send_btn, SW_SHOW);
+
+        int input_h = 24;
+        int send_w = 60;
+        int gap = 4;
+        int console_h = ph - input_h - gap;
+        if (console_h < 20) console_h = 20;
+
+        MoveWindow(p->console, px, py, pw, console_h, TRUE);
+        int input_y = py + console_h + gap;
+        MoveWindow(p->console_in, px, input_y, pw - send_w - gap, input_h, TRUE);
+        MoveWindow(p->send_btn, px + pw - send_w, input_y, send_w, input_h, TRUE);
+    } else if (cur_tab == kTabDisplay) {
+        if (p->display_panel) {
+            p->display_panel->SetVisible(true);
+            p->display_panel->SetBounds(px, py, pw, ph);
+        }
     }
-    label_w = (label_w + 8) * 2;
-
-    SelectObject(hdc, old_font);
-    ReleaseDC(p->hwnd, hdc);
-
-    int row_h   = tm.tmHeight + tm.tmExternalLeading + 2;
-    int row_gap = row_h + 4;
-
-    int val_x = rx + 8 + label_w + 6;
-    int val_w = rw - (label_w + 22);
-    if (val_w < 40) val_w = 40;
-
-    int dy = content_top + 8;
-    for (int i = 0; i < Impl::kDetailRows; ++i) {
-        MoveWindow(p->detail_labels[i], rx + 8, dy, label_w, row_h, TRUE);
-        MoveWindow(p->detail_values[i], val_x, dy, val_w, row_h, TRUE);
-        dy += row_gap;
-    }
-
-    // Console area
-    int console_top = dy + 8;
-    int console_h   = content_top + content_h - console_top - 30;
-    if (console_h < 40) console_h = 40;
-    MoveWindow(p->console, rx + 8, console_top, rw - 16, console_h, TRUE);
-
-    int input_y = console_top + console_h + 4;
-    int send_w  = 60;
-    MoveWindow(p->console_in, rx + 8, input_y, rw - 16 - send_w - 4, 24, TRUE);
-    MoveWindow(p->send_btn, rx + 8 + rw - 16 - send_w, input_y, send_w, 24, TRUE);
 }
 
 // ── Update detail panel from selected VM ──
 
-static void UpdateDetailPanel(Win32UiShell::Impl* p) {
+static void UpdateDetailPanel(Impl* p) {
     static const char* labels[] = {
         "ID:", "Location:", "Kernel:", "Disk:", "Memory:", "vCPUs:", "NAT:"
     };
-    for (int i = 0; i < Impl::kDetailRows; ++i) {
+    for (int i = 0; i < Impl::kDetailRows; ++i)
         SetWindowTextA(p->detail_labels[i], labels[i]);
-    }
 
     if (p->selected_index < 0 ||
         p->selected_index >= static_cast<int>(p->records.size())) {
@@ -419,8 +461,14 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 p->selected_index = sel;
                 p->ResetConsole();
                 SetWindowTextA(p->console, "");
+                p->display_available = false;
                 UpdateDetailPanel(p);
                 UpdateCommandStates(p);
+
+                bool running = IsVmRunning(p->records[sel].state);
+                SendMessage(p->tab, TCM_SETCURSEL,
+                    running ? kTabConsole : kTabInfo, 0);
+                LayoutControls(p);
             }
             return 0;
         }
@@ -460,6 +508,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             std::string vm_id = p->records[p->selected_index].spec.vm_id;
             p->ResetConsole();
             SetWindowTextA(p->console, "");
+            p->display_available = false;
+            SendMessage(p->tab, TCM_SETCURSEL, kTabConsole, 0);
+            LayoutControls(p);
             SendMessageA(p->statusbar, SB_SETTEXTA, 0,
                 reinterpret_cast<LPARAM>(("Starting " + vm_id + "...").c_str()));
             std::string error;
@@ -550,8 +601,13 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     }
 
-    case WM_NOTIFY:
+    case WM_NOTIFY: {
+        auto* nmhdr = reinterpret_cast<NMHDR*>(lp);
+        if (nmhdr->idFrom == IDC_TAB && nmhdr->code == TCN_SELCHANGE) {
+            LayoutControls(p);
+        }
         break;
+    }
 
     case WM_MEASUREITEM: {
         auto* mis = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
@@ -710,7 +766,7 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     INITCOMMONCONTROLSEX icc{sizeof(icc),
-        ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES};
+        ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&icc);
 
     HINSTANCE hinst = GetModuleHandle(nullptr);
@@ -750,13 +806,34 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
 
     impl_->listview  = CreateVmListBox(impl_->hwnd, hinst);
 
-    // Detail label/value statics
+    // Tab control (Console / Display)
+    impl_->tab = CreateWindowExA(0, WC_TABCONTROLA, nullptr,
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+        0, 0, 0, 0, impl_->hwnd,
+        reinterpret_cast<HMENU>(IDC_TAB), hinst, nullptr);
+    SendMessage(impl_->tab, WM_SETFONT,
+        reinterpret_cast<WPARAM>(impl_->ui_font), FALSE);
+    {
+        TCITEMA ti{};
+        ti.mask = TCIF_TEXT;
+        ti.pszText = const_cast<char*>("Info");
+        SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabInfo,
+            reinterpret_cast<LPARAM>(&ti));
+        ti.pszText = const_cast<char*>("Console");
+        SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabConsole,
+            reinterpret_cast<LPARAM>(&ti));
+        ti.pszText = const_cast<char*>("Display");
+        SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabDisplay,
+            reinterpret_cast<LPARAM>(&ti));
+    }
+
+    // Detail label/value statics for Info tab
     for (int i = 0; i < Impl::kDetailRows; ++i) {
         impl_->detail_labels[i] = CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | WS_VISIBLE | SS_RIGHT,
+            WS_CHILD | SS_RIGHT,
             0, 0, 0, 0, impl_->hwnd, nullptr, hinst, nullptr);
         impl_->detail_values[i] = CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_PATHELLIPSIS,
+            WS_CHILD | SS_LEFT | SS_PATHELLIPSIS,
             0, 0, 0, 0, impl_->hwnd, nullptr, hinst, nullptr);
         SendMessage(impl_->detail_labels[i], WM_SETFONT,
             reinterpret_cast<WPARAM>(impl_->ui_font), FALSE);
@@ -802,7 +879,44 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     SendMessage(impl_->listview, WM_SETFONT,
         reinterpret_cast<WPARAM>(impl_->ui_font), FALSE);
 
+    // Display panel
+    impl_->display_panel = std::make_unique<DisplayPanel>();
+    impl_->display_panel->Create(impl_->hwnd, hinst, 0, 0, 400, 300);
+    impl_->display_panel->SetKeyCallback(
+        [this](uint32_t evdev_code, bool pressed) {
+            if (impl_->selected_index < 0 ||
+                impl_->selected_index >= static_cast<int>(impl_->records.size()))
+                return;
+            const auto& vm_id = impl_->records[impl_->selected_index].spec.vm_id;
+            manager_.SendKeyEvent(vm_id, evdev_code, pressed);
+        });
+    impl_->display_panel->SetPointerCallback(
+        [this](int32_t x, int32_t y, uint32_t buttons) {
+            if (impl_->selected_index < 0 ||
+                impl_->selected_index >= static_cast<int>(impl_->records.size()))
+                return;
+            const auto& vm_id = impl_->records[impl_->selected_index].spec.vm_id;
+            manager_.SendPointerEvent(vm_id, x, y, buttons);
+        });
+
     // Wire callbacks
+    manager_.SetDisplayCallback(
+        [this](const std::string& vm_id, const DisplayFrame& frame) {
+            InvokeOnUiThread([this, vm_id, frame]() {
+                if (impl_->selected_index < 0 ||
+                    impl_->selected_index >= static_cast<int>(impl_->records.size()))
+                    return;
+                if (impl_->records[impl_->selected_index].spec.vm_id != vm_id)
+                    return;
+                impl_->display_panel->UpdateFrame(frame);
+                if (!impl_->display_available) {
+                    impl_->display_available = true;
+                    SendMessage(impl_->tab, TCM_SETCURSEL, kTabDisplay, 0);
+                    LayoutControls(impl_.get());
+                }
+            });
+        });
+
     manager_.SetConsoleCallback([this](const std::string& vm_id,
                                        const std::string& data) {
         InvokeOnUiThread([this, vm_id, data]() {
@@ -833,8 +947,20 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
         });
     });
 
-    manager_.SetStateChangeCallback([this](const std::string& /*vm_id*/) {
-        InvokeOnUiThread([this]() { RefreshVmList(); });
+    manager_.SetStateChangeCallback([this](const std::string& vm_id) {
+        InvokeOnUiThread([this, vm_id]() {
+            RefreshVmList();
+            if (impl_->selected_index >= 0 &&
+                impl_->selected_index < static_cast<int>(impl_->records.size()) &&
+                impl_->records[impl_->selected_index].spec.vm_id == vm_id) {
+                auto state = impl_->records[impl_->selected_index].state;
+                if (state == VmPowerState::kStopped || state == VmPowerState::kCrashed) {
+                    impl_->display_available = false;
+                    SendMessage(impl_->tab, TCM_SETCURSEL, kTabInfo, 0);
+                    LayoutControls(impl_.get());
+                }
+            }
+        });
     });
 
     RefreshVmList();

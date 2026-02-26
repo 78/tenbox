@@ -42,7 +42,7 @@ dpkg-deb -x linux-image-*.deb kmod_extract/
 MODDIR="kmod_extract/lib/modules/$KVER/kernel"
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
-# Modules needed for virtio block/net devices + ext4 filesystem support
+# Modules needed for virtio block/net/input/gpu devices + ext4 filesystem support
 VIRTIO_MODS=(
     "drivers/virtio/virtio.ko"
     "drivers/virtio/virtio_ring.ko"
@@ -51,6 +51,12 @@ VIRTIO_MODS=(
     "net/core/failover.ko"
     "drivers/net/net_failover.ko"
     "drivers/net/virtio_net.ko"
+    "drivers/virtio/virtio_input.ko"
+    "drivers/media/cec/cec.ko"
+    "drivers/gpu/drm/drm.ko"
+    "drivers/gpu/drm/drm_kms_helper.ko"
+    "drivers/virtio/virtio_dma_buf.ko"
+    "drivers/gpu/drm/virtio/virtio-gpu.ko"
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
@@ -59,21 +65,38 @@ VIRTIO_MODS=(
     "fs/ext4/ext4.ko"
 )
 
-for relmod in "${VIRTIO_MODS[@]}"; do
-    modname="$(basename $relmod)"
-    src="$MODDIR/$relmod"
-    # Try plain .ko, .ko.xz, .ko.zst
+copy_module() {
+    local relmod="$1"
+    local modname="$(basename "$relmod")"
+    local src="$MODDIR/$relmod"
     if [ -f "$src" ]; then
         cp "$src" "$DESTDIR/"
         echo "  Copied: $modname"
+        return 0
     elif [ -f "${src}.xz" ]; then
         xz -d < "${src}.xz" > "$DESTDIR/$modname"
         echo "  Decompressed: $modname (.xz)"
+        return 0
     elif [ -f "${src}.zst" ]; then
         zstd -d "${src}.zst" -o "$DESTDIR/$modname" 2>/dev/null
         echo "  Decompressed: $modname (.zst)"
-    else
-        echo "  WARNING: $modname not found in $KPKG"
+        return 0
+    fi
+    return 1
+}
+
+for relmod in "${VIRTIO_MODS[@]}"; do
+    modname="$(basename "$relmod")"
+    if ! copy_module "$relmod"; then
+        # Some modules have different paths across kernel versions;
+        # fall back to a find-based search.
+        found=$(find "$MODDIR" -name "$modname" -o -name "${modname}.xz" -o -name "${modname}.zst" 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+            rel="${found#$MODDIR/}"
+            copy_module "$rel" || echo "  WARNING: $modname found but copy failed"
+        else
+            echo "  WARNING: $modname not found in $KPKG"
+        fi
     fi
 done
 
@@ -88,7 +111,16 @@ cat > "$WORKDIR/initramfs/init" << 'EOF'
 
 # Load virtio modules — device discovery is handled by ACPI DSDT
 MODDIR=/lib/modules
-for mod in virtio virtio_ring virtio_mmio virtio_blk failover net_failover virtio_net; do
+for mod in virtio virtio_ring virtio_mmio virtio_blk failover net_failover virtio_net virtio_input; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load DRM / virtio-gpu modules (order matters: cec before drm_kms_helper,
+# virtio_dma_buf before virtio-gpu)
+for mod in cec drm drm_kms_helper virtio_dma_buf virtio-gpu; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"
@@ -161,5 +193,5 @@ cd "$WORKDIR/initramfs"
 find . | cpio -o -H newc 2>/dev/null | gzip > "$WORKDIR/initramfs.cpio.gz"
 
 echo "[5/5] Copying output..."
-cp "$WORKDIR/initramfs.cpio.gz" "$OUTDIR/initramfs.cpio.gz"
-echo "Done: $OUTDIR/initramfs.cpio.gz ($(du -h "$OUTDIR/initramfs.cpio.gz" | cut -f1))"
+cp "$WORKDIR/initramfs.cpio.gz" "$OUTDIR/share/initramfs.cpio.gz"
+echo "Done: $OUTDIR/share/initramfs.cpio.gz ($(du -h "$OUTDIR/share/initramfs.cpio.gz" | cut -f1))"

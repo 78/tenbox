@@ -18,6 +18,8 @@ set(TENBOX_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/device/virtio/raw_image.cpp
     ${CMAKE_SOURCE_DIR}/src/core/device/virtio/qcow2.cpp
     ${CMAKE_SOURCE_DIR}/src/core/device/virtio/virtio_net.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/device/virtio/virtio_input.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/device/virtio/virtio_gpu.cpp
     ${CMAKE_SOURCE_DIR}/src/core/net/net_backend.cpp
     ${CMAKE_SOURCE_DIR}/src/platform/windows/console/std_console_port.cpp
 )

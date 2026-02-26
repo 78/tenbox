@@ -1,9 +1,10 @@
 #include "core/device/acpi/acpi_pm.h"
 
 void AcpiPm::TriggerPowerButton() {
-    pm1_sts_ |= (1u << 8);  // PWRBTN_STS
-    pm1_en_  |= (1u << 8);  // Ensure PWRBTN_EN so kernel SCI handler sees status & enable
-    if (sci_cb_) sci_cb_();
+    // FADT declares no fixed-hardware power button (PWR_BUTTON flag set).
+    // The guest is expected to shut down via console `poweroff` command,
+    // which writes SLP_EN+SLP_TYP to PM1_CNT and triggers shutdown_cb_.
+    LOG_INFO("ACPI: TriggerPowerButton called (no-op; guest uses poweroff)");
 }
 
 void AcpiPm::RaiseSci() {

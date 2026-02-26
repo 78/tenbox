@@ -63,6 +63,51 @@ void ManagedConsolePort::SetWriteHandler(
     write_handler_ = std::move(handler);
 }
 
+// ── ManagedInputPort ─────────────────────────────────────────────────
+
+bool ManagedInputPort::PollKeyboard(KeyboardEvent* event) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (key_queue_.empty()) return false;
+    *event = key_queue_.front();
+    key_queue_.pop_front();
+    return true;
+}
+
+bool ManagedInputPort::PollPointer(PointerEvent* event) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (pointer_queue_.empty()) return false;
+    *event = pointer_queue_.front();
+    pointer_queue_.pop_front();
+    return true;
+}
+
+void ManagedInputPort::PushKeyEvent(const KeyboardEvent& ev) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    key_queue_.push_back(ev);
+}
+
+void ManagedInputPort::PushPointerEvent(const PointerEvent& ev) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pointer_queue_.push_back(ev);
+}
+
+// ── ManagedDisplayPort ───────────────────────────────────────────────
+
+void ManagedDisplayPort::SubmitFrame(const DisplayFrame& frame) {
+    std::function<void(const DisplayFrame&)> handler;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        handler = handler_;
+    }
+    if (handler) handler(frame);
+}
+
+void ManagedDisplayPort::SetFrameHandler(
+    std::function<void(const DisplayFrame&)> handler) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    handler_ = std::move(handler);
+}
+
 std::string EncodeHex(const uint8_t* data, size_t size) {
     static constexpr char kDigits[] = "0123456789abcdef";
     std::string out;
@@ -98,6 +143,25 @@ RuntimeControlService::RuntimeControlService(std::string vm_id, std::string pipe
     console_port_->SetWriteHandler([this](const uint8_t* data, size_t size) {
         std::lock_guard<std::mutex> lock(console_buf_mutex_);
         console_buf_.append(reinterpret_cast<const char*>(data), size);
+    });
+
+    display_port_->SetFrameHandler([this](const DisplayFrame& frame) {
+        ipc::Message event;
+        event.kind = ipc::Kind::kEvent;
+        event.channel = ipc::Channel::kDisplay;
+        event.type = "display.frame";
+        event.vm_id = vm_id_;
+        event.request_id = next_event_id_++;
+        event.fields["width"] = std::to_string(frame.width);
+        event.fields["height"] = std::to_string(frame.height);
+        event.fields["stride"] = std::to_string(frame.stride);
+        event.fields["format"] = std::to_string(frame.format);
+        event.fields["resource_width"] = std::to_string(frame.resource_width);
+        event.fields["resource_height"] = std::to_string(frame.resource_height);
+        event.fields["dirty_x"] = std::to_string(frame.dirty_x);
+        event.fields["dirty_y"] = std::to_string(frame.dirty_y);
+        event.payload = frame.pixels;
+        SendWithPayload(event);
     });
 }
 
@@ -181,6 +245,20 @@ bool RuntimeControlService::Send(const ipc::Message& message) {
     std::lock_guard<std::mutex> lock(send_mutex_);
     HANDLE h = AsHandle(pipe_handle_);
     if (!h || h == INVALID_HANDLE_VALUE) return false;
+    std::string encoded = ipc::Encode(message);
+    DWORD written = 0;
+    if (!WriteFile(h, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)) {
+        return false;
+    }
+    return written == encoded.size();
+}
+
+bool RuntimeControlService::SendWithPayload(const ipc::Message& message) {
+    std::lock_guard<std::mutex> lock(send_mutex_);
+    HANDLE h = AsHandle(pipe_handle_);
+    if (!h || h == INVALID_HANDLE_VALUE) return false;
+
+    // Encode header + raw binary payload in one write when possible
     std::string encoded = ipc::Encode(message);
     DWORD written = 0;
     if (!WriteFile(h, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)) {
@@ -292,6 +370,34 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
         return;
     }
 
+    if (message.channel == ipc::Channel::kInput &&
+        message.kind == ipc::Kind::kRequest &&
+        message.type == "input.key_event") {
+        auto it_code = message.fields.find("key_code");
+        auto it_pressed = message.fields.find("pressed");
+        if (it_code != message.fields.end() && it_pressed != message.fields.end()) {
+            KeyboardEvent ev;
+            ev.key_code = static_cast<uint32_t>(std::strtoul(it_code->second.c_str(), nullptr, 10));
+            ev.pressed = (it_pressed->second == "1" || it_pressed->second == "true");
+            input_port_->PushKeyEvent(ev);
+        }
+        return;
+    }
+
+    if (message.channel == ipc::Channel::kInput &&
+        message.kind == ipc::Kind::kRequest &&
+        message.type == "input.pointer_event") {
+        PointerEvent ev;
+        auto it_x = message.fields.find("x");
+        auto it_y = message.fields.find("y");
+        auto it_btn = message.fields.find("buttons");
+        if (it_x != message.fields.end()) ev.x = std::atoi(it_x->second.c_str());
+        if (it_y != message.fields.end()) ev.y = std::atoi(it_y->second.c_str());
+        if (it_btn != message.fields.end()) ev.buttons = static_cast<uint32_t>(std::strtoul(it_btn->second.c_str(), nullptr, 10));
+        input_port_->PushPointerEvent(ev);
+        return;
+    }
+
     if (message.channel == ipc::Channel::kControl &&
         message.kind == ipc::Kind::kRequest &&
         message.type == "runtime.ping") {
@@ -330,9 +436,12 @@ void RuntimeControlService::RunLoop() {
     }
 
     HANDLE h = AsHandle(pipe_handle_);
-    std::array<char, 4096> buf{};
+    std::array<char, 65536> buf{};
     std::string pending;
     last_console_flush_ = std::chrono::steady_clock::now();
+
+    size_t payload_needed = 0;
+    ipc::Message pending_msg;
 
     while (running_) {
         auto now = std::chrono::steady_clock::now();
@@ -369,19 +478,36 @@ void RuntimeControlService::RunLoop() {
         }
 
         pending.append(buf.data(), read);
-        size_t pos = 0;
-        while (true) {
-            size_t nl = pending.find('\n', pos);
-            if (nl == std::string::npos) {
-                pending.erase(0, pos);
-                break;
+
+        while (!pending.empty()) {
+            if (payload_needed > 0) {
+                if (pending.size() < payload_needed) break;
+                pending_msg.payload.assign(
+                    reinterpret_cast<const uint8_t*>(pending.data()),
+                    reinterpret_cast<const uint8_t*>(pending.data()) + payload_needed);
+                pending.erase(0, payload_needed);
+                payload_needed = 0;
+                HandleMessage(pending_msg);
+                continue;
             }
-            std::string line = pending.substr(pos, nl - pos + 1);
-            pos = nl + 1;
+
+            size_t nl = pending.find('\n');
+            if (nl == std::string::npos) break;
+            std::string line = pending.substr(0, nl + 1);
+            pending.erase(0, nl + 1);
             auto decoded = ipc::Decode(line);
-            if (decoded) {
-                HandleMessage(*decoded);
+            if (!decoded) continue;
+
+            auto ps_it = decoded->fields.find("payload_size");
+            if (ps_it != decoded->fields.end()) {
+                payload_needed = std::strtoull(ps_it->second.c_str(), nullptr, 10);
+                decoded->fields.erase(ps_it);
+                if (payload_needed > 0) {
+                    pending_msg = std::move(*decoded);
+                    continue;
+                }
             }
+            HandleMessage(*decoded);
         }
     }
 

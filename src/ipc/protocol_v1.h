@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace ipc {
 
@@ -31,9 +32,18 @@ struct Message {
     std::string vm_id;
     uint64_t request_id = 0;
     std::unordered_map<std::string, std::string> fields;
+    std::vector<uint8_t> payload;
 };
 
+// Encode header line (text). When payload is non-empty the header includes
+// payload_size=N and the caller must append the raw payload bytes after.
+std::string EncodeHeader(const Message& message);
+
+// Encode a complete message: header + optional raw payload bytes.
 std::string Encode(const Message& message);
+
+// Decode only the text header. Sets message.payload to empty.
+// The caller is responsible for reading payload_size bytes afterwards.
 std::optional<Message> Decode(const std::string& raw);
 
 const char* ChannelToString(Channel channel);

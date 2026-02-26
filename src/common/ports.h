@@ -35,6 +35,12 @@ struct DisplayFrame {
     uint32_t height = 0;
     uint32_t stride = 0;
     uint32_t format = 0;
+    // Full resource dimensions (for dirty-rect mode)
+    uint32_t resource_width = 0;
+    uint32_t resource_height = 0;
+    // Dirty rectangle origin within the resource
+    uint32_t dirty_x = 0;
+    uint32_t dirty_y = 0;
     std::vector<uint8_t> pixels;
 };
 

@@ -14,6 +14,8 @@
 #include "core/device/virtio/virtio_mmio.h"
 #include "core/device/virtio/virtio_blk.h"
 #include "core/device/virtio/virtio_net.h"
+#include "core/device/virtio/virtio_input.h"
+#include "core/device/virtio/virtio_gpu.h"
 #include "core/net/net_backend.h"
 #include "core/arch/x86_64/acpi.h"
 #include "common/ports.h"
@@ -34,6 +36,10 @@ struct VmConfig {
     std::vector<PortForward> port_forwards;
     bool interactive = true;
     std::shared_ptr<ConsolePort> console_port;
+    std::shared_ptr<InputPort> input_port;
+    std::shared_ptr<DisplayPort> display_port;
+    uint32_t display_width = 1024;
+    uint32_t display_height = 768;
 };
 
 class Vm {
@@ -49,6 +55,8 @@ public:
     void InjectConsoleBytes(const uint8_t* data, size_t size);
     void SetNetLinkUp(bool up);
     void UpdatePortForwards(const std::vector<PortForward>& forwards);
+    void InjectKeyEvent(uint32_t evdev_code, bool pressed);
+    void InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons);
 
 private:
     Vm() = default;
@@ -57,9 +65,12 @@ private:
     bool SetupDevices();
     bool SetupVirtioBlk(const std::string& disk_path);
     bool SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards);
+    bool SetupVirtioInput();
+    bool SetupVirtioGpu(uint32_t width, uint32_t height);
     bool LoadKernel(const VmConfig& config);
 
     void InputThreadFunc();
+    void HidInputThreadFunc();
     void VCpuThreadFunc(uint32_t vcpu_index);
     void InjectIrq(uint8_t irq);
 
@@ -81,7 +92,7 @@ private:
     I8259Pic pic_slave_;
     PciHostBridge pci_host_;
     AcpiPm acpi_pm_;
-    Device port_sink_;  // absorbs POST (0x80), DMA page (0x87), etc.
+    Device port_sink_;
 
     // VirtIO block device (optional)
     std::unique_ptr<VirtioBlkDevice> virtio_blk_;
@@ -92,9 +103,22 @@ private:
     std::unique_ptr<VirtioMmioDevice> virtio_mmio_net_;
     std::unique_ptr<NetBackend> net_backend_;
 
+    // VirtIO input devices (keyboard + tablet)
+    std::unique_ptr<VirtioInputDevice> virtio_kbd_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_kbd_;
+    std::unique_ptr<VirtioInputDevice> virtio_tablet_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_tablet_;
+
+    // VirtIO GPU (2D)
+    std::unique_ptr<VirtioGpuDevice> virtio_gpu_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_gpu_;
+
     std::vector<x86::VirtioMmioAcpiInfo> virtio_acpi_devs_;
 
     std::atomic<bool> running_{false};
     std::thread input_thread_;
+    std::thread hid_input_thread_;
     std::shared_ptr<ConsolePort> console_port_;
+    std::shared_ptr<InputPort> input_port_;
+    std::shared_ptr<DisplayPort> display_port_;
 };

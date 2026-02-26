@@ -13,6 +13,8 @@ public:
 
     static constexpr uint8_t kMaxRedirEntries = 24;
 
+    IoApic() { ResetRedirTable(); }
+
     void MmioRead(uint64_t offset, uint8_t size, uint64_t* value) override;
     void MmioWrite(uint64_t offset, uint8_t size, uint64_t value) override;
 
@@ -29,8 +31,13 @@ private:
     uint32_t index_ = 0;
     uint32_t id_ = 0;
 
-    // Each redirection entry is 64 bits (low + high)
-    std::array<uint64_t, kMaxRedirEntries> redir_table_{};
+    // Each redirection entry is 64 bits (low + high).
+    // Per Intel I/O APIC spec, reset value has bit 16 (mask) set.
+    std::array<uint64_t, kMaxRedirEntries> redir_table_;
+
+    void ResetRedirTable() {
+        redir_table_.fill(0x0000000000010000ULL);
+    }
 
     uint32_t ReadRegister() const;
     void WriteRegister(uint32_t value);

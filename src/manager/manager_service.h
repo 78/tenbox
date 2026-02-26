@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/ports.h"
 #include "common/vm_model.h"
 #include "ipc/protocol_v1.h"
 #include "manager/app_settings.h"
@@ -12,6 +13,11 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+struct PipeParseState {
+    size_t payload_needed = 0;
+    ipc::Message pending_msg;
+};
 
 struct VmRuntimeHandle {
     void* process_handle = nullptr;
@@ -99,6 +105,11 @@ public:
     using StateChangeCallback = std::function<void(const std::string& vm_id)>;
     void SetStateChangeCallback(StateChangeCallback cb);
 
+    using DisplayCallback = std::function<void(const std::string& vm_id, const DisplayFrame& frame)>;
+    void SetDisplayCallback(DisplayCallback cb);
+    bool SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed);
+    bool SendPointerEvent(const std::string& vm_id, int32_t x, int32_t y, uint32_t buttons);
+
 private:
     bool SendRuntimeMessage(VmRecord& vm, const ipc::Message& msg);
     bool EnsurePipeConnected(VmRecord& vm);
@@ -109,7 +120,8 @@ private:
     void StartReadThread(const std::string& vm_id, VmRecord& vm);
     void StopReadThread(VmRecord& vm);
     void PipeReadThreadFunc(const std::string& vm_id);
-    void DispatchPipeData(std::string& pending, const std::string& vm_id);
+    void DispatchPipeData(std::string& pending, PipeParseState& parse,
+                         const std::string& vm_id);
     void HandleProcessExit(const std::string& vm_id);
     void CleanupRuntimeHandles(VmRecord& vm);
     void HandleIncomingMessage(const std::string& vm_id, const ipc::Message& msg);
@@ -123,5 +135,6 @@ private:
     std::mutex vms_mutex_;
     ConsoleCallback console_callback_;
     StateChangeCallback state_change_callback_;
+    DisplayCallback display_callback_;
     void* job_object_ = nullptr;
 };

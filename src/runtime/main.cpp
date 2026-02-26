@@ -131,6 +131,8 @@ int main(int argc, char* argv[]) {
         }
         control->PublishState("starting");
         config.console_port = control->ConsolePort();
+        config.input_port = control->GetInputPort();
+        config.display_port = control->GetDisplayPort();
     }
 
     auto vm = Vm::Create(config);

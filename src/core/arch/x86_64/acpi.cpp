@@ -243,8 +243,13 @@ static void BuildFadt(uint8_t* buf, GPA dsdt_addr) {
     // PM1_CNT_LEN (offset 89) = 2
     buf[89] = 2;
 
-    // Flags (offset 112): none (no HW_REDUCED_ACPI)
-    // Zero flags = traditional ACPI with legacy hardware support.
+    // Flags (offset 112, uint32_t):
+    //   Bit 4 (PWR_BUTTON): 1 = no fixed-hardware power button
+    //   Bit 5 (SLP_BUTTON): 1 = no fixed-hardware sleep button
+    // We don't emulate fixed power/sleep button events, so set both bits
+    // to prevent the kernel from looking for handlers that don't exist.
+    uint32_t fadt_flags = (1u << 4) | (1u << 5);
+    memcpy(buf + 112, &fadt_flags, 4);
 
     // FADT minor version (offset 131)
     buf[131] = 1;

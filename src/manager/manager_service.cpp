@@ -491,6 +491,63 @@ void ManagerService::SetStateChangeCallback(StateChangeCallback cb) {
     state_change_callback_ = std::move(cb);
 }
 
+void ManagerService::SetDisplayCallback(DisplayCallback cb) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    display_callback_ = std::move(cb);
+}
+
+bool ManagerService::SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kInput;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "input.key_event";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+    msg.fields["key_code"] = std::to_string(key_code);
+    msg.fields["pressed"] = pressed ? "1" : "0";
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
+bool ManagerService::SendPointerEvent(const std::string& vm_id,
+                                       int32_t x, int32_t y, uint32_t buttons) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kInput;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "input.pointer_event";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+    msg.fields["x"] = std::to_string(x);
+    msg.fields["y"] = std::to_string(y);
+    msg.fields["buttons"] = std::to_string(buttons);
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
 bool ManagerService::SendConsoleInput(const std::string& vm_id, const std::string& input) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
@@ -534,20 +591,37 @@ void ManagerService::StopReadThread(VmRecord& vm) {
     }
 }
 
-void ManagerService::DispatchPipeData(std::string& pending, const std::string& vm_id) {
-    size_t pos = 0;
-    while (true) {
-        size_t nl = pending.find('\n', pos);
-        if (nl == std::string::npos) {
-            pending.erase(0, pos);
-            break;
+void ManagerService::DispatchPipeData(std::string& pending, PipeParseState& parse,
+                                      const std::string& vm_id) {
+    while (!pending.empty()) {
+        if (parse.payload_needed > 0) {
+            if (pending.size() < parse.payload_needed) return;
+            parse.pending_msg.payload.assign(
+                reinterpret_cast<const uint8_t*>(pending.data()),
+                reinterpret_cast<const uint8_t*>(pending.data()) + parse.payload_needed);
+            pending.erase(0, parse.payload_needed);
+            parse.payload_needed = 0;
+            HandleIncomingMessage(vm_id, parse.pending_msg);
+            continue;
         }
-        std::string line = pending.substr(pos, nl - pos + 1);
-        pos = nl + 1;
+
+        size_t nl = pending.find('\n');
+        if (nl == std::string::npos) return;
+        std::string line = pending.substr(0, nl + 1);
+        pending.erase(0, nl + 1);
         auto decoded = ipc::Decode(line);
-        if (decoded) {
-            HandleIncomingMessage(vm_id, *decoded);
+        if (!decoded) continue;
+
+        auto ps_it = decoded->fields.find("payload_size");
+        if (ps_it != decoded->fields.end()) {
+            parse.payload_needed = std::strtoull(ps_it->second.c_str(), nullptr, 10);
+            decoded->fields.erase(ps_it);
+            if (parse.payload_needed > 0) {
+                parse.pending_msg = std::move(*decoded);
+                continue;
+            }
         }
+        HandleIncomingMessage(vm_id, *decoded);
     }
 }
 
@@ -581,8 +655,9 @@ void ManagerService::PipeReadThreadFunc(const std::string& vm_id) {
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE || !running_flag) return;
 
-    std::array<char, 4096> buf{};
+    std::array<char, 65536> buf{};
     std::string pending;
+    PipeParseState parse;
     bool process_exited = false;
     DWORD idle_count = 0;
 
@@ -613,7 +688,7 @@ void ManagerService::PipeReadThreadFunc(const std::string& vm_id) {
             }
             if (bytes_read > 0) {
                 pending.append(buf.data(), bytes_read);
-                DispatchPipeData(pending, vm_id);
+                DispatchPipeData(pending, parse, vm_id);
             }
         }
 
@@ -646,6 +721,33 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
             }
             if (cb) cb(vm_id, data);
         }
+        return;
+    }
+
+    if (msg.channel == ipc::Channel::kDisplay &&
+        msg.kind == ipc::Kind::kEvent &&
+        msg.type == "display.frame") {
+        DisplayFrame frame;
+        auto get = [&](const char* key) -> uint32_t {
+            auto it = msg.fields.find(key);
+            return (it != msg.fields.end()) ? static_cast<uint32_t>(std::strtoul(it->second.c_str(), nullptr, 10)) : 0;
+        };
+        frame.width = get("width");
+        frame.height = get("height");
+        frame.stride = get("stride");
+        frame.format = get("format");
+        frame.resource_width = get("resource_width");
+        frame.resource_height = get("resource_height");
+        frame.dirty_x = get("dirty_x");
+        frame.dirty_y = get("dirty_y");
+        frame.pixels = msg.payload;
+
+        DisplayCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(vms_mutex_);
+            cb = display_callback_;
+        }
+        if (cb) cb(vm_id, frame);
         return;
     }
 

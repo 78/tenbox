@@ -1,6 +1,7 @@
 add_library(tenbox_ui_shell_win32 STATIC
     ${CMAKE_SOURCE_DIR}/src/ui/win32/win32_ui_shell.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/win32/win32_dialogs.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/win32/win32_display_panel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/common/vm_forms.cpp
 )
 

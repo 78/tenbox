@@ -3,15 +3,23 @@
 #include "platform/windows/console/std_console_port.h"
 #include <algorithm>
 
-static constexpr uint64_t kVirtioMmioBase    = 0xd0000000;
-static constexpr uint8_t  kVirtioBlkIrq      = 5;
-static constexpr uint64_t kVirtioNetMmioBase = 0xd0000200;
-static constexpr uint8_t  kVirtioNetIrq      = 6;
+static constexpr uint64_t kVirtioMmioBase       = 0xd0000000;
+static constexpr uint8_t  kVirtioBlkIrq         = 5;
+static constexpr uint64_t kVirtioNetMmioBase    = 0xd0000200;
+static constexpr uint8_t  kVirtioNetIrq         = 6;
+static constexpr uint64_t kVirtioKbdMmioBase    = 0xd0000400;
+static constexpr uint8_t  kVirtioKbdIrq         = 11;
+static constexpr uint64_t kVirtioTabletMmioBase = 0xd0000600;
+static constexpr uint8_t  kVirtioTabletIrq      = 12;
+static constexpr uint64_t kVirtioGpuMmioBase    = 0xd0000800;
+static constexpr uint8_t  kVirtioGpuIrq         = 13;
 
 Vm::~Vm() {
     running_ = false;
     if (input_thread_.joinable())
         input_thread_.join();
+    if (hid_input_thread_.joinable())
+        hid_input_thread_.join();
     for (auto& t : vcpu_threads_) {
         if (t.joinable()) t.join();
     }
@@ -32,6 +40,8 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
 
     auto vm = std::unique_ptr<Vm>(new Vm());
     vm->console_port_ = config.console_port;
+    vm->input_port_ = config.input_port;
+    vm->display_port_ = config.display_port;
     if (!vm->console_port_ && config.interactive) {
         vm->console_port_ = std::make_shared<StdConsolePort>();
     }
@@ -51,6 +61,11 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (!vm->SetupVirtioNet(config.net_link_up, config.port_forwards))
         return nullptr;
 
+    if (!vm->SetupVirtioInput()) return nullptr;
+
+    if (!vm->SetupVirtioGpu(config.display_width, config.display_height))
+        return nullptr;
+
     // Register virtio-mmio devices for ACPI DSDT so the kernel discovers
     // them via the "LNRO0005" HID in the virtio_mmio driver.
     if (vm->virtio_mmio_) {
@@ -64,6 +79,24 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
             kVirtioNetMmioBase,
             static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
             kVirtioNetIrq});
+    }
+    if (vm->virtio_mmio_kbd_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioKbdMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioKbdIrq});
+    }
+    if (vm->virtio_mmio_tablet_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioTabletMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioTabletIrq});
+    }
+    if (vm->virtio_mmio_gpu_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioGpuMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioGpuIrq});
     }
 
     if (!vm->LoadKernel(config)) return nullptr;
@@ -217,6 +250,46 @@ bool Vm::SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards) 
     return true;
 }
 
+bool Vm::SetupVirtioInput() {
+    virtio_kbd_ = std::make_unique<VirtioInputDevice>(VirtioInputDevice::SubType::kKeyboard);
+    virtio_mmio_kbd_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_kbd_->Init(virtio_kbd_.get(), mem_);
+    virtio_mmio_kbd_->SetIrqCallback([this]() { InjectIrq(kVirtioKbdIrq); });
+    virtio_kbd_->SetMmioDevice(virtio_mmio_kbd_.get());
+    addr_space_.AddMmioDevice(
+        kVirtioKbdMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_kbd_.get());
+
+    virtio_tablet_ = std::make_unique<VirtioInputDevice>(VirtioInputDevice::SubType::kTablet);
+    virtio_mmio_tablet_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_tablet_->Init(virtio_tablet_.get(), mem_);
+    virtio_mmio_tablet_->SetIrqCallback([this]() { InjectIrq(kVirtioTabletIrq); });
+    virtio_tablet_->SetMmioDevice(virtio_mmio_tablet_.get());
+    addr_space_.AddMmioDevice(
+        kVirtioTabletMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_tablet_.get());
+
+    return true;
+}
+
+bool Vm::SetupVirtioGpu(uint32_t width, uint32_t height) {
+    virtio_gpu_ = std::make_unique<VirtioGpuDevice>(width, height);
+    virtio_gpu_->SetMemMap(mem_);
+
+    if (display_port_) {
+        virtio_gpu_->SetFrameCallback([this](const DisplayFrame& frame) {
+            display_port_->SubmitFrame(frame);
+        });
+    }
+
+    virtio_mmio_gpu_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_gpu_->Init(virtio_gpu_.get(), mem_);
+    virtio_mmio_gpu_->SetIrqCallback([this]() { InjectIrq(kVirtioGpuIrq); });
+    virtio_gpu_->SetMmioDevice(virtio_mmio_gpu_.get());
+    addr_space_.AddMmioDevice(
+        kVirtioGpuMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_gpu_.get());
+
+    return true;
+}
+
 bool Vm::LoadKernel(const VmConfig& config) {
     x86::BootConfig boot_cfg;
     boot_cfg.kernel_path = config.kernel_path;
@@ -305,12 +378,45 @@ void Vm::VCpuThreadFunc(uint32_t vcpu_index) {
     LOG_INFO("vCPU %u stopped (total exits: %llu)", vcpu_index, exit_count);
 }
 
+void Vm::HidInputThreadFunc() {
+    if (!input_port_) return;
+
+    while (running_) {
+        KeyboardEvent kev;
+        while (input_port_->PollKeyboard(&kev)) {
+            if (virtio_kbd_) {
+                virtio_kbd_->InjectEvent(EV_KEY, static_cast<uint16_t>(kev.key_code),
+                                         kev.pressed ? 1 : 0);
+                virtio_kbd_->InjectEvent(EV_SYN, SYN_REPORT, 0);
+            }
+        }
+
+        PointerEvent pev;
+        while (input_port_->PollPointer(&pev)) {
+            if (virtio_tablet_) {
+                virtio_tablet_->InjectEvent(EV_ABS, ABS_X, static_cast<uint32_t>(pev.x));
+                virtio_tablet_->InjectEvent(EV_ABS, ABS_Y, static_cast<uint32_t>(pev.y));
+                virtio_tablet_->InjectEvent(EV_KEY, BTN_LEFT, (pev.buttons & 1) ? 1 : 0);
+                virtio_tablet_->InjectEvent(EV_KEY, BTN_RIGHT, (pev.buttons & 2) ? 1 : 0);
+                virtio_tablet_->InjectEvent(EV_KEY, BTN_MIDDLE, (pev.buttons & 4) ? 1 : 0);
+                virtio_tablet_->InjectEvent(EV_SYN, SYN_REPORT, 0);
+            }
+        }
+
+        Sleep(2);
+    }
+}
+
 int Vm::Run() {
     running_ = true;
     LOG_INFO("Starting VM execution...");
 
     if (console_port_) {
         input_thread_ = std::thread(&Vm::InputThreadFunc, this);
+    }
+
+    if (input_port_) {
+        hid_input_thread_ = std::thread(&Vm::HidInputThreadFunc, this);
     }
 
     for (uint32_t i = 0; i < cpu_count_; i++) {
@@ -351,4 +457,23 @@ void Vm::SetNetLinkUp(bool up) {
 
 void Vm::UpdatePortForwards(const std::vector<PortForward>& forwards) {
     if (net_backend_) net_backend_->UpdatePortForwards(forwards);
+}
+
+void Vm::InjectKeyEvent(uint32_t evdev_code, bool pressed) {
+    if (virtio_kbd_) {
+        virtio_kbd_->InjectEvent(EV_KEY, static_cast<uint16_t>(evdev_code),
+                                 pressed ? 1 : 0);
+        virtio_kbd_->InjectEvent(EV_SYN, SYN_REPORT, 0);
+    }
+}
+
+void Vm::InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons) {
+    if (virtio_tablet_) {
+        virtio_tablet_->InjectEvent(EV_ABS, ABS_X, static_cast<uint32_t>(x));
+        virtio_tablet_->InjectEvent(EV_ABS, ABS_Y, static_cast<uint32_t>(y));
+        virtio_tablet_->InjectEvent(EV_KEY, BTN_LEFT, (buttons & 1) ? 1 : 0);
+        virtio_tablet_->InjectEvent(EV_KEY, BTN_RIGHT, (buttons & 2) ? 1 : 0);
+        virtio_tablet_->InjectEvent(EV_KEY, BTN_MIDDLE, (buttons & 4) ? 1 : 0);
+        virtio_tablet_->InjectEvent(EV_SYN, SYN_REPORT, 0);
+    }
 }
