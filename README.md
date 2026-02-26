@@ -1,6 +1,6 @@
-# TenClaw
+# TenBox
 
-A lightweight x86-64 Virtual Machine Monitor (VMM) for Windows, built on top of the Windows Hypervisor Platform (WHVP). TenClaw can boot a full Linux system from a qcow2 disk image with virtio devices, NAT networking, and port forwarding — all in a single small binary.
+A lightweight x86-64 Virtual Machine Monitor (VMM) for Windows, built on top of the Windows Hypervisor Platform (WHVP). TenBox can boot a full Linux system from a qcow2 disk image with virtio devices, NAT networking, and port forwarding — all in a single small binary.
 
 ## Features
 
@@ -47,13 +47,13 @@ sudo ./scripts/make-rootfs.sh
 ### Run
 
 ```bash
-TenClaw.exe --kernel build/vmlinuz --initrd build/initramfs.cpio.gz --disk build/rootfs.qcow2 --net
+TenBox.exe --kernel build/vmlinuz --initrd build/initramfs.cpio.gz --disk build/rootfs.qcow2 --net
 ```
 
 With port forwarding (e.g. SSH):
 
 ```bash
-TenClaw.exe --kernel build/vmlinuz --initrd build/initramfs.cpio.gz --disk build/rootfs.qcow2 --net --forward 2222:22
+TenBox.exe --kernel build/vmlinuz --initrd build/initramfs.cpio.gz --disk build/rootfs.qcow2 --net --forward 2222:22
 ```
 
 ### CLI Options
@@ -73,7 +73,7 @@ TenClaw.exe --kernel build/vmlinuz --initrd build/initramfs.cpio.gz --disk build
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                   TenClaw VMM                   │
+│                   TenBox VMM                    │
 ├──────────┬──────────────────────┬───────────────┤
 │ Hypervisor│     Device Layer     │  Net Backend  │
 │  (WHVP)  │                      │  (lwIP+NAT)   │
@@ -111,7 +111,7 @@ scripts/
 
 ### Networking
 
-When `--net` is enabled, TenClaw provides a user-mode NAT network:
+When `--net` is enabled, TenBox provides a user-mode NAT network:
 
 | Address | Role |
 |---|---|
@@ -126,7 +126,7 @@ When `--net` is enabled, TenClaw provides a user-mode NAT network:
 
 ### Guest Defaults
 
-- Root password: `tenclaw`
+- Root password: `tenbox`
 - Auto-login on serial console (`ttyS0`)
 - Network: DHCP on `eth0` (auto-configured)
 

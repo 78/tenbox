@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a minimal BusyBox initramfs for TenClaw testing.
+# Build a minimal BusyBox initramfs for TenBox testing.
 # Includes virtio kernel modules for block device support.
 # Run this in WSL2 or a Linux environment.
 set -e
@@ -111,7 +111,7 @@ done
 
 echo ""
 echo "====================================="
-echo " TenClaw VM booted successfully!"
+echo " TenBox VM booted successfully!"
 echo "====================================="
 echo "Kernel: $(uname -r)"
 echo "Memory: $(cat /proc/meminfo | head -1)"

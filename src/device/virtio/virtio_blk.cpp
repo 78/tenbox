@@ -131,7 +131,7 @@ void VirtioBlkDevice::ProcessRequest(VirtQueue& vq, uint16_t head_idx) {
         disk_->Flush();
         break;
     case VIRTIO_BLK_T_GET_ID: {
-        const char* id_str = "tenclaw-vblk";
+        const char* id_str = "tenbox-vblk";
         for (size_t i = 1; i + 1 < chain.size(); i++) {
             auto& elem = chain[i];
             if (!elem.writable) continue;

@@ -4,7 +4,7 @@
 #include <cstring>
 
 static void PrintVersion() {
-    fprintf(stderr, "TenClaw v" TENCLAW_VERSION "\n");
+    fprintf(stderr, "TenBox v" TENBOX_VERSION "\n");
 }
 
 static void PrintUsage(const char* prog) {
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    LOG_INFO("TenClaw VMM v" TENCLAW_VERSION);
+    LOG_INFO("TenBox VMM v" TENBOX_VERSION);
     LOG_INFO("Kernel: %s", config.kernel_path.c_str());
     if (!config.initrd_path.empty())
         LOG_INFO("Initrd: %s", config.initrd_path.c_str());

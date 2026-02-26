@@ -64,10 +64,10 @@ static void FillHeader(AcpiHeader* h, const char sig[4], uint32_t len,
     memcpy(h->signature, sig, 4);
     h->length = len;
     h->revision = rev;
-    memcpy(h->oem_id, "TNCLAW", 6);
-    memcpy(h->oem_table_id, "TENCLAW ", 8);
+    memcpy(h->oem_id, "TENBOX", 6);
+    memcpy(h->oem_table_id, "TENBOX  ", 8);
     h->oem_revision = 1;
-    memcpy(h->creator_id, "TNCL", 4);
+    memcpy(h->creator_id, "TNBX", 4);
     h->creator_revision = 1;
 }
 
@@ -334,7 +334,7 @@ GPA BuildAcpiTables(uint8_t* ram, uint32_t num_cpus,
 
     AcpiRsdp* rsdp = reinterpret_cast<AcpiRsdp*>(rsdp_base);
     memcpy(rsdp->signature, "RSD PTR ", 8);
-    memcpy(rsdp->oem_id, "TNCLAW", 6);
+    memcpy(rsdp->oem_id, "TENBOX", 6);
     rsdp->revision = 2;
     rsdp->rsdt_address = 0;
     rsdp->length = sizeof(AcpiRsdp);

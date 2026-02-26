@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a Debian base rootfs as qcow2 for TenClaw Phase 2.
+# Build a Debian base rootfs as qcow2 for TenBox Phase 2.
 # Requires: debootstrap, qemu-utils. Run as root in WSL2 or Linux.
 set -e
 
@@ -79,8 +79,8 @@ PRC
 sudo chmod +x "$MOUNT_DIR/usr/sbin/policy-rc.d"
 
 sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
-echo "root:tenclaw" | chpasswd
-echo "tenclaw-vm" > /etc/hostname
+echo "root:tenbox" | chpasswd
+echo "tenbox-vm" > /etc/hostname
 echo "/dev/vda / ext4 defaults 0 1" > /etc/fstab
 
 cat > /etc/apt/sources.list << 'APT'

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Extract a Debian vmlinuz for TenClaw testing.
+# Extract a Debian vmlinuz for TenBox testing.
 # Run this in WSL2 or a Debian-based Linux environment.
 set -e
 

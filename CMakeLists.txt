@@ -1,8 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-project(TenClaw VERSION 0.1.0 LANGUAGES C CXX)
+cmake_policy(SET CMP0091 NEW)
+project(TenBox VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(MSVC)
+    # Use static runtime in non-Debug configs to avoid msvcp DLL dependency on target machines.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "$<$<CONFIG:Debug>:MultiThreadedDebugDLL>$<$<NOT:$<CONFIG:Debug>>:MultiThreaded>")
+endif()
 
 include(FetchContent)
 
@@ -68,9 +75,9 @@ set(SOURCES
 
 configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 
-add_executable(TenClaw ${SOURCES})
-target_include_directories(TenClaw PRIVATE src/ ${CMAKE_CURRENT_BINARY_DIR})
+add_executable(TenBox ${SOURCES})
+target_include_directories(TenBox PRIVATE src/ ${CMAKE_CURRENT_BINARY_DIR})
 
-target_include_directories(TenClaw PRIVATE ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
-target_include_directories(TenClaw PRIVATE ${LWIP_INCLUDE_DIRS})
-target_link_libraries(TenClaw PRIVATE WinHvPlatform WinHvEmulation zlibstatic lwipcore ws2_32)
+target_include_directories(TenBox PRIVATE ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
+target_include_directories(TenBox PRIVATE ${LWIP_INCLUDE_DIRS})
+target_link_libraries(TenBox PRIVATE WinHvPlatform WinHvEmulation zlibstatic lwipcore ws2_32)

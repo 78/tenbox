@@ -97,7 +97,6 @@ bool Vm::AllocateMemory(uint64_t size) {
         LOG_ERROR("VirtualAlloc(%llu MB) failed", alloc / (1024 * 1024));
         return false;
     }
-    memset(base, 0, alloc);
 
     mem_.base = base;
     mem_.alloc_size = alloc;
