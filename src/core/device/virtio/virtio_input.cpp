@@ -83,11 +83,15 @@ void VirtioInputDevice::UpdateConfigData() {
                 config_.size = 0;
             }
         } else {
-            // Tablet (absolute pointer)
+            // Tablet (absolute pointer with scroll wheel)
             if (config_.subsel == EV_ABS) {
                 SetBit(config_.data, ABS_X);
                 SetBit(config_.data, ABS_Y);
                 config_.size = 1;
+            } else if (config_.subsel == EV_REL) {
+                SetBit(config_.data, REL_WHEEL);
+                SetBit(config_.data, REL_HWHEEL);
+                config_.size = static_cast<uint8_t>((REL_WHEEL / 8) + 1);
             } else if (config_.subsel == EV_KEY) {
                 SetBit(config_.data, BTN_LEFT);
                 SetBit(config_.data, BTN_RIGHT);

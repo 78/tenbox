@@ -56,6 +56,10 @@ void DisplayPanel::SetPointerCallback(PointerEventCallback cb) {
     pointer_cb_ = std::move(cb);
 }
 
+void DisplayPanel::SetWheelCallback(WheelEventCallback cb) {
+    wheel_cb_ = std::move(cb);
+}
+
 void DisplayPanel::UpdateFrame(const DisplayFrame& frame) {
     std::lock_guard<std::mutex> lock(fb_mutex_);
 
@@ -531,6 +535,13 @@ LRESULT CALLBACK DisplayPanel::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     case WM_MBUTTONUP:
     case WM_MOUSEMOVE:
         self->HandleMouse(msg, wp, lp);
+        return 0;
+
+    case WM_MOUSEWHEEL:
+        if (self->wheel_cb_) {
+            int16_t delta = GET_WHEEL_DELTA_WPARAM(wp);
+            self->wheel_cb_(delta / WHEEL_DELTA);
+        }
         return 0;
 
     case WM_KILLFOCUS:

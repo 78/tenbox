@@ -1224,6 +1224,14 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
             const auto& vm_id = impl_->records[impl_->selected_index].spec.vm_id;
             manager_.SendPointerEvent(vm_id, x, y, buttons);
         });
+    impl_->display_panel->SetWheelCallback(
+        [this](int32_t delta) {
+            if (impl_->selected_index < 0 ||
+                impl_->selected_index >= static_cast<int>(impl_->records.size()))
+                return;
+            const auto& vm_id = impl_->records[impl_->selected_index].spec.vm_id;
+            manager_.SendWheelEvent(vm_id, delta);
+        });
 
     // Wire callbacks: always cache to VM state; update UI only for current VM
     manager_.SetDisplayCallback(

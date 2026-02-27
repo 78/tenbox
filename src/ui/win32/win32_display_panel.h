@@ -17,6 +17,7 @@ class DisplayPanel {
 public:
     using KeyEventCallback = std::function<void(uint32_t evdev_code, bool pressed)>;
     using PointerEventCallback = std::function<void(int32_t x, int32_t y, uint32_t buttons)>;
+    using WheelEventCallback = std::function<void(int32_t delta)>;
 
     DisplayPanel();
     ~DisplayPanel();
@@ -26,6 +27,7 @@ public:
 
     void SetKeyCallback(KeyEventCallback cb);
     void SetPointerCallback(PointerEventCallback cb);
+    void SetWheelCallback(WheelEventCallback cb);
 
     // Update the internal framebuffer with a dirty-rect frame.
     // Thread-safe; triggers InvalidateRect.
@@ -88,4 +90,5 @@ private:
 
     KeyEventCallback key_cb_;
     PointerEventCallback pointer_cb_;
+    WheelEventCallback wheel_cb_;
 };

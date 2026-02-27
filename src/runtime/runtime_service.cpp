@@ -643,6 +643,17 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
         return;
     }
 
+    if (message.channel == ipc::Channel::kInput &&
+        message.kind == ipc::Kind::kRequest &&
+        message.type == "input.wheel_event") {
+        auto it_delta = message.fields.find("delta");
+        if (it_delta != message.fields.end() && vm_) {
+            int32_t delta = std::atoi(it_delta->second.c_str());
+            vm_->InjectWheelEvent(delta);
+        }
+        return;
+    }
+
     if (message.channel == ipc::Channel::kDisplay &&
         message.kind == ipc::Kind::kRequest &&
         message.type == "display.set_size") {

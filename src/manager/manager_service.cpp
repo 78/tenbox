@@ -633,6 +633,30 @@ bool ManagerService::SendPointerEvent(const std::string& vm_id,
         && written == encoded.size();
 }
 
+bool ManagerService::SendWheelEvent(const std::string& vm_id, int32_t delta) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kInput;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "input.wheel_event";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+    msg.fields["delta"] = std::to_string(delta);
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
 bool ManagerService::SetDisplaySize(const std::string& vm_id, uint32_t width, uint32_t height) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {

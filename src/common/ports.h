@@ -16,6 +16,7 @@ struct PointerEvent {
     int32_t x = 0;
     int32_t y = 0;
     uint32_t buttons = 0;
+    int32_t wheel_delta = 0;  // Vertical scroll: positive=up, negative=down
 };
 
 struct KeyboardEvent {

@@ -22,6 +22,10 @@ constexpr uint16_t MSC_SCAN   = 0x04;
 constexpr uint16_t ABS_X = 0x00;
 constexpr uint16_t ABS_Y = 0x01;
 
+// Relative axis codes (for mouse wheel)
+constexpr uint16_t REL_WHEEL  = 0x08;  // Vertical scroll
+constexpr uint16_t REL_HWHEEL = 0x06;  // Horizontal scroll
+
 // Mouse button codes (evdev)
 constexpr uint16_t BTN_LEFT   = 0x110;
 constexpr uint16_t BTN_RIGHT  = 0x111;

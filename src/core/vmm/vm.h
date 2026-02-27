@@ -62,6 +62,7 @@ public:
     void UpdatePortForwards(const std::vector<PortForward>& forwards);
     void InjectKeyEvent(uint32_t evdev_code, bool pressed);
     void InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons);
+    void InjectWheelEvent(int32_t delta);
     void SetDisplaySize(uint32_t width, uint32_t height);
 
     // Clipboard operations

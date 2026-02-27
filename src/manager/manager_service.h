@@ -130,6 +130,7 @@ public:
 
     bool SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed);
     bool SendPointerEvent(const std::string& vm_id, int32_t x, int32_t y, uint32_t buttons);
+    bool SendWheelEvent(const std::string& vm_id, int32_t delta);
     bool SetDisplaySize(const std::string& vm_id, uint32_t width, uint32_t height);
 
     // Clipboard operations: host to VM
