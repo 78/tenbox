@@ -56,13 +56,18 @@ void VirtioGpuDevice::WriteConfig(uint32_t offset, uint8_t size, uint32_t value)
 }
 
 void VirtioGpuDevice::OnStatusChange(uint32_t new_status) {
+    if (new_status == 0) {
+        resources_.clear();
+        scanout_resource_id_ = 0;
+    }
 }
 
 void VirtioGpuDevice::OnQueueNotify(uint32_t queue_idx, VirtQueue& vq) {
     if (queue_idx == 0) {
         ProcessControlQueue(vq);
+    } else if (queue_idx == 1) {
+        ProcessCursorQueue(vq);
     }
-    // queue_idx == 1: cursor queue, not implemented
 }
 
 uint8_t* VirtioGpuDevice::GpaToHva(uint64_t gpa) const {
@@ -157,6 +162,17 @@ void VirtioGpuDevice::ProcessControlQueue(VirtQueue& vq) {
             break;
         }
 
+        // If the request had VIRTIO_GPU_FLAG_FENCE set, copy fence info to response.
+        // The guest driver waits on dma_fence which is signaled only when the
+        // response contains matching flags and fence_id.
+        if (resp_len >= sizeof(VirtioGpuCtrlHdr) &&
+            (hdr->flags & VIRTIO_GPU_FLAG_FENCE)) {
+            auto* resp_hdr = reinterpret_cast<VirtioGpuCtrlHdr*>(resp.data());
+            resp_hdr->flags |= VIRTIO_GPU_FLAG_FENCE;
+            resp_hdr->fence_id = hdr->fence_id;
+            resp_hdr->ctx_id = hdr->ctx_id;
+        }
+
         // Copy response into writable descriptors
         uint32_t written = 0;
         for (auto& elem : resp_elems) {
@@ -167,6 +183,38 @@ void VirtioGpuDevice::ProcessControlQueue(VirtQueue& vq) {
         }
 
         vq.PushUsed(head, written);
+    }
+
+    if (mmio_) mmio_->NotifyUsedBuffer();
+}
+
+void VirtioGpuDevice::ProcessCursorQueue(VirtQueue& vq) {
+    uint16_t head;
+    while (vq.PopAvail(&head)) {
+        std::vector<VirtqChainElem> chain;
+        if (!vq.WalkChain(head, &chain)) {
+            vq.PushUsed(head, 0);
+            continue;
+        }
+
+        // Cursor commands typically don't have response buffers, but we need
+        // to consume the request to unblock the guest. Parse the command type
+        // for potential future cursor rendering support.
+        std::vector<uint8_t> req_buf;
+        for (auto& elem : chain) {
+            if (!elem.writable) {
+                req_buf.insert(req_buf.end(), elem.addr, elem.addr + elem.len);
+            }
+        }
+
+        if (req_buf.size() >= sizeof(VirtioGpuCtrlHdr)) {
+            auto* hdr = reinterpret_cast<const VirtioGpuCtrlHdr*>(req_buf.data());
+            (void)hdr; // Cursor commands (UPDATE_CURSOR, MOVE_CURSOR) are acknowledged
+                       // by simply consuming them. Hardware cursor rendering is optional.
+        }
+
+        // Mark the buffer as used (no response data for cursor commands)
+        vq.PushUsed(head, 0);
     }
 
     if (mmio_) mmio_->NotifyUsedBuffer();
@@ -199,7 +247,8 @@ void VirtioGpuDevice::CmdResourceCreate2d(const uint8_t* req, uint32_t req_len,
         return;
     }
     auto* cmd = reinterpret_cast<const VirtioGpuResourceCreate2d*>(req);
-    if (cmd->resource_id == 0 || cmd->width == 0 || cmd->height == 0) {
+    if (cmd->resource_id == 0 || cmd->width == 0 || cmd->height == 0 ||
+        cmd->width > 16384 || cmd->height > 16384) {
         WriteResponse(resp, VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER, resp_len);
         return;
     }
@@ -282,6 +331,10 @@ void VirtioGpuDevice::CmdTransferToHost2d(const uint8_t* req, uint32_t req_len,
     uint32_t rw = cmd->r.width;
     uint32_t rh = cmd->r.height;
 
+    if (rx >= res.width || ry >= res.height) {
+        WriteResponse(resp, VIRTIO_GPU_RESP_OK_NODATA, resp_len);
+        return;
+    }
     if (rx + rw > res.width) rw = res.width - rx;
     if (ry + rh > res.height) rh = res.height - ry;
 
@@ -291,6 +344,8 @@ void VirtioGpuDevice::CmdTransferToHost2d(const uint8_t* req, uint32_t req_len,
         uint8_t* hva = GpaToHva(page.gpa);
         if (hva) {
             linear.insert(linear.end(), hva, hva + page.length);
+        } else {
+            linear.resize(linear.size() + page.length, 0);
         }
     }
 
@@ -337,6 +392,10 @@ void VirtioGpuDevice::CmdResourceFlush(const uint8_t* req, uint32_t req_len,
         uint32_t dw = cmd->r.width;
         uint32_t dh = cmd->r.height;
 
+        if (dx >= res.width || dy >= res.height) {
+            WriteResponse(resp, VIRTIO_GPU_RESP_OK_NODATA, resp_len);
+            return;
+        }
         if (dx + dw > res.width) dw = res.width - dx;
         if (dy + dh > res.height) dh = res.height - dy;
 
@@ -385,9 +444,18 @@ void VirtioGpuDevice::CmdAttachBacking(const uint8_t* req, uint32_t req_len,
     res.backing.clear();
 
     uint32_t nr = cmd->nr_entries;
+    if (nr > 16384) {
+        WriteResponse(resp, VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER, resp_len);
+        return;
+    }
     if (extra && extra_len >= nr * sizeof(VirtioGpuMemEntry)) {
         auto* entries = reinterpret_cast<const VirtioGpuMemEntry*>(extra);
         for (uint32_t i = 0; i < nr; ++i) {
+            if (entries[i].length == 0 || entries[i].length > 64 * 1024 * 1024) {
+                res.backing.clear();
+                WriteResponse(resp, VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER, resp_len);
+                return;
+            }
             res.backing.push_back({entries[i].addr, entries[i].length});
         }
     }

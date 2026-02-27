@@ -18,6 +18,10 @@ constexpr uint32_t VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D   = 0x0105;
 constexpr uint32_t VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING = 0x0106;
 constexpr uint32_t VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING = 0x0107;
 
+// Cursor commands (spec 5.7.6.8)
+constexpr uint32_t VIRTIO_GPU_CMD_UPDATE_CURSOR = 0x0300;
+constexpr uint32_t VIRTIO_GPU_CMD_MOVE_CURSOR   = 0x0301;
+
 // Response types
 constexpr uint32_t VIRTIO_GPU_RESP_OK_NODATA            = 0x1100;
 constexpr uint32_t VIRTIO_GPU_RESP_OK_DISPLAY_INFO      = 0x1101;
@@ -37,6 +41,9 @@ constexpr uint32_t VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM = 134;
 
 // Feature bits
 constexpr uint64_t VIRTIO_GPU_F_EDID = 1ULL << 1;
+
+// Control header flags
+constexpr uint32_t VIRTIO_GPU_FLAG_FENCE = 1;
 
 #pragma pack(push, 1)
 struct VirtioGpuCtrlHdr {
@@ -119,6 +126,22 @@ struct VirtioGpuResourceDetachBacking {
     uint32_t padding;
 };
 
+struct VirtioGpuCursorPos {
+    uint32_t scanout_id;
+    uint32_t x;
+    uint32_t y;
+    uint32_t padding;
+};
+
+struct VirtioGpuUpdateCursor {
+    VirtioGpuCtrlHdr hdr;
+    VirtioGpuCursorPos pos;
+    uint32_t resource_id;
+    uint32_t hot_x;
+    uint32_t hot_y;
+    uint32_t padding;
+};
+
 struct VirtioGpuConfig {
     uint32_t events_read;
     uint32_t events_clear;
@@ -164,8 +187,7 @@ private:
     };
 
     void ProcessControlQueue(VirtQueue& vq);
-    void HandleCommand(const uint8_t* req_buf, uint32_t req_len,
-                       uint8_t* resp_buf, uint32_t resp_max, uint32_t* resp_len);
+    void ProcessCursorQueue(VirtQueue& vq);
 
     void CmdGetDisplayInfo(const VirtioGpuCtrlHdr* hdr,
                            uint8_t* resp, uint32_t* resp_len);

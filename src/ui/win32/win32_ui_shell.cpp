@@ -119,14 +119,15 @@ struct Win32UiShell::Impl {
         ansi_state = kNormal;
     }
 
-    void AppendConsoleData(const std::string& raw) {
+    std::string AppendConsoleData(const std::string& raw) {
+        std::string added;
         for (unsigned char ch : raw) {
             switch (ansi_state) {
             case kNormal:
                 if (ch == 0x1b) { ansi_state = kEsc; break; }
-                if (ch == '\n') { console_text += "\r\n"; break; }
-                if (ch == '\t') { console_text.push_back('\t'); break; }
-                if (ch >= 0x20 && ch <= 0x7e) { console_text.push_back(ch); break; }
+                if (ch == '\n') { console_text += "\r\n"; added += "\r\n"; break; }
+                if (ch == '\t') { console_text.push_back('\t'); added.push_back('\t'); break; }
+                if (ch >= 0x20 && ch <= 0x7e) { console_text.push_back(ch); added.push_back(ch); break; }
                 break;
             case kEsc:
                 ansi_state = (ch == '[') ? kCsi : kNormal;
@@ -139,6 +140,7 @@ struct Win32UiShell::Impl {
         if (console_text.size() > kMaxConsoleLen) {
             console_text.erase(0, console_text.size() - kMaxConsoleLen);
         }
+        return added;
     }
 };
 
@@ -926,9 +928,8 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
             if (impl_->records[impl_->selected_index].spec.vm_id != vm_id)
                 return;
 
-            size_t old_size = impl_->console_text.size();
-            impl_->AppendConsoleData(data);
-            if (impl_->console_text.size() != old_size) {
+            std::string added = impl_->AppendConsoleData(data);
+            if (!added.empty()) {
                 // Trim the Edit control when it gets too large
                 int ctl_len = GetWindowTextLengthA(impl_->console);
                 if (ctl_len > static_cast<int>(kConsoleTrimAt)) {
@@ -940,7 +941,6 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                 }
 
                 SendMessageA(impl_->console, EM_SETSEL, ctl_len, ctl_len);
-                std::string added = impl_->console_text.substr(old_size);
                 SendMessageA(impl_->console, EM_REPLACESEL, FALSE,
                     reinterpret_cast<LPARAM>(added.c_str()));
             }
