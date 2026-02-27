@@ -20,6 +20,7 @@ public:
 
     void PushInput(uint8_t byte);
     bool HasInput() const;
+    void CheckAndRaiseIrq() { RaiseIrqIfNeeded(); }
 
 private:
     static constexpr uint16_t kTHR = 0;

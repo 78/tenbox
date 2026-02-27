@@ -10,9 +10,9 @@ static constexpr uint8_t  kVirtioNetIrq         = 6;
 static constexpr uint64_t kVirtioKbdMmioBase    = 0xd0000400;
 static constexpr uint8_t  kVirtioKbdIrq         = 11;
 static constexpr uint64_t kVirtioTabletMmioBase = 0xd0000600;
-static constexpr uint8_t  kVirtioTabletIrq      = 12;
+static constexpr uint8_t  kVirtioTabletIrq      = 14;
 static constexpr uint64_t kVirtioGpuMmioBase    = 0xd0000800;
-static constexpr uint8_t  kVirtioGpuIrq         = 13;
+static constexpr uint8_t  kVirtioGpuIrq         = 15;
 
 Vm::~Vm() {
     running_ = false;
@@ -318,7 +318,7 @@ void Vm::InputThreadFunc() {
         for (size_t i = 0; i < read; ++i) {
             uart_.PushInput(buf[i]);
         }
-        InjectIrq(4);
+        uart_.CheckAndRaiseIrq();
     }
 }
 
@@ -462,7 +462,7 @@ void Vm::InjectConsoleBytes(const uint8_t* data, size_t size) {
     for (size_t i = 0; i < size; ++i) {
         uart_.PushInput(data[i]);
     }
-    InjectIrq(4);
+    uart_.CheckAndRaiseIrq();
 }
 
 void Vm::SetNetLinkUp(bool up) {

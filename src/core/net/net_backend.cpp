@@ -562,9 +562,9 @@ void NetBackend::SendDhcpReply(uint8_t type, uint32_t xid,
 
 void NetBackend::InjectFrame(const uint8_t* frame, uint32_t len) {
     if (!link_up_) return;
-    if (virtio_net_ && virtio_net_->InjectRx(frame, len)) {
-        if (irq_callback_) irq_callback_();
-    }
+    // InjectRx() already calls mmio_->NotifyUsedBuffer() which fires the
+    // MMIO-level IRQ callback, so no additional irq_callback_() here.
+    virtio_net_->InjectRx(frame, len);
 }
 
 // ============================================================

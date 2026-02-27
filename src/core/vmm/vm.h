@@ -29,7 +29,7 @@ struct VmConfig {
     std::string kernel_path;
     std::string initrd_path;
     std::string disk_path;
-    std::string cmdline = "console=ttyS0 earlyprintk=serial lapic no_timer_check tsc=reliable";
+    std::string cmdline = "console=ttyS0 earlyprintk=serial lapic no_timer_check tsc=reliable i8042.noprobe";
     uint64_t memory_mb = 256;
     uint32_t cpu_count = 1;
     bool net_link_up = false;

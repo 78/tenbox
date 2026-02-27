@@ -2,6 +2,7 @@
 
 #include "core/device/device.h"
 #include <array>
+#include <mutex>
 
 // Minimal I/O APIC emulation at 0xFEC00000.
 // Provides the register interface the kernel expects during initialization.
@@ -33,6 +34,7 @@ private:
 
     // Each redirection entry is 64 bits (low + high).
     // Per Intel I/O APIC spec, reset value has bit 16 (mask) set.
+    mutable std::mutex mutex_;
     std::array<uint64_t, kMaxRedirEntries> redir_table_;
 
     void ResetRedirTable() {

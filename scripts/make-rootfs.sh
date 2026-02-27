@@ -115,36 +115,7 @@ cat > /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf << 'INNER'
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I 115200 linux
-INNER
-
-cat > /etc/profile.d/term-size.sh << 'RESIZE'
-# Provide a `resize` command for serial consoles and auto-detect
-# terminal size on login. Uses DSR (ESC[6n) cursor position query:
-# move cursor to far corner (999,999 → clamped to actual size),
-# query position, then set stty rows/cols.
-resize() {
-    [ -t 0 ] && [ -t 1 ] || return 0
-    local saved rows cols _
-    saved=$(stty -g 2>/dev/null)
-    stty raw -echo min 0 time 20 2>/dev/null
-    printf '\033[s\033[999;999H\033[6n\033[u'
-    IFS='[;' read -r -d R -t 2 _ rows cols 2>/dev/null
-    stty "$saved" 2>/dev/null
-    if [ -n "$rows" ] && [ "$rows" -gt 0 ] 2>/dev/null &&
-       [ -n "$cols" ] && [ "$cols" -gt 0 ] 2>/dev/null; then
-        stty rows "$rows" cols "$cols"
-        export LINES="$rows" COLUMNS="$cols"
-    fi
-}
-case "$(tty 2>/dev/null)" in /dev/ttyS*) resize ;; esac
-RESIZE
-
-mkdir -p /etc/udev/rules.d
-cat > /etc/udev/rules.d/99-virtio-input.rules << 'UDEV'
-SUBSYSTEM=="input", ATTR{name}=="virtio-keyboard", ENV{ID_INPUT}="1", ENV{ID_INPUT_KEYBOARD}="1"
-SUBSYSTEM=="input", ATTR{name}=="virtio-tablet", ENV{ID_INPUT}="1", ENV{ID_INPUT_MOUSE}="1"
-UDEV
-
+INNER 
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf << 'LDM'
 [Seat:*]

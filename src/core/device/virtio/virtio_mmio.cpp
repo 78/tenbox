@@ -19,6 +19,7 @@ void VirtioMmioDevice::DoReset() {
     driver_features_sel_ = 0;
     driver_features_ = 0;
     queue_sel_ = 0;
+    shm_sel_ = 0;
     interrupt_status_.store(0, std::memory_order_relaxed);
 
     for (uint32_t i = 0; i < queues_.size(); i++) {
@@ -71,6 +72,14 @@ void VirtioMmioDevice::MmioRead(uint64_t offset, uint8_t size,
         break;
     case kConfigGeneration:
         val = config_generation_;
+        break;
+    case kSHMLenLow:
+    case kSHMLenHigh:
+    case kSHMBaseLow:
+    case kSHMBaseHigh:
+        // No shared memory regions supported — return all-ones so the
+        // kernel's virtio_get_shm_region() interprets this as "not present".
+        val = 0xFFFFFFFF;
         break;
     default:
         LOG_DEBUG("VirtIO MMIO: unhandled read offset=0x%03X", (uint32_t)offset);
@@ -180,6 +189,9 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
             queue_configs_[queue_sel_].device_addr =
                 (queue_configs_[queue_sel_].device_addr & 0x00000000FFFFFFFFULL) |
                 (static_cast<uint64_t>(val) << 32);
+        break;
+    case kSHMSel:
+        shm_sel_ = val;
         break;
     default:
         LOG_DEBUG("VirtIO MMIO: unhandled write offset=0x%03X val=0x%X",

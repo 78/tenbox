@@ -1,43 +1,63 @@
 #!/bin/bash
 # Build a minimal BusyBox initramfs for TenBox testing.
 # Includes virtio kernel modules for block device support.
-# Run this in WSL2 or a Linux environment.
+# Only requires: curl, gzip, dpkg-deb, cpio. Run in WSL2 or Linux.
+#
+# Usage:
+#   ./make-initramfs.sh [output_dir] [suite]
+#     output_dir - where to place initramfs.cpio.gz (default: ../build/share)
+#     suite      - Debian suite: bookworm(6.x), bullseye(5.x), etc. Default: bookworm
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../build}" && cd "${1:-$SCRIPT_DIR/../build}" && pwd)"
+OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../build/share}" && cd "${1:-$SCRIPT_DIR/../build/share}" && pwd)"
+SUITE="${2:-bookworm}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 
-echo "[1/5] Downloading BusyBox static binary..."
+MIRROR="https://deb.debian.org/debian"
+ARCH="amd64"
+
 cd "$WORKDIR"
-apt-get download busybox-static 2>/dev/null || \
-    apt download busybox-static 2>/dev/null
-dpkg-deb -x busybox-static*.deb extract/
-cp extract/bin/busybox "$WORKDIR/busybox"
+
+echo "[1/5] Resolving kernel package from $SUITE ..."
+curl -fsSL "$MIRROR/dists/$SUITE/main/binary-$ARCH/Packages.gz" | gunzip > Packages
+
+META_BLOCK=$(awk '/^Package: linux-image-amd64$/,/^$/' Packages)
+KPKG=$(echo "$META_BLOCK" | grep -oP '^Depends:.*\Klinux-image-[0-9]\S+')
+KVER=$(echo "$KPKG" | sed 's/^linux-image-//')
+if [ -z "$KPKG" ] || [ -z "$KVER" ]; then
+    echo "Error: could not resolve kernel package from $SUITE." >&2
+    exit 1
+fi
+echo "  -> kernel package: $KPKG  (version: $KVER)"
+
+echo "[2/5] Downloading BusyBox & kernel package ..."
+# BusyBox
+BB_DEB_PATH=$(awk '/^Package: busybox-static$/,/^$/' Packages | grep -oP '^Filename: \K.*')
+if [ -z "$BB_DEB_PATH" ]; then
+    echo "Error: could not find busybox-static in $SUITE." >&2
+    exit 1
+fi
+curl -fsSL -o busybox-static.deb "$MIRROR/$BB_DEB_PATH"
+dpkg-deb -x busybox-static.deb bb_extract/
+cp bb_extract/bin/busybox "$WORKDIR/busybox"
 chmod +x "$WORKDIR/busybox"
 
-echo "[2/5] Creating initramfs layout..."
+# Kernel (for modules)
+KERN_DEB_PATH=$(awk "/^Package: ${KPKG}$/,/^$/" Packages | grep -oP '^Filename: \K.*')
+if [ -z "$KERN_DEB_PATH" ]; then
+    echo "Error: could not find .deb path for $KPKG." >&2
+    exit 1
+fi
+echo "  -> $MIRROR/$KERN_DEB_PATH"
+curl -fsSL -o kernel.deb "$MIRROR/$KERN_DEB_PATH"
+mkdir -p kmod_extract
+dpkg-deb -x kernel.deb kmod_extract/
+
+echo "[3/5] Creating initramfs layout & extracting modules ..."
 mkdir -p "$WORKDIR/initramfs"/{bin,dev,proc,sys,etc,tmp,lib/modules}
 cp "$WORKDIR/busybox" "$WORKDIR/initramfs/bin/"
-
-echo "[3/5] Extracting virtio kernel modules from Debian package..."
-# The vmlinuz we use is from a specific Debian kernel package.
-# Download and extract modules from that same package to ensure version match.
-KVER="5.10.0-38-amd64"
-KPKG="linux-image-${KVER}"
-echo "  Downloading $KPKG (contains kernel modules) ..."
-
-cd "$WORKDIR"
-apt-get download "$KPKG" 2>/dev/null || \
-    apt download "$KPKG" 2>/dev/null || {
-    echo "ERROR: Failed to download $KPKG."
-    echo "  Try: apt-cache search linux-image-5.10.0"
-    echo "  to find the correct package name."
-    exit 1
-}
-mkdir -p kmod_extract
-dpkg-deb -x linux-image-*.deb kmod_extract/
 
 MODDIR="kmod_extract/lib/modules/$KVER/kernel"
 DESTDIR="$WORKDIR/initramfs/lib/modules"
@@ -53,9 +73,11 @@ VIRTIO_MODS=(
     "drivers/net/virtio_net.ko"
     "drivers/virtio/virtio_input.ko"
     "drivers/input/evdev.ko"
+    "drivers/media/rc/rc-core.ko"
     "drivers/media/cec/cec.ko"
     "drivers/gpu/drm/drm.ko"
     "drivers/gpu/drm/drm_kms_helper.ko"
+    "drivers/gpu/drm/drm_shmem_helper.ko"
     "drivers/virtio/virtio_dma_buf.ko"
     "drivers/gpu/drm/virtio/virtio-gpu.ko"
     "fs/mbcache.ko"
@@ -119,9 +141,9 @@ for mod in virtio virtio_ring virtio_mmio virtio_blk failover net_failover virti
     fi
 done
 
-# Load DRM / virtio-gpu modules (order matters: cec before drm_kms_helper,
-# virtio_dma_buf before virtio-gpu)
-for mod in cec drm drm_kms_helper virtio_dma_buf virtio-gpu; do
+# Load DRM / virtio-gpu modules (order matters: rc-core before cec,
+# drm_shmem_helper before virtio-gpu)
+for mod in rc-core cec drm drm_kms_helper drm_shmem_helper virtio_dma_buf virtio-gpu; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"
@@ -194,5 +216,5 @@ cd "$WORKDIR/initramfs"
 find . | cpio -o -H newc 2>/dev/null | gzip > "$WORKDIR/initramfs.cpio.gz"
 
 echo "[5/5] Copying output..."
-cp "$WORKDIR/initramfs.cpio.gz" "$OUTDIR/share/initramfs.cpio.gz"
-echo "Done: $OUTDIR/share/initramfs.cpio.gz ($(du -h "$OUTDIR/share/initramfs.cpio.gz" | cut -f1))"
+cp "$WORKDIR/initramfs.cpio.gz" "$OUTDIR/initramfs.cpio.gz"
+echo "Done: $OUTDIR/initramfs.cpio.gz ($(du -h "$OUTDIR/initramfs.cpio.gz" | cut -f1))"

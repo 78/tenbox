@@ -75,6 +75,11 @@ private:
         kQueueDriverHigh  = 0x094,
         kQueueDeviceLow   = 0x0A0,
         kQueueDeviceHigh  = 0x0A4,
+        kSHMSel           = 0x0AC,
+        kSHMLenLow        = 0x0B0,
+        kSHMLenHigh       = 0x0B4,
+        kSHMBaseLow       = 0x0B8,
+        kSHMBaseHigh      = 0x0BC,
         kConfigGeneration = 0x0FC,
         kConfig           = 0x100,
     };
@@ -102,4 +107,5 @@ private:
         uint64_t device_addr = 0;
     };
     std::vector<QueueConfig> queue_configs_;
+    uint32_t shm_sel_ = 0;
 };

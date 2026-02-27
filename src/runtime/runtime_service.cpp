@@ -23,12 +23,26 @@ HANDLE AsHandle(void* handle) {
 void ManagedConsolePort::Write(const uint8_t* data, size_t size) {
     if (!data || size == 0) return;
     std::function<void(const uint8_t*, size_t)> handler;
+    std::string chunk;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        handler = write_handler_;
+        // 累积 UART 每次写入的单个字符，做简单批量。
+        pending_write_.append(reinterpret_cast<const char*>(data), size);
+
+        // 优先按行刷新：找到最后一个换行符之前的内容一次性输出。
+        size_t cut = pending_write_.find_last_of('\n');
+        if (cut != std::string::npos) {
+            chunk.assign(pending_write_.data(), cut + 1);
+            pending_write_.erase(0, cut + 1);
+            handler = write_handler_;
+        } else if (pending_write_.size() >= kFlushThreshold) {
+            // 没有换行但累计太多，也刷一次，避免尾部长期不输出。
+            chunk.swap(pending_write_);
+            handler = write_handler_;
+        }
     }
-    if (handler) {
-        handler(data, size);
+    if (handler && !chunk.empty()) {
+        handler(reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size());
     }
 }
 
@@ -141,8 +155,22 @@ std::vector<uint8_t> DecodeHex(const std::string& value) {
 RuntimeControlService::RuntimeControlService(std::string vm_id, std::string pipe_name)
     : vm_id_(std::move(vm_id)), pipe_name_(std::move(pipe_name)) {
     console_port_->SetWriteHandler([this](const uint8_t* data, size_t size) {
-        std::lock_guard<std::mutex> lock(console_buf_mutex_);
-        console_buf_.append(reinterpret_cast<const char*>(data), size);
+        if (!data || size == 0) return;
+
+        ipc::Message event;
+        event.kind = ipc::Kind::kEvent;
+        event.channel = ipc::Channel::kConsole;
+        event.type = "console.data";
+        event.vm_id = vm_id_;
+        event.request_id = next_event_id_++;
+        event.fields["data_hex"] = EncodeHex(data, size);
+
+        std::string encoded = ipc::Encode(event);
+        {
+            std::lock_guard<std::mutex> lock(send_queue_mutex_);
+            console_queue_.push_back(std::move(encoded));
+        }
+        send_cv_.notify_one();
     });
 
     display_port_->SetFrameHandler([this](const DisplayFrame& frame) {
@@ -161,7 +189,16 @@ RuntimeControlService::RuntimeControlService(std::string vm_id, std::string pipe
         event.fields["dirty_x"] = std::to_string(frame.dirty_x);
         event.fields["dirty_y"] = std::to_string(frame.dirty_y);
         event.payload = frame.pixels;
-        SendWithPayload(event);
+
+        std::string encoded = ipc::Encode(event);
+        {
+            std::lock_guard<std::mutex> lock(send_queue_mutex_);
+            frame_queue_.push_back(std::move(encoded));
+            if (frame_queue_.size() > kMaxPendingFrames) {
+                frame_queue_.pop_front();
+            }
+        }
+        send_cv_.notify_one();
     });
 }
 
@@ -171,13 +208,73 @@ RuntimeControlService::~RuntimeControlService() {
 
 bool RuntimeControlService::Start() {
     if (running_) return true;
+    if (!EnsureClientConnected()) {
+        return false;
+    }
+
     running_ = true;
-    thread_ = std::thread(&RuntimeControlService::RunLoop, this);
+
+    send_thread_ = std::thread([this]() {
+        HANDLE h = AsHandle(pipe_handle_);
+        while (running_) {
+            std::string batch;
+            {
+                std::unique_lock<std::mutex> lock(send_queue_mutex_);
+                send_cv_.wait(lock, [this]() {
+                    return !running_ || !console_queue_.empty() || !frame_queue_.empty();
+                });
+                if (!running_) {
+                    break;
+                }
+
+                // 优先发送所有小的高优先级消息（console/control 等）。
+                while (!console_queue_.empty()) {
+                    batch += std::move(console_queue_.front());
+                    console_queue_.pop_front();
+                }
+
+                // 然后发送若干帧显示数据（按顺序），数量受限以避免长时间占用管道。
+                size_t frames_to_send = frame_queue_.size();
+                while (frames_to_send-- > 0 && !frame_queue_.empty()) {
+                    batch += std::move(frame_queue_.front());
+                    frame_queue_.pop_front();
+                }
+            }
+
+            if (batch.empty()) {
+                continue;
+            }
+
+            std::lock_guard<std::mutex> send_lock(send_mutex_);
+            h = AsHandle(pipe_handle_);
+            if (!h || h == INVALID_HANDLE_VALUE) {
+                break;
+            }
+
+            const char* data = batch.data();
+            size_t remaining = batch.size();
+            while (remaining > 0) {
+                DWORD written = 0;
+                if (!WriteFile(h, data, static_cast<DWORD>(remaining), &written, nullptr)) {
+                    break;
+                }
+                if (written == 0) {
+                    break;
+                }
+                data += written;
+                remaining -= written;
+            }
+        }
+    });
+
+    recv_thread_ = std::thread(&RuntimeControlService::RunLoop, this);
     return true;
 }
 
 void RuntimeControlService::Stop() {
     running_ = false;
+    send_cv_.notify_all();
+
     HANDLE h = AsHandle(pipe_handle_);
     if (h && h != INVALID_HANDLE_VALUE) {
         CancelIoEx(h, nullptr);
@@ -185,8 +282,11 @@ void RuntimeControlService::Stop() {
         CloseHandle(h);
         pipe_handle_ = nullptr;
     }
-    if (thread_.joinable()) {
-        thread_.join();
+    if (send_thread_.joinable()) {
+        send_thread_.join();
+    }
+    if (recv_thread_.joinable()) {
+        recv_thread_.join();
     }
 }
 
@@ -242,29 +342,23 @@ bool RuntimeControlService::EnsureClientConnected() {
 }
 
 bool RuntimeControlService::Send(const ipc::Message& message) {
-    std::lock_guard<std::mutex> lock(send_mutex_);
-    HANDLE h = AsHandle(pipe_handle_);
-    if (!h || h == INVALID_HANDLE_VALUE) return false;
     std::string encoded = ipc::Encode(message);
-    DWORD written = 0;
-    if (!WriteFile(h, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)) {
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(send_queue_mutex_);
+        console_queue_.push_back(std::move(encoded));
     }
-    return written == encoded.size();
+    send_cv_.notify_one();
+    return true;
 }
 
 bool RuntimeControlService::SendWithPayload(const ipc::Message& message) {
-    std::lock_guard<std::mutex> lock(send_mutex_);
-    HANDLE h = AsHandle(pipe_handle_);
-    if (!h || h == INVALID_HANDLE_VALUE) return false;
-
-    // Encode header + raw binary payload in one write when possible
     std::string encoded = ipc::Encode(message);
-    DWORD written = 0;
-    if (!WriteFile(h, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)) {
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(send_queue_mutex_);
+        console_queue_.push_back(std::move(encoded));
     }
-    return written == encoded.size();
+    send_cv_.notify_one();
+    return true;
 }
 
 void RuntimeControlService::HandleMessage(const ipc::Message& message) {
@@ -411,25 +505,6 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
     }
 }
 
-void RuntimeControlService::FlushConsoleBuf() {
-    std::string data;
-    {
-        std::lock_guard<std::mutex> lock(console_buf_mutex_);
-        if (console_buf_.empty()) return;
-        data.swap(console_buf_);
-    }
-
-    ipc::Message event;
-    event.kind = ipc::Kind::kEvent;
-    event.channel = ipc::Channel::kConsole;
-    event.type = "console.data";
-    event.vm_id = vm_id_;
-    event.request_id = next_event_id_++;
-    event.fields["data_hex"] = EncodeHex(
-        reinterpret_cast<const uint8_t*>(data.data()), data.size());
-    Send(event);
-}
-
 void RuntimeControlService::RunLoop() {
     if (!EnsureClientConnected()) {
         return;
@@ -438,18 +513,10 @@ void RuntimeControlService::RunLoop() {
     HANDLE h = AsHandle(pipe_handle_);
     std::array<char, 65536> buf{};
     std::string pending;
-    last_console_flush_ = std::chrono::steady_clock::now();
-
     size_t payload_needed = 0;
     ipc::Message pending_msg;
 
     while (running_) {
-        auto now = std::chrono::steady_clock::now();
-        if (now - last_console_flush_ >= std::chrono::milliseconds(16)) {
-            FlushConsoleBuf();
-            last_console_flush_ = now;
-        }
-
         DWORD available = 0;
         if (!PeekNamedPipe(h, nullptr, 0, nullptr, &available, nullptr)) {
             DWORD err = GetLastError();
@@ -510,6 +577,4 @@ void RuntimeControlService::RunLoop() {
             HandleMessage(*decoded);
         }
     }
-
-    FlushConsoleBuf();
 }

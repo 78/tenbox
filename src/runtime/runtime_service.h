@@ -27,10 +27,13 @@ public:
     void SetWriteHandler(std::function<void(const uint8_t*, size_t)> handler);
 
 private:
+    static constexpr size_t kFlushThreshold = 512;
+
     std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<uint8_t> queue_;
     std::function<void(const uint8_t*, size_t)> write_handler_;
+    std::string pending_write_;
 };
 
 class ManagedInputPort final : public InputPort {
@@ -77,7 +80,6 @@ private:
     void RunLoop();
     void HandleMessage(const ipc::Message& message);
     bool EnsureClientConnected();
-    void FlushConsoleBuf();
 
     std::string vm_id_;
     std::string pipe_name_;
@@ -86,15 +88,27 @@ private:
     std::shared_ptr<ManagedDisplayPort> display_port_ = std::make_shared<ManagedDisplayPort>();
 
     std::atomic<bool> running_{false};
-    std::thread thread_;
+
+    // Dedicated threads for sending and receiving IPC over the named pipe.
+    std::thread send_thread_;
+    std::thread recv_thread_;
+
+    // Protects pipe_handle_ and low-level WriteFile operations.
     std::mutex send_mutex_;
     void* pipe_handle_ = nullptr;
     Vm* vm_ = nullptr;
-    uint64_t next_event_id_ = 1;
+    std::atomic<uint64_t> next_event_id_{1};
 
-    std::mutex console_buf_mutex_;
-    std::string console_buf_;
-    std::chrono::steady_clock::time_point last_console_flush_{};
+    // High-priority queue for small, latency-sensitive messages
+    // (console output, control responses, etc.).
+    std::mutex send_queue_mutex_;
+    std::condition_variable send_cv_;
+    std::deque<std::string> console_queue_;
+
+    // Bounded queue for display frames. Preserves dirty-rect ordering
+    // but caps memory usage.
+    static constexpr size_t kMaxPendingFrames = 8;
+    std::deque<std::string> frame_queue_;
 };
 
 std::string EncodeHex(const uint8_t* data, size_t size);

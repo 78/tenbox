@@ -2,16 +2,16 @@
 
 bool IoApic::GetRedirEntry(uint8_t irq, uint64_t* entry) const {
     if (irq >= kMaxRedirEntries) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
     *entry = redir_table_[irq];
     return true;
 }
 
 void IoApic::MmioRead(uint64_t offset, uint8_t size, uint64_t* value) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (offset == 0x00) {
-        // IOREGSEL - return current index
         *value = index_;
     } else if (offset == 0x10) {
-        // IOWIN - read selected register
         *value = ReadRegister();
     } else {
         *value = 0;
@@ -19,12 +19,19 @@ void IoApic::MmioRead(uint64_t offset, uint8_t size, uint64_t* value) {
 }
 
 void IoApic::MmioWrite(uint64_t offset, uint8_t size, uint64_t value) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (offset == 0x00) {
-        // IOREGSEL
         index_ = static_cast<uint32_t>(value) & 0xFF;
     } else if (offset == 0x10) {
-        // IOWIN
         WriteRegister(static_cast<uint32_t>(value));
+    } else if (offset == 0x40) {
+        // EOI register: clear Remote IRR for the entry matching this vector.
+        uint32_t vector = static_cast<uint32_t>(value) & 0xFF;
+        for (auto& rte : redir_table_) {
+            if ((rte & 0xFF) == vector) {
+                rte &= ~(1ULL << 14);  // clear Remote IRR (bit 14)
+            }
+        }
     }
 }
 
