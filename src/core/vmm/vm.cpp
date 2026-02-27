@@ -13,6 +13,8 @@ static constexpr uint64_t kVirtioTabletMmioBase = 0xd0000600;
 static constexpr uint8_t  kVirtioTabletIrq      = 14;
 static constexpr uint64_t kVirtioGpuMmioBase    = 0xd0000800;
 static constexpr uint8_t  kVirtioGpuIrq         = 15;
+static constexpr uint64_t kVirtioSerialMmioBase = 0xd0000a00;
+static constexpr uint8_t  kVirtioSerialIrq      = 7;
 
 Vm::~Vm() {
     running_ = false;
@@ -23,6 +25,28 @@ Vm::~Vm() {
     for (auto& t : vcpu_threads_) {
         if (t.joinable()) t.join();
     }
+
+    // Clear callbacks before destroying objects they reference.
+    // This prevents use-after-free when unique_ptrs are destroyed
+    // in reverse declaration order.
+    if (vdagent_handler_) {
+        vdagent_handler_->SetClipboardCallback(nullptr);
+    }
+    if (virtio_serial_) {
+        virtio_serial_->SetDataCallback(nullptr);
+    }
+    if (virtio_gpu_) {
+        virtio_gpu_->SetFrameCallback(nullptr);
+        virtio_gpu_->SetCursorCallback(nullptr);
+        virtio_gpu_->SetScanoutStateCallback(nullptr);
+    }
+
+    // Stop network backend before releasing guest memory, as its
+    // thread may still be accessing virtio_net_ and mem_.
+    if (net_backend_) {
+        net_backend_->Stop();
+    }
+
     vcpus_.clear();
     whvp_vm_.reset();
     if (mem_.base) {
@@ -42,6 +66,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     vm->console_port_ = config.console_port;
     vm->input_port_ = config.input_port;
     vm->display_port_ = config.display_port;
+    vm->clipboard_port_ = config.clipboard_port;
     if (!vm->console_port_ && config.interactive) {
         vm->console_port_ = std::make_shared<StdConsolePort>();
     }
@@ -64,6 +89,9 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (!vm->SetupVirtioInput()) return nullptr;
 
     if (!vm->SetupVirtioGpu(config.display_width, config.display_height))
+        return nullptr;
+
+    if (!vm->SetupVirtioSerial())
         return nullptr;
 
     // Register virtio-mmio devices for ACPI DSDT so the kernel discovers
@@ -97,6 +125,12 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
             kVirtioGpuMmioBase,
             static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
             kVirtioGpuIrq});
+    }
+    if (vm->virtio_mmio_serial_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioSerialMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioSerialIrq});
     }
 
     if (!vm->LoadKernel(config)) return nullptr;
@@ -294,6 +328,36 @@ bool Vm::SetupVirtioGpu(uint32_t width, uint32_t height) {
     addr_space_.AddMmioDevice(
         kVirtioGpuMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_gpu_.get());
 
+    return true;
+}
+
+bool Vm::SetupVirtioSerial() {
+    virtio_serial_ = std::make_unique<VirtioSerialDevice>(1);
+    virtio_serial_->SetPortName(0, "com.redhat.spice.0");
+
+    vdagent_handler_ = std::make_unique<VDAgentHandler>();
+    vdagent_handler_->SetSerialDevice(virtio_serial_.get(), 0);
+
+    if (clipboard_port_) {
+        vdagent_handler_->SetClipboardCallback([this](const ClipboardEvent& event) {
+            clipboard_port_->OnClipboardEvent(event);
+        });
+    }
+
+    virtio_serial_->SetDataCallback([this](uint32_t port_id, const uint8_t* data, size_t len) {
+        if (vdagent_handler_ && port_id == 0) {
+            vdagent_handler_->OnDataReceived(data, len);
+        }
+    });
+
+    virtio_mmio_serial_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_serial_->Init(virtio_serial_.get(), mem_);
+    virtio_mmio_serial_->SetIrqCallback([this]() { InjectIrq(kVirtioSerialIrq); });
+    virtio_serial_->SetMmioDevice(virtio_mmio_serial_.get());
+    addr_space_.AddMmioDevice(
+        kVirtioSerialMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_serial_.get());
+
+    LOG_INFO("VirtIO Serial device initialized for vdagent clipboard");
     return true;
 }
 
@@ -518,5 +582,33 @@ void Vm::InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons) {
 void Vm::SetDisplaySize(uint32_t width, uint32_t height) {
     if (virtio_gpu_) {
         virtio_gpu_->SetDisplaySize(width, height);
+    }
+}
+
+void Vm::SendClipboardGrab(const std::vector<uint32_t>& types) {
+    if (vdagent_handler_) {
+        vdagent_handler_->SendClipboardGrab(
+            VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD, types);
+    }
+}
+
+void Vm::SendClipboardData(uint32_t type, const uint8_t* data, size_t len) {
+    if (vdagent_handler_) {
+        vdagent_handler_->SendClipboardData(
+            VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD, type, data, len);
+    }
+}
+
+void Vm::SendClipboardRequest(uint32_t type) {
+    if (vdagent_handler_) {
+        vdagent_handler_->SendClipboardRequest(
+            VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD, type);
+    }
+}
+
+void Vm::SendClipboardRelease() {
+    if (vdagent_handler_) {
+        vdagent_handler_->SendClipboardRelease(
+            VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD);
     }
 }

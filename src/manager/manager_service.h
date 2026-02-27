@@ -4,6 +4,7 @@
 #include "common/vm_model.h"
 #include "ipc/protocol_v1.h"
 #include "manager/app_settings.h"
+#include "core/vdagent/vdagent_protocol.h"
 
 #include <atomic>
 #include <functional>
@@ -115,9 +116,28 @@ public:
     using DisplayStateCallback = std::function<void(const std::string& vm_id, bool active, uint32_t width, uint32_t height)>;
     void SetDisplayStateCallback(DisplayStateCallback cb);
 
+    // Clipboard callbacks: events from VM to host
+    using ClipboardGrabCallback = std::function<void(const std::string& vm_id,
+        const std::vector<uint32_t>& types)>;
+    using ClipboardDataCallback = std::function<void(const std::string& vm_id,
+        uint32_t type, const std::vector<uint8_t>& data)>;
+    using ClipboardRequestCallback = std::function<void(const std::string& vm_id,
+        uint32_t type)>;
+
+    void SetClipboardGrabCallback(ClipboardGrabCallback cb);
+    void SetClipboardDataCallback(ClipboardDataCallback cb);
+    void SetClipboardRequestCallback(ClipboardRequestCallback cb);
+
     bool SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed);
     bool SendPointerEvent(const std::string& vm_id, int32_t x, int32_t y, uint32_t buttons);
     bool SetDisplaySize(const std::string& vm_id, uint32_t width, uint32_t height);
+
+    // Clipboard operations: host to VM
+    bool SendClipboardGrab(const std::string& vm_id, const std::vector<uint32_t>& types);
+    bool SendClipboardData(const std::string& vm_id, uint32_t type,
+                           const uint8_t* data, size_t len);
+    bool SendClipboardRequest(const std::string& vm_id, uint32_t type);
+    bool SendClipboardRelease(const std::string& vm_id);
 
 private:
     bool SendRuntimeMessage(VmRecord& vm, const ipc::Message& msg);
@@ -147,5 +167,8 @@ private:
     DisplayCallback display_callback_;
     CursorCallback cursor_callback_;
     DisplayStateCallback display_state_callback_;
+    ClipboardGrabCallback clipboard_grab_callback_;
+    ClipboardDataCallback clipboard_data_callback_;
+    ClipboardRequestCallback clipboard_request_callback_;
     void* job_object_ = nullptr;
 };

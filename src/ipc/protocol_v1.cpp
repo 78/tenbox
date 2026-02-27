@@ -82,6 +82,7 @@ const char* ChannelToString(Channel channel) {
     case Channel::kInput: return "input";
     case Channel::kDisplay: return "display";
     case Channel::kAudio: return "audio";
+    case Channel::kClipboard: return "clipboard";
     default: return "unknown";
     }
 }
@@ -92,6 +93,7 @@ std::optional<Channel> ChannelFromString(const std::string& value) {
     if (value == "input") return Channel::kInput;
     if (value == "display") return Channel::kDisplay;
     if (value == "audio") return Channel::kAudio;
+    if (value == "clipboard") return Channel::kClipboard;
     return std::nullopt;
 }
 

@@ -133,6 +133,7 @@ int main(int argc, char* argv[]) {
         config.console_port = control->ConsolePort();
         config.input_port = control->GetInputPort();
         config.display_port = control->GetDisplayPort();
+        config.clipboard_port = control->GetClipboardPort();
     }
 
     auto vm = Vm::Create(config);

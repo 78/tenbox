@@ -566,6 +566,21 @@ void ManagerService::SetDisplayStateCallback(DisplayStateCallback cb) {
     display_state_callback_ = std::move(cb);
 }
 
+void ManagerService::SetClipboardGrabCallback(ClipboardGrabCallback cb) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    clipboard_grab_callback_ = std::move(cb);
+}
+
+void ManagerService::SetClipboardDataCallback(ClipboardDataCallback cb) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    clipboard_data_callback_ = std::move(cb);
+}
+
+void ManagerService::SetClipboardRequestCallback(ClipboardRequestCallback cb) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    clipboard_request_callback_ = std::move(cb);
+}
+
 bool ManagerService::SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
@@ -636,6 +651,112 @@ bool ManagerService::SetDisplaySize(const std::string& vm_id, uint32_t width, ui
     msg.request_id = GetTickCount64();
     msg.fields["width"] = std::to_string(width);
     msg.fields["height"] = std::to_string(height);
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
+bool ManagerService::SendClipboardGrab(const std::string& vm_id,
+                                       const std::vector<uint32_t>& types) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kClipboard;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "clipboard.grab";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+
+    std::string types_str;
+    for (size_t i = 0; i < types.size(); ++i) {
+        if (i > 0) types_str += ",";
+        types_str += std::to_string(types[i]);
+    }
+    msg.fields["types"] = types_str;
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
+bool ManagerService::SendClipboardData(const std::string& vm_id, uint32_t type,
+                                       const uint8_t* data, size_t len) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kClipboard;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "clipboard.data";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+    msg.fields["data_type"] = std::to_string(type);
+    if (data && len > 0) {
+        msg.payload.assign(data, data + len);
+    }
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
+bool ManagerService::SendClipboardRequest(const std::string& vm_id, uint32_t type) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kClipboard;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "clipboard.request";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+    msg.fields["data_type"] = std::to_string(type);
+
+    std::string encoded = ipc::Encode(msg);
+    DWORD written = 0;
+    return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
+        && written == encoded.size();
+}
+
+bool ManagerService::SendClipboardRelease(const std::string& vm_id) {
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        auto it = vms_.find(vm_id);
+        if (it == vms_.end()) return false;
+        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+    }
+    if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kClipboard;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "clipboard.release";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
 
     std::string encoded = ipc::Encode(msg);
     DWORD written = 0;
@@ -944,6 +1065,70 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
                     vm_it->second.reboot_pending = true;
                 }
             }
+        }
+        return;
+    }
+
+    // Clipboard events from VM
+    if (msg.channel == ipc::Channel::kClipboard &&
+        msg.kind == ipc::Kind::kEvent) {
+
+        if (msg.type == "clipboard.grab") {
+            auto it_types = msg.fields.find("types");
+            if (it_types != msg.fields.end()) {
+                std::vector<uint32_t> types;
+                std::string types_str = it_types->second;
+                size_t pos = 0;
+                while (pos < types_str.size()) {
+                    size_t comma = types_str.find(',', pos);
+                    if (comma == std::string::npos) comma = types_str.size();
+                    std::string num_str = types_str.substr(pos, comma - pos);
+                    if (!num_str.empty()) {
+                        types.push_back(static_cast<uint32_t>(std::strtoul(num_str.c_str(), nullptr, 10)));
+                    }
+                    pos = comma + 1;
+                }
+
+                ClipboardGrabCallback cb;
+                {
+                    std::lock_guard<std::mutex> lock(vms_mutex_);
+                    cb = clipboard_grab_callback_;
+                }
+                if (cb) {
+                    cb(vm_id, types);
+                }
+            }
+            return;
+        }
+
+        if (msg.type == "clipboard.data") {
+            auto it_type = msg.fields.find("data_type");
+            if (it_type != msg.fields.end()) {
+                uint32_t data_type = static_cast<uint32_t>(std::strtoul(it_type->second.c_str(), nullptr, 10));
+
+                ClipboardDataCallback cb;
+                {
+                    std::lock_guard<std::mutex> lock(vms_mutex_);
+                    cb = clipboard_data_callback_;
+                }
+                if (cb) cb(vm_id, data_type, msg.payload);
+            }
+            return;
+        }
+
+        if (msg.type == "clipboard.request") {
+            auto it_type = msg.fields.find("data_type");
+            if (it_type != msg.fields.end()) {
+                uint32_t data_type = static_cast<uint32_t>(std::strtoul(it_type->second.c_str(), nullptr, 10));
+
+                ClipboardRequestCallback cb;
+                {
+                    std::lock_guard<std::mutex> lock(vms_mutex_);
+                    cb = clipboard_request_callback_;
+                }
+                if (cb) cb(vm_id, data_type);
+            }
+            return;
         }
     }
 }

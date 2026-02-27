@@ -53,6 +53,9 @@ enum CtlId : UINT {
 // WM_APP range for cross-thread invoke
 static constexpr UINT WM_INVOKE = WM_APP + 100;
 
+// Track if we initiated the clipboard change (to avoid echo)
+static bool g_clipboard_from_vm = false;
+
 static constexpr int kLeftPaneWidth = 260;
 static constexpr size_t kMaxConsoleLen = 32 * 1024;
 static constexpr size_t kConsoleTrimAt = 24 * 1024;  // trim control when exceeding this
@@ -856,7 +859,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     p->vm_ui_states.erase(vm_id);
                     shell->RefreshVmList();
                     if (p->records.empty()) {
-                        ShowWindow(p->tab, SW_HIDE);
+                        LayoutControls(p);
                     } else {
                         // Simulate click on current selection to restore VM UI state
                         int new_sel = p->selected_index;
@@ -1001,6 +1004,21 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    case WM_CLIPBOARDUPDATE:
+        // Host clipboard changed - notify running VMs
+        if (!g_clipboard_from_vm) {
+            auto vms = shell->manager_.ListVms();
+            for (const auto& vm : vms) {
+                if (vm.state == VmPowerState::kRunning) {
+                    std::vector<uint32_t> types = {1};  // VD_AGENT_CLIPBOARD_UTF8_TEXT
+                    shell->manager_.SendClipboardGrab(vm.spec.vm_id, types);
+                }
+            }
+        } else {
+            g_clipboard_from_vm = false;
+        }
+        return 0;
+
     case WM_CLOSE:
         // Check if any VM is still running
         {
@@ -1100,6 +1118,9 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     g_main_hwnd = impl_->hwnd;
     SetWindowLongPtrA(impl_->hwnd, GWLP_USERDATA,
         reinterpret_cast<LONG_PTR>(impl_.get()));
+
+    // Register for clipboard change notifications
+    AddClipboardFormatListener(impl_->hwnd);
 
     impl_->toolbar   = CreateToolbar(impl_->hwnd, hinst);
     impl_->statusbar = CreateWindowExA(0, STATUSCLASSNAMEA, nullptr,
@@ -1319,6 +1340,9 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
 }
 
 Win32UiShell::~Win32UiShell() {
+    if (impl_->hwnd) {
+        RemoveClipboardFormatListener(impl_->hwnd);
+    }
     if (impl_->ui_font) DeleteObject(impl_->ui_font);
     if (impl_->mono_font) DeleteObject(impl_->mono_font);
     g_shell = nullptr;
@@ -1397,4 +1421,8 @@ void Win32UiShell::InvokeOnUiThread(std::function<void()> fn) {
     if (g_main_hwnd) {
         PostMessage(g_main_hwnd, WM_INVOKE, 0, 0);
     }
+}
+
+void Win32UiShell::SetClipboardFromVm(bool value) {
+    g_clipboard_from_vm = value;
 }

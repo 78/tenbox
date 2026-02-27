@@ -101,6 +101,9 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     locales \
     dbus-x11 at-spi2-core
 
+# SPICE vdagent for clipboard sharing with host
+DEBIAN_FRONTEND=noninteractive apt-get install -y spice-vdagent
+
 # Chinese locale
 sed -i 's/^# *zh_CN.UTF-8/zh_CN.UTF-8/' /etc/locale.gen
 sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
@@ -173,6 +176,26 @@ NET
 systemctl enable networking.service 2>/dev/null || true
 systemctl set-default graphical.target
 systemctl enable lightdm.service 2>/dev/null || true
+
+# SPICE vdagent setup for clipboard sharing
+echo "Setting up spice-vdagent..."
+cat > /etc/udev/rules.d/99-spice-vdagent.rules << 'UDEV'
+SUBSYSTEM=="virtio-ports", ATTR{name}=="com.redhat.spice.0", SYMLINK+="virtio-ports/com.redhat.spice.0"
+UDEV
+echo "  Created: /etc/udev/rules.d/99-spice-vdagent.rules"
+
+# Configure spice-vdagentd for microvm environment (no uinput, no session integration)
+mkdir -p /etc/systemd/system/spice-vdagentd.service.d
+cat > /etc/systemd/system/spice-vdagentd.service.d/override.conf << 'OVERRIDE'
+[Service]
+ExecStart=
+ExecStart=/usr/sbin/spice-vdagentd -X -f -u /dev/null
+OVERRIDE
+echo "  Created: spice-vdagentd systemd override"
+
+# Enable spice-vdagentd service (the daemon that communicates with spice-vdagent)
+systemctl enable spice-vdagentd.service 2>/dev/null || true
+echo "  Enabled: spice-vdagentd.service"
 
 # Verify key commands
 ls -la /sbin/init

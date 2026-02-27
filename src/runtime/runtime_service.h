@@ -70,6 +70,16 @@ private:
     std::function<void(bool, uint32_t, uint32_t)> state_handler_;
 };
 
+class ManagedClipboardPort final : public ClipboardPort {
+public:
+    void OnClipboardEvent(const ClipboardEvent& event) override;
+    void SetEventHandler(std::function<void(const ClipboardEvent&)> handler);
+
+private:
+    std::mutex mutex_;
+    std::function<void(const ClipboardEvent&)> event_handler_;
+};
+
 class RuntimeControlService {
 public:
     RuntimeControlService(std::string vm_id, std::string pipe_name);
@@ -82,6 +92,7 @@ public:
     std::shared_ptr<ManagedConsolePort> ConsolePort() const { return console_port_; }
     std::shared_ptr<ManagedInputPort> GetInputPort() const { return input_port_; }
     std::shared_ptr<ManagedDisplayPort> GetDisplayPort() const { return display_port_; }
+    std::shared_ptr<ManagedClipboardPort> GetClipboardPort() const { return clipboard_port_; }
     void PublishState(const std::string& state, int exit_code = 0);
 
 private:
@@ -96,6 +107,7 @@ private:
     std::shared_ptr<ManagedConsolePort> console_port_ = std::make_shared<ManagedConsolePort>();
     std::shared_ptr<ManagedInputPort> input_port_ = std::make_shared<ManagedInputPort>();
     std::shared_ptr<ManagedDisplayPort> display_port_ = std::make_shared<ManagedDisplayPort>();
+    std::shared_ptr<ManagedClipboardPort> clipboard_port_ = std::make_shared<ManagedClipboardPort>();
 
     std::atomic<bool> running_{false};
 

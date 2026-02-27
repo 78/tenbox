@@ -11,6 +11,7 @@ using UiShell = Win32UiShell;
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 static std::string ResolveDefaultRuntimeExePath() {
     char self[MAX_PATH]{};
@@ -64,6 +65,70 @@ int main(int argc, char* argv[]) {
     std::string data_dir = settings::GetDataDir();
 
     ManagerService manager(runtime_exe, data_dir);
+
+    // Set up clipboard callbacks for VM <-> Host clipboard sharing
+    manager.SetClipboardGrabCallback([&](const std::string& vm_id, const std::vector<uint32_t>& types) {
+        for (uint32_t type : types) {
+            if (type == 1) {  // VD_AGENT_CLIPBOARD_UTF8_TEXT
+                manager.SendClipboardRequest(vm_id, type);
+                break;
+            }
+        }
+    });
+
+    manager.SetClipboardDataCallback([&](const std::string& vm_id, uint32_t type,
+                                         const std::vector<uint8_t>& data) {
+        if (type == 1 && !data.empty()) {  // VD_AGENT_CLIPBOARD_UTF8_TEXT
+            UiShell::SetClipboardFromVm(true);
+            if (OpenClipboard(nullptr)) {
+                EmptyClipboard();
+                int wlen = MultiByteToWideChar(CP_UTF8, 0,
+                    reinterpret_cast<const char*>(data.data()),
+                    static_cast<int>(data.size()), nullptr, 0);
+                if (wlen > 0) {
+                    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (wlen + 1) * sizeof(wchar_t));
+                    if (hMem) {
+                        wchar_t* pMem = static_cast<wchar_t*>(GlobalLock(hMem));
+                        if (pMem) {
+                            MultiByteToWideChar(CP_UTF8, 0,
+                                reinterpret_cast<const char*>(data.data()),
+                                static_cast<int>(data.size()), pMem, wlen);
+                            pMem[wlen] = L'\0';
+                            GlobalUnlock(hMem);
+                            SetClipboardData(CF_UNICODETEXT, hMem);
+                        }
+                    }
+                }
+                CloseClipboard();
+            }
+        }
+    });
+
+    manager.SetClipboardRequestCallback([&](const std::string& vm_id, uint32_t type) {
+        if (type == 1) {  // VD_AGENT_CLIPBOARD_UTF8_TEXT
+            if (OpenClipboard(nullptr)) {
+                HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+                if (hData) {
+                    wchar_t* pData = static_cast<wchar_t*>(GlobalLock(hData));
+                    if (pData) {
+                        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, pData, -1, nullptr, 0, nullptr, nullptr);
+                        if (utf8_len > 0) {
+                            std::vector<uint8_t> utf8_data(utf8_len);
+                            WideCharToMultiByte(CP_UTF8, 0, pData, -1,
+                                reinterpret_cast<char*>(utf8_data.data()), utf8_len, nullptr, nullptr);
+                            if (!utf8_data.empty() && utf8_data.back() == 0) {
+                                utf8_data.pop_back();
+                            }
+                            manager.SendClipboardData(vm_id, type, utf8_data.data(), utf8_data.size());
+                        }
+                        GlobalUnlock(hData);
+                    }
+                }
+                CloseClipboard();
+            }
+        }
+    });
+
     UiShell ui(manager);
 
     WindowsTrayApp tray(

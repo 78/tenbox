@@ -88,3 +88,25 @@ public:
     virtual ~ControlPort() = default;
     virtual void OnControlCommand(ControlCommandType command) = 0;
 };
+
+// Clipboard event for host-side handling
+struct ClipboardEvent {
+    enum class Type {
+        kGrab,      // Clipboard content changed (with available types)
+        kData,      // Clipboard data received
+        kRequest,   // Request for clipboard data
+        kRelease,   // Clipboard ownership released
+    };
+
+    Type type;
+    uint8_t selection = 0;
+    std::vector<uint32_t> available_types;  // For kGrab
+    uint32_t data_type = 0;                 // For kData/kRequest
+    std::vector<uint8_t> data;              // For kData
+};
+
+class ClipboardPort {
+public:
+    virtual ~ClipboardPort() = default;
+    virtual void OnClipboardEvent(const ClipboardEvent& event) = 0;
+};

@@ -16,6 +16,8 @@
 #include "core/device/virtio/virtio_net.h"
 #include "core/device/virtio/virtio_input.h"
 #include "core/device/virtio/virtio_gpu.h"
+#include "core/device/virtio/virtio_serial.h"
+#include "core/vdagent/vdagent_handler.h"
 #include "core/net/net_backend.h"
 #include "core/arch/x86_64/acpi.h"
 #include "common/ports.h"
@@ -38,6 +40,7 @@ struct VmConfig {
     std::shared_ptr<ConsolePort> console_port;
     std::shared_ptr<InputPort> input_port;
     std::shared_ptr<DisplayPort> display_port;
+    std::shared_ptr<ClipboardPort> clipboard_port;
     uint32_t display_width = 1024;
     uint32_t display_height = 768;
 };
@@ -61,6 +64,12 @@ public:
     void InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons);
     void SetDisplaySize(uint32_t width, uint32_t height);
 
+    // Clipboard operations
+    void SendClipboardGrab(const std::vector<uint32_t>& types);
+    void SendClipboardData(uint32_t type, const uint8_t* data, size_t len);
+    void SendClipboardRequest(uint32_t type);
+    void SendClipboardRelease();
+
 private:
     Vm() = default;
 
@@ -70,6 +79,7 @@ private:
     bool SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards);
     bool SetupVirtioInput();
     bool SetupVirtioGpu(uint32_t width, uint32_t height);
+    bool SetupVirtioSerial();
     bool LoadKernel(const VmConfig& config);
 
     void InputThreadFunc();
@@ -116,6 +126,11 @@ private:
     std::unique_ptr<VirtioGpuDevice> virtio_gpu_;
     std::unique_ptr<VirtioMmioDevice> virtio_mmio_gpu_;
 
+    // VirtIO Serial (for vdagent clipboard)
+    std::unique_ptr<VirtioSerialDevice> virtio_serial_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_serial_;
+    std::unique_ptr<VDAgentHandler> vdagent_handler_;
+
     std::vector<x86::VirtioMmioAcpiInfo> virtio_acpi_devs_;
 
     std::atomic<bool> running_{false};
@@ -125,5 +140,6 @@ private:
     std::shared_ptr<ConsolePort> console_port_;
     std::shared_ptr<InputPort> input_port_;
     std::shared_ptr<DisplayPort> display_port_;
+    std::shared_ptr<ClipboardPort> clipboard_port_;
     uint32_t inject_prev_buttons_ = 0;
 };

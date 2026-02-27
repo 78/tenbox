@@ -150,6 +150,24 @@ void ManagedDisplayPort::SetStateHandler(std::function<void(bool, uint32_t, uint
     state_handler_ = std::move(handler);
 }
 
+// ── ManagedClipboardPort ──────────────────────────────────────────────
+
+void ManagedClipboardPort::OnClipboardEvent(const ClipboardEvent& event) {
+    std::function<void(const ClipboardEvent&)> handler;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        handler = event_handler_;
+    }
+    if (handler) {
+        handler(event);
+    }
+}
+
+void ManagedClipboardPort::SetEventHandler(std::function<void(const ClipboardEvent&)> handler) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    event_handler_ = std::move(handler);
+}
+
 std::string EncodeHex(const uint8_t* data, size_t size) {
     static constexpr char kDigits[] = "0123456789abcdef";
     std::string out;
@@ -251,6 +269,54 @@ RuntimeControlService::RuntimeControlService(std::string vm_id, std::string pipe
         event.fields["active"] = active ? "1" : "0";
         event.fields["width"] = std::to_string(width);
         event.fields["height"] = std::to_string(height);
+
+        std::string encoded = ipc::Encode(event);
+        {
+            std::lock_guard<std::mutex> lock(send_queue_mutex_);
+            console_queue_.push_back(std::move(encoded));
+        }
+        send_cv_.notify_one();
+    });
+
+    clipboard_port_->SetEventHandler([this](const ClipboardEvent& clip_event) {
+        ipc::Message event;
+        event.kind = ipc::Kind::kEvent;
+        event.channel = ipc::Channel::kClipboard;
+        event.vm_id = vm_id_;
+        event.request_id = next_event_id_++;
+
+        switch (clip_event.type) {
+        case ClipboardEvent::Type::kGrab:
+            event.type = "clipboard.grab";
+            event.fields["selection"] = std::to_string(clip_event.selection);
+            {
+                std::string types_str;
+                for (size_t i = 0; i < clip_event.available_types.size(); ++i) {
+                    if (i > 0) types_str += ",";
+                    types_str += std::to_string(clip_event.available_types[i]);
+                }
+                event.fields["types"] = types_str;
+            }
+            break;
+
+        case ClipboardEvent::Type::kData:
+            event.type = "clipboard.data";
+            event.fields["selection"] = std::to_string(clip_event.selection);
+            event.fields["data_type"] = std::to_string(clip_event.data_type);
+            event.payload = clip_event.data;
+            break;
+
+        case ClipboardEvent::Type::kRequest:
+            event.type = "clipboard.request";
+            event.fields["selection"] = std::to_string(clip_event.selection);
+            event.fields["data_type"] = std::to_string(clip_event.data_type);
+            break;
+
+        case ClipboardEvent::Type::kRelease:
+            event.type = "clipboard.release";
+            event.fields["selection"] = std::to_string(clip_event.selection);
+            break;
+        }
 
         std::string encoded = ipc::Encode(event);
         {
@@ -600,6 +666,56 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
         resp.vm_id = vm_id_;
         resp.request_id = message.request_id;
         Send(resp);
+        return;
+    }
+
+    // Clipboard messages from manager to VM
+    if (message.channel == ipc::Channel::kClipboard &&
+        message.kind == ipc::Kind::kRequest) {
+        if (!vm_) return;
+
+        if (message.type == "clipboard.grab") {
+            auto it_types = message.fields.find("types");
+            if (it_types != message.fields.end()) {
+                std::vector<uint32_t> types;
+                std::string types_str = it_types->second;
+                size_t pos = 0;
+                while (pos < types_str.size()) {
+                    size_t comma = types_str.find(',', pos);
+                    if (comma == std::string::npos) comma = types_str.size();
+                    std::string num_str = types_str.substr(pos, comma - pos);
+                    if (!num_str.empty()) {
+                        types.push_back(static_cast<uint32_t>(std::strtoul(num_str.c_str(), nullptr, 10)));
+                    }
+                    pos = comma + 1;
+                }
+                vm_->SendClipboardGrab(types);
+            }
+            return;
+        }
+
+        if (message.type == "clipboard.data") {
+            auto it_type = message.fields.find("data_type");
+            if (it_type != message.fields.end()) {
+                uint32_t data_type = static_cast<uint32_t>(std::strtoul(it_type->second.c_str(), nullptr, 10));
+                vm_->SendClipboardData(data_type, message.payload.data(), message.payload.size());
+            }
+            return;
+        }
+
+        if (message.type == "clipboard.request") {
+            auto it_type = message.fields.find("data_type");
+            if (it_type != message.fields.end()) {
+                uint32_t data_type = static_cast<uint32_t>(std::strtoul(it_type->second.c_str(), nullptr, 10));
+                vm_->SendClipboardRequest(data_type);
+            }
+            return;
+        }
+
+        if (message.type == "clipboard.release") {
+            vm_->SendClipboardRelease();
+            return;
+        }
     }
 }
 

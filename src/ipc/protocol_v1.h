@@ -16,6 +16,7 @@ enum class Channel : uint8_t {
     kInput = 2,
     kDisplay = 3,
     kAudio = 4,
+    kClipboard = 5,
 };
 
 enum class Kind : uint8_t {
