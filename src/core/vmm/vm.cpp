@@ -186,6 +186,7 @@ bool Vm::SetupDevices() {
     addr_space_.AddMmioDevice(
         IoApic::kBaseAddress, IoApic::kSize, &ioapic_);
     acpi_pm_.SetShutdownCallback([this]() { RequestStop(); });
+    acpi_pm_.SetResetCallback([this]() { RequestReboot(); });
     acpi_pm_.SetSciCallback([this]() { InjectIrq(9); });
     addr_space_.AddPioDevice(
         AcpiPm::kBasePort, AcpiPm::kRegCount, &acpi_pm_);
@@ -454,6 +455,12 @@ void Vm::RequestStop() {
         WHvCancelRunVirtualProcessor(
             whvp_vm_->Handle(), vcpu->VpIndex(), 0);
     }
+}
+
+void Vm::RequestReboot() {
+    LOG_INFO("VM reboot requested");
+    reboot_requested_ = true;
+    RequestStop();
 }
 
 void Vm::TriggerPowerButton() {

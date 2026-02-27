@@ -54,6 +54,7 @@ struct VmRecord {
     std::optional<VmMutablePatch> pending_patch;
     VmRuntimeHandle runtime;
     int last_exit_code = 0;
+    bool reboot_pending = false;
 
     VmRecord() = default;
     VmRecord(VmSpec s) : spec(std::move(s)) {}

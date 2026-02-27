@@ -212,6 +212,8 @@ static constexpr uint32_t kFadtSize = 268; // FADT revision 5
 // PM1 register I/O ports (must match AcpiPm device in the VMM)
 static constexpr uint16_t kPm1aEvtPort = 0x600;
 static constexpr uint16_t kPm1aCntPort = 0x604;
+static constexpr uint16_t kResetPort   = 0x608;
+static constexpr uint8_t  kResetValue  = 0x01;
 
 static void BuildFadt(uint8_t* buf, GPA dsdt_addr) {
     memset(buf, 0, kFadtSize);
@@ -246,10 +248,22 @@ static void BuildFadt(uint8_t* buf, GPA dsdt_addr) {
     // Flags (offset 112, uint32_t):
     //   Bit 4 (PWR_BUTTON): 1 = no fixed-hardware power button
     //   Bit 5 (SLP_BUTTON): 1 = no fixed-hardware sleep button
+    //   Bit 10 (RESET_REG_SUP): 1 = RESET_REG is supported
     // We don't emulate fixed power/sleep button events, so set both bits
     // to prevent the kernel from looking for handlers that don't exist.
-    uint32_t fadt_flags = (1u << 4) | (1u << 5);
+    uint32_t fadt_flags = (1u << 4) | (1u << 5) | (1u << 10);
     memcpy(buf + 112, &fadt_flags, 4);
+
+    // RESET_REG — Generic Address Structure (offset 116, 12 bytes)
+    buf[116] = 1;   // AddressSpaceId = System I/O
+    buf[117] = 8;   // RegisterBitWidth = 8 bits
+    buf[118] = 0;   // RegisterBitOffset
+    buf[119] = 1;   // AccessSize = Byte
+    uint64_t reset_addr = kResetPort;
+    memcpy(buf + 120, &reset_addr, 8);
+
+    // RESET_VALUE (offset 128) — value to write to RESET_REG
+    buf[128] = kResetValue;
 
     // FADT minor version (offset 131)
     buf[131] = 1;

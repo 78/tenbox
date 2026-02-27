@@ -229,12 +229,14 @@ void DisplayPanel::OnPaint() {
 
     // Draw hint bar at bottom
     RECT hint_rc = {0, ch, rc.right, rc.bottom};
-    HBRUSH bg_brush = CreateSolidBrush(RGB(48, 48, 48));
+    COLORREF bg_color = captured_ ? RGB(0, 100, 180) : RGB(48, 48, 48);
+    HBRUSH bg_brush = CreateSolidBrush(bg_color);
     FillRect(hdc, &hint_rc, bg_brush);
     DeleteObject(bg_brush);
 
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(200, 200, 200));
+    COLORREF text_color = captured_ ? RGB(255, 255, 255) : RGB(200, 200, 200);
+    SetTextColor(hdc, text_color);
     const char* hint = captured_
         ? "Press Right Alt to release | Input captured"
         : "Click to capture keyboard & mouse";

@@ -632,6 +632,7 @@ void ManagerService::DispatchPipeData(std::string& pending, PipeParseState& pars
 
 void ManagerService::HandleProcessExit(const std::string& vm_id) {
     StateChangeCallback cb;
+    bool needs_reboot = false;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
         auto it = vms_.find(vm_id);
@@ -640,10 +641,32 @@ void ManagerService::HandleProcessExit(const std::string& vm_id) {
             it->second.state != VmPowerState::kStopping) return;
         auto& vm = it->second;
         CleanupRuntimeHandles(vm);
+        // Exit code 128 indicates a reboot request from the guest
+        needs_reboot = vm.reboot_pending || (vm.last_exit_code == 128);
+        vm.reboot_pending = false;
         vm.state = VmPowerState::kStopped;
         cb = state_change_callback_;
     }
     if (cb) cb(vm_id);
+
+    if (needs_reboot) {
+        LOG_INFO("VM %s requested reboot, restarting...", vm_id.c_str());
+        // Must spawn a new thread because we're currently in the read_thread
+        // and StartVm will try to join it (can't join self).
+        std::thread([this, vm_id]() {
+            StateChangeCallback cb_after;
+            {
+                std::lock_guard<std::mutex> lock(vms_mutex_);
+                std::string error;
+                if (!StartVm(vm_id, &error)) {
+                    LOG_ERROR("Failed to restart VM %s: %s", vm_id.c_str(), error.c_str());
+                    return;
+                }
+                cb_after = state_change_callback_;
+            }
+            if (cb_after) cb_after(vm_id);
+        }).detach();
+    }
 }
 
 void ManagerService::PipeReadThreadFunc(const std::string& vm_id) {
@@ -806,6 +829,8 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
                     vm_it->second.state = VmPowerState::kStopped;
                 } else if (state_str == "crashed") {
                     vm_it->second.state = VmPowerState::kCrashed;
+                } else if (state_str == "rebooting") {
+                    vm_it->second.reboot_pending = true;
                 }
             }
         }

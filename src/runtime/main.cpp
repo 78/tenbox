@@ -145,9 +145,14 @@ int main(int argc, char* argv[]) {
     if (control) control->PublishState("running");
 
     int exit_code = vm->Run();
+    bool wants_reboot = vm->RebootRequested();
     if (control) {
-        control->PublishState(exit_code == 0 ? "stopped" : "crashed", exit_code);
+        if (wants_reboot) {
+            control->PublishState("rebooting", 0);
+        } else {
+            control->PublishState(exit_code == 0 ? "stopped" : "crashed", exit_code);
+        }
         control->Stop();
     }
-    return exit_code;
+    return wants_reboot ? 128 : exit_code;
 }

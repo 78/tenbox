@@ -28,6 +28,10 @@ void AcpiPm::PioRead(uint16_t offset, uint8_t size, uint32_t* value) {
     case 4:
         *value = pm1_cnt_;
         break;
+    case 8:
+        // RESET_REG read returns 0
+        *value = 0;
+        break;
     default:
         *value = 0;
         break;
@@ -57,6 +61,13 @@ void AcpiPm::PioWrite(uint16_t offset, uint8_t size, uint32_t value) {
         }
         break;
     }
+    case 8:
+        // RESET_REG: writing kResetValue triggers system reset
+        if ((value & 0xFF) == kResetValue && reset_cb_) {
+            LOG_INFO("ACPI: system reset requested via RESET_REG");
+            reset_cb_();
+        }
+        break;
     default:
         break;
     }

@@ -51,6 +51,8 @@ public:
     int Run();
 
     void RequestStop();
+    void RequestReboot();
+    bool RebootRequested() const { return reboot_requested_.load(); }
     void TriggerPowerButton();
     void InjectConsoleBytes(const uint8_t* data, size_t size);
     void SetNetLinkUp(bool up);
@@ -116,6 +118,7 @@ private:
     std::vector<x86::VirtioMmioAcpiInfo> virtio_acpi_devs_;
 
     std::atomic<bool> running_{false};
+    std::atomic<bool> reboot_requested_{false};
     std::thread input_thread_;
     std::thread hid_input_thread_;
     std::shared_ptr<ConsolePort> console_port_;
