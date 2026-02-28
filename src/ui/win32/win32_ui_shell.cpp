@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <windowsx.h>
+#include <shlobj.h>
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -48,6 +49,9 @@ enum CtlId : UINT {
     IDC_CONSOLE_IN  = 2005,
     IDC_SEND_BTN    = 2006,
     IDC_TAB         = 2007,
+    IDC_SF_LISTVIEW = 2008,
+    IDC_SF_ADD_BTN  = 2009,
+    IDC_SF_DEL_BTN  = 2010,
 };
 
 // WM_APP range for cross-thread invoke
@@ -119,6 +123,9 @@ struct Win32UiShell::Impl {
     HWND console_in = nullptr;
     HWND send_btn   = nullptr;
     HWND tab        = nullptr;
+    HWND sf_list    = nullptr;
+    HWND sf_add_btn = nullptr;
+    HWND sf_del_btn = nullptr;
     HMENU menu_bar  = nullptr;
 
     bool display_available = false;
@@ -361,15 +368,50 @@ static HWND CreateVmListBox(HWND parent, HINSTANCE hinst) {
 
 using Impl = Win32UiShell::Impl;
 
-static constexpr int kTabInfo    = 0;
-static constexpr int kTabConsole = 1;
-static constexpr int kTabDisplay = 2;
+static constexpr int kTabInfo     = 0;
+static constexpr int kTabConsole  = 1;
+static constexpr int kTabDisplay  = 2;
+static constexpr int kTabSharedFs = 3;
 
 static void ShowDetailControls(Impl* p, bool visible) {
     int cmd = visible ? SW_SHOW : SW_HIDE;
     for (int i = 0; i < Impl::kDetailRows; ++i) {
         ShowWindow(p->detail_labels[i], cmd);
         ShowWindow(p->detail_values[i], cmd);
+    }
+}
+
+static void ShowSharedFsControls(Impl* p, bool visible) {
+    int cmd = visible ? SW_SHOW : SW_HIDE;
+    ShowWindow(p->sf_list, cmd);
+    ShowWindow(p->sf_add_btn, cmd);
+    ShowWindow(p->sf_del_btn, cmd);
+}
+
+static void RefreshSharedFsList(Impl* p, ManagerService& mgr) {
+    if (!p->sf_list) return;
+    
+    ListView_DeleteAllItems(p->sf_list);
+    
+    if (p->selected_index < 0 || p->selected_index >= static_cast<int>(p->records.size())) {
+        return;
+    }
+    
+    const auto& vm = p->records[p->selected_index];
+    auto folders = mgr.GetSharedFolders(vm.spec.vm_id);
+    
+    for (size_t i = 0; i < folders.size(); ++i) {
+        const auto& sf = folders[i];
+        
+        LVITEMA item{};
+        item.mask = LVIF_TEXT;
+        item.iItem = static_cast<int>(i);
+        item.iSubItem = 0;
+        item.pszText = const_cast<char*>(sf.tag.c_str());
+        int idx = ListView_InsertItem(p->sf_list, &item);
+        
+        ListView_SetItemText(p->sf_list, idx, 1, const_cast<char*>(sf.host_path.c_str()));
+        ListView_SetItemText(p->sf_list, idx, 2, const_cast<char*>(sf.readonly ? "Read Only" : "Read/Write"));
     }
 }
 
@@ -479,6 +521,7 @@ static void LayoutControls(Impl* p) {
     ShowWindow(p->console, SW_HIDE);
     ShowWindow(p->console_in, SW_HIDE);
     ShowWindow(p->send_btn, SW_HIDE);
+    ShowSharedFsControls(p, false);
     if (p->display_panel) p->display_panel->SetVisible(false);
 
     // Hide tab control when no VM is selected
@@ -578,6 +621,19 @@ static void LayoutControls(Impl* p) {
                     Impl::kResizeDebounceMs, nullptr);
             }
         }
+    } else if (cur_tab == kTabSharedFs) {
+        ShowSharedFsControls(p, true);
+
+        int btn_h = 26;
+        int btn_w = 80;
+        int gap = 4;
+        int list_h = ph - btn_h - gap;
+        if (list_h < 50) list_h = 50;
+
+        MoveWindow(p->sf_list, px, py, pw, list_h, TRUE);
+        int btn_y = py + list_h + gap;
+        MoveWindow(p->sf_add_btn, px, btn_y, btn_w, btn_h, TRUE);
+        MoveWindow(p->sf_del_btn, px + btn_w + gap, btn_y, btn_w, btn_h, TRUE);
     }
 }
 
@@ -735,6 +791,11 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     p->display_panel->Clear();
                 }
 
+                // Refresh shared folders list if that tab is visible
+                if (new_state.current_tab == kTabSharedFs) {
+                    RefreshSharedFsList(p, shell->manager_);
+                }
+
                 LayoutControls(p);
             }
             return 0;
@@ -877,6 +938,88 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
+        case IDC_SF_ADD_BTN: {
+            if (code != BN_CLICKED) break;
+            if (p->selected_index < 0 ||
+                p->selected_index >= static_cast<int>(p->records.size()))
+                break;
+            
+            // Simple dialog to add shared folder
+            char tag_buf[64] = {};
+            char path_buf[MAX_PATH] = {};
+            
+            // Use folder browser dialog
+            BROWSEINFOA bi = {};
+            bi.hwndOwner = hwnd;
+            bi.lpszTitle = "Select folder to share";
+            bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+            
+            LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+            if (pidl) {
+                SHGetPathFromIDListA(pidl, path_buf);
+                CoTaskMemFree(pidl);
+                
+                // Generate a default tag from folder name
+                std::string path_str(path_buf);
+                size_t last_sep = path_str.find_last_of("\\/");
+                std::string default_tag = (last_sep != std::string::npos) 
+                    ? path_str.substr(last_sep + 1) : "share";
+                
+                // Ask for tag name
+                std::string prompt = "Enter a tag name for this shared folder:";
+                strncpy_s(tag_buf, default_tag.c_str(), sizeof(tag_buf) - 1);
+                
+                // Simple input dialog using a static variable and MessageBox
+                // For a better UX, this should be a custom dialog
+                if (default_tag.empty()) {
+                    strcpy_s(tag_buf, "share");
+                }
+                
+                // Add the shared folder
+                SharedFolder sf;
+                sf.tag = default_tag;
+                sf.host_path = path_buf;
+                sf.readonly = false;
+                
+                std::string error;
+                std::string vm_id = p->records[p->selected_index].spec.vm_id;
+                if (shell->manager_.AddSharedFolder(vm_id, sf, &error)) {
+                    RefreshSharedFsList(p, shell->manager_);
+                } else {
+                    MessageBoxA(hwnd, error.c_str(), i18n::tr(i18n::S::kError), MB_OK | MB_ICONERROR);
+                }
+            }
+            return 0;
+        }
+        case IDC_SF_DEL_BTN: {
+            if (code != BN_CLICKED) break;
+            if (p->selected_index < 0 ||
+                p->selected_index >= static_cast<int>(p->records.size()))
+                break;
+            
+            int sel = ListView_GetNextItem(p->sf_list, -1, LVNI_SELECTED);
+            if (sel < 0) {
+                MessageBoxA(hwnd, "Please select a shared folder to remove.",
+                           i18n::tr(i18n::S::kError), MB_OK | MB_ICONWARNING);
+                return 0;
+            }
+            
+            char tag_buf[64] = {};
+            ListView_GetItemText(p->sf_list, sel, 0, tag_buf, sizeof(tag_buf));
+            
+            std::string prompt = "Remove shared folder '" + std::string(tag_buf) + "'?";
+            if (MessageBoxA(hwnd, prompt.c_str(), "Confirm Remove",
+                    MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                std::string error;
+                std::string vm_id = p->records[p->selected_index].spec.vm_id;
+                if (shell->manager_.RemoveSharedFolder(vm_id, tag_buf, &error)) {
+                    RefreshSharedFsList(p, shell->manager_);
+                } else {
+                    MessageBoxA(hwnd, error.c_str(), i18n::tr(i18n::S::kError), MB_OK | MB_ICONERROR);
+                }
+            }
+            return 0;
+        }
         } // switch cmd
         break;
     }
@@ -888,6 +1031,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (p->selected_index >= 0 &&
                 p->selected_index < static_cast<int>(p->records.size())) {
                 p->GetVmUiState(p->records[p->selected_index].spec.vm_id).current_tab = cur_tab;
+            }
+            if (cur_tab == kTabSharedFs) {
+                RefreshSharedFsList(p, shell->manager_);
             }
             LayoutControls(p);
         }
@@ -905,6 +1051,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DRAWITEM: {
         auto* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+
         if (dis->CtlID == IDC_LISTVIEW && dis->itemID != static_cast<UINT>(-1)) {
             int idx = static_cast<int>(dis->itemID);
             if (idx < 0 || idx >= static_cast<int>(p->records.size()))
@@ -912,14 +1059,13 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             const auto& rec = p->records[idx];
 
             bool selected = (dis->itemState & ODS_SELECTED) != 0;
-            COLORREF card_bg = selected ? GetSysColor(COLOR_HIGHLIGHT)
+            COLORREF card_bg = selected ? RGB(229, 241, 255)
                                         : RGB(248, 248, 248);
-            COLORREF fg  = selected ? GetSysColor(COLOR_HIGHLIGHTTEXT)
+            COLORREF fg  = selected ? RGB(20, 20, 20)
                                     : GetSysColor(COLOR_WINDOWTEXT);
-            COLORREF dim = selected ? GetSysColor(COLOR_HIGHLIGHTTEXT)
+            COLORREF dim = selected ? RGB(80, 80, 80)
                                     : GetSysColor(COLOR_GRAYTEXT);
 
-            // Fill the whole row with window background first, then draw the card inset
             HBRUSH wnd_br = GetSysColorBrush(COLOR_WINDOW);
             FillRect(dis->hDC, &dis->rcItem, wnd_br);
 
@@ -931,7 +1077,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
             HBRUSH card_br = CreateSolidBrush(card_bg);
             HPEN border_pen = CreatePen(PS_SOLID, 1,
-                selected ? GetSysColor(COLOR_HIGHLIGHT) : RGB(232, 232, 232));
+                selected ? RGB(100, 160, 230) : RGB(232, 232, 232));
             HPEN old_pen = static_cast<HPEN>(SelectObject(dis->hDC, border_pen));
             HBRUSH old_br = static_cast<HBRUSH>(SelectObject(dis->hDC, card_br));
             RoundRect(dis->hDC, card.left, card.top, card.right, card.bottom, 6, 6);
@@ -966,9 +1112,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             auto state_w = i18n::to_wide(StateText(rec.state));
             COLORREF state_color;
             if (rec.state == VmPowerState::kRunning)
-                state_color = selected ? fg : RGB(0, 128, 0);
+                state_color = RGB(0, 128, 0);
             else if (rec.state == VmPowerState::kCrashed)
-                state_color = selected ? fg : RGB(200, 0, 0);
+                state_color = RGB(200, 0, 0);
             else
                 state_color = dim;
             SetTextColor(dis->hDC, state_color);
@@ -1150,6 +1296,9 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
         ti.pszText = const_cast<char*>(i18n::tr(i18n::S::kTabDisplay));
         SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabDisplay,
             reinterpret_cast<LPARAM>(&ti));
+        ti.pszText = const_cast<char*>("Shared Folders");
+        SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabSharedFs,
+            reinterpret_cast<LPARAM>(&ti));
     }
 
     // Detail label/value statics for Info tab
@@ -1198,6 +1347,43 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
 
     // Subclass the console input to catch Enter key
     SetWindowSubclass(impl_->console_in, ConsoleInputSubclass, 0, 0);
+
+    // Shared folders ListView
+    impl_->sf_list = CreateWindowExA(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
+        WS_CHILD | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+        0, 0, 0, 0, impl_->hwnd,
+        reinterpret_cast<HMENU>(IDC_SF_LISTVIEW), hinst, nullptr);
+    ListView_SetExtendedListViewStyle(impl_->sf_list, 
+        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+    SendMessage(impl_->sf_list, WM_SETFONT,
+        reinterpret_cast<WPARAM>(impl_->ui_font), FALSE);
+    {
+        LVCOLUMNA col{};
+        col.mask = LVCF_TEXT | LVCF_WIDTH;
+        col.cx = 200;
+        col.pszText = const_cast<char*>("Tag");
+        ListView_InsertColumn(impl_->sf_list, 0, &col);
+        col.cx = 500;
+        col.pszText = const_cast<char*>("Host Path");
+        ListView_InsertColumn(impl_->sf_list, 1, &col);
+        col.cx = 160;
+        col.pszText = const_cast<char*>("Mode");
+        ListView_InsertColumn(impl_->sf_list, 2, &col);
+    }
+
+    // Shared folders buttons
+    impl_->sf_add_btn = CreateWindowExA(0, "BUTTON", "Add...",
+        WS_CHILD | BS_PUSHBUTTON,
+        0, 0, 0, 0, impl_->hwnd,
+        reinterpret_cast<HMENU>(IDC_SF_ADD_BTN), hinst, nullptr);
+    impl_->sf_del_btn = CreateWindowExA(0, "BUTTON", "Remove",
+        WS_CHILD | BS_PUSHBUTTON,
+        0, 0, 0, 0, impl_->hwnd,
+        reinterpret_cast<HMENU>(IDC_SF_DEL_BTN), hinst, nullptr);
+    SendMessage(impl_->sf_add_btn, WM_SETFONT,
+        reinterpret_cast<WPARAM>(impl_->ui_font), FALSE);
+    SendMessage(impl_->sf_del_btn, WM_SETFONT,
+        reinterpret_cast<WPARAM>(impl_->ui_font), FALSE);
 
     // Apply font to toolbar
     SendMessage(impl_->toolbar, WM_SETFONT,

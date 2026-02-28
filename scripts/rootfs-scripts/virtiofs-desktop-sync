@@ -1,0 +1,46 @@
+#!/bin/bash
+# Sync desktop links with /mnt/shared subdirectories
+
+MOUNT_POINT="/mnt/shared"
+MOUNT_USER="openclaw"
+USER_HOME="/home/$MOUNT_USER"
+DESKTOP_DIR="$USER_HOME/Desktop"
+
+sync_links() {
+    [ -d "$DESKTOP_DIR" ] || return
+    [ -d "$MOUNT_POINT" ] || return
+    
+    # Remove stale links (links pointing to non-existent dirs in /mnt/shared)
+    for link in "$DESKTOP_DIR"/*; do
+        [ -L "$link" ] || continue
+        target=$(readlink "$link")
+        if [[ "$target" == "$MOUNT_POINT/"* ]]; then
+            if [ ! -d "$target" ]; then
+                rm -f "$link"
+                echo "virtiofs-desktop: removed stale link $(basename "$link")"
+            fi
+        fi
+    done
+    
+    # Create links for new subdirectories
+    for dir in "$MOUNT_POINT"/*/; do
+        [ -d "$dir" ] || continue
+        name=$(basename "$dir")
+        link_path="$DESKTOP_DIR/$name"
+        if [ ! -e "$link_path" ]; then
+            ln -s "${dir%/}" "$link_path"
+            chown -h "$MOUNT_USER:$MOUNT_USER" "$link_path"
+            echo "virtiofs-desktop: created link $name"
+        fi
+    done
+}
+
+# Initial sync
+sync_links
+
+# Poll every 10 seconds to pick up dynamic share changes.
+# inotifywait is unreliable on virtiofs (no server-side notify support).
+while true; do
+    sleep 10
+    sync_links
+done

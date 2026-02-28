@@ -1,5 +1,6 @@
 build/
 out/
+.deps/
 .vs/
 .vscode/
 *.obj

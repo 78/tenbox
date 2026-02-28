@@ -16,6 +16,12 @@ endif()
 
 include(FetchContent)
 
+# Use a persistent cache directory for FetchContent downloads
+# This avoids re-downloading dependencies when build directory is deleted
+if(NOT DEFINED FETCHCONTENT_BASE_DIR)
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.deps" CACHE PATH "FetchContent cache directory")
+endif()
+
 # zlib — required for qcow2 compressed cluster support
 FetchContent_Declare(
     zlib

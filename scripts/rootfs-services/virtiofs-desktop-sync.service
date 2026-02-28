@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync desktop links with virtiofs shared folders
+After=virtiofs-automount.service display-manager.service
+Requires=virtiofs-automount.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/virtiofs-desktop-sync
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

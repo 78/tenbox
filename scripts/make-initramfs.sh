@@ -62,7 +62,7 @@ cp "$WORKDIR/busybox" "$WORKDIR/initramfs/bin/"
 MODDIR="kmod_extract/lib/modules/$KVER/kernel"
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
-# Modules needed for virtio block/net/input/gpu devices + ext4 filesystem support
+# Modules needed for virtio block/net/input/gpu/fs devices + ext4 filesystem support
 VIRTIO_MODS=(
     "drivers/virtio/virtio.ko"
     "drivers/virtio/virtio_ring.ko"
@@ -81,6 +81,8 @@ VIRTIO_MODS=(
     "drivers/gpu/drm/drm_shmem_helper.ko"
     "drivers/virtio/virtio_dma_buf.ko"
     "drivers/gpu/drm/virtio/virtio-gpu.ko"
+    "fs/fuse/fuse.ko"
+    "fs/fuse/virtiofs.ko"
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
@@ -153,6 +155,14 @@ done
 
 # Load ext4 filesystem modules
 for mod in crc16 crc32c_generic libcrc32c mbcache jbd2 ext4; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load virtio-fs / fuse modules for shared folder support
+for mod in fuse virtiofs; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"

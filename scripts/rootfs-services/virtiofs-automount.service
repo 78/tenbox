@@ -1,0 +1,12 @@
+[Unit]
+Description=Auto-mount virtiofs shared folders
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/virtiofs-automount
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

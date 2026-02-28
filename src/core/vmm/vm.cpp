@@ -15,6 +15,8 @@ static constexpr uint64_t kVirtioGpuMmioBase    = 0xd0000800;
 static constexpr uint8_t  kVirtioGpuIrq         = 15;
 static constexpr uint64_t kVirtioSerialMmioBase = 0xd0000a00;
 static constexpr uint8_t  kVirtioSerialIrq      = 7;
+static constexpr uint64_t kVirtioFsMmioBase     = 0xd0000c00;
+static constexpr uint8_t  kVirtioFsBaseIrq      = 16;
 
 Vm::~Vm() {
     running_ = false;
@@ -94,6 +96,10 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (!vm->SetupVirtioSerial())
         return nullptr;
 
+    // Always create virtiofs device for dynamic share management
+    if (!vm->SetupVirtioFs(config.shared_folders))
+        return nullptr;
+
     // Register virtio-mmio devices for ACPI DSDT so the kernel discovers
     // them via the "LNRO0005" HID in the virtio_mmio driver.
     if (vm->virtio_mmio_) {
@@ -131,6 +137,12 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
             kVirtioSerialMmioBase,
             static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
             kVirtioSerialIrq});
+    }
+    if (vm->virtio_mmio_fs_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioFsMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioFsBaseIrq});
     }
 
     if (!vm->LoadKernel(config)) return nullptr;
@@ -358,6 +370,28 @@ bool Vm::SetupVirtioSerial() {
         kVirtioSerialMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_serial_.get());
 
     LOG_INFO("VirtIO Serial device initialized for vdagent clipboard");
+    return true;
+}
+
+bool Vm::SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders) {
+    // Create single virtiofs device with mount tag "shared"
+    virtio_fs_ = std::make_unique<VirtioFsDevice>("shared");
+    
+    virtio_mmio_fs_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_fs_->Init(virtio_fs_.get(), mem_);
+    virtio_mmio_fs_->SetIrqCallback([this]() { InjectIrq(kVirtioFsBaseIrq); });
+    virtio_fs_->SetMmioDevice(virtio_mmio_fs_.get());
+    
+    addr_space_.AddMmioDevice(kVirtioFsMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_fs_.get());
+    
+    // Add initial shares
+    for (const auto& folder : initial_folders) {
+        if (!virtio_fs_->AddShare(folder.tag, folder.host_path, folder.readonly)) {
+            LOG_WARN("Failed to add initial share: %s -> %s", folder.tag.c_str(), folder.host_path.c_str());
+        }
+    }
+    
+    LOG_INFO("VirtIO FS device initialized (mount tag: shared, %zu initial shares)", initial_folders.size());
     return true;
 }
 
@@ -619,4 +653,27 @@ void Vm::SendClipboardRelease() {
         vdagent_handler_->SendClipboardRelease(
             VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD);
     }
+}
+
+bool Vm::AddSharedFolder(const std::string& tag, const std::string& host_path, bool readonly) {
+    if (!virtio_fs_) {
+        LOG_ERROR("VirtIO FS device not initialized");
+        return false;
+    }
+    return virtio_fs_->AddShare(tag, host_path, readonly);
+}
+
+bool Vm::RemoveSharedFolder(const std::string& tag) {
+    if (!virtio_fs_) {
+        LOG_ERROR("VirtIO FS device not initialized");
+        return false;
+    }
+    return virtio_fs_->RemoveShare(tag);
+}
+
+std::vector<std::string> Vm::GetSharedFolderTags() const {
+    if (!virtio_fs_) {
+        return {};
+    }
+    return virtio_fs_->GetShareTags();
 }

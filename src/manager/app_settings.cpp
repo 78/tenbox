@@ -180,6 +180,20 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
                 }
             }
         }
+
+        if (j.contains("shared_folders") && j["shared_folders"].is_array()) {
+            for (auto& item : j["shared_folders"]) {
+                if (item.contains("tag") && item.contains("host_path")) {
+                    SharedFolder sf;
+                    sf.tag = item["tag"].get<std::string>();
+                    sf.host_path = item["host_path"].get<std::string>();
+                    if (item.contains("readonly")) {
+                        sf.readonly = item["readonly"].get<bool>();
+                    }
+                    spec.shared_folders.push_back(std::move(sf));
+                }
+            }
+        }
     } catch (...) {
         return false;
     }
@@ -214,6 +228,16 @@ void SaveVmManifest(const VmSpec& spec) {
         fwds.push_back({{"host_port", f.host_port}, {"guest_port", f.guest_port}});
     }
     j["port_forwards"] = fwds;
+
+    json shared = json::array();
+    for (const auto& sf : spec.shared_folders) {
+        shared.push_back({
+            {"tag", sf.tag},
+            {"host_path", sf.host_path},
+            {"readonly", sf.readonly}
+        });
+    }
+    j["shared_folders"] = shared;
 
     auto path = fs::path(spec.vm_dir) / "vm.json";
     std::ofstream ofs(path, std::ios::trunc);

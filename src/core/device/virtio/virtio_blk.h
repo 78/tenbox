@@ -10,7 +10,10 @@ constexpr uint64_t VIRTIO_BLK_F_SIZE_MAX = 1ULL << 1;
 constexpr uint64_t VIRTIO_BLK_F_SEG_MAX  = 1ULL << 2;
 constexpr uint64_t VIRTIO_BLK_F_BLK_SIZE = 1ULL << 6;
 constexpr uint64_t VIRTIO_BLK_F_FLUSH    = 1ULL << 9;
+#ifndef VIRTIO_F_VERSION_1_DEFINED
+#define VIRTIO_F_VERSION_1_DEFINED
 constexpr uint64_t VIRTIO_F_VERSION_1    = 1ULL << 32;
+#endif
 
 // Request types
 constexpr uint32_t VIRTIO_BLK_T_IN    = 0;

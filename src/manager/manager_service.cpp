@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -70,6 +71,11 @@ std::string BuildRuntimeCommand(const std::string& exe, const VmSpec& spec, cons
     }
     for (const auto& forward : spec.port_forwards) {
         cmd << " --forward " << forward.host_port << ':' << forward.guest_port;
+    }
+    for (const auto& sf : spec.shared_folders) {
+        cmd << " --share \"" << sf.tag << ':' << sf.host_path;
+        if (sf.readonly) cmd << ":ro";
+        cmd << '"';
     }
     return cmd.str();
 }
@@ -243,6 +249,7 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
     if (patch.name) vm.spec.name = *patch.name;
     if (patch.nat_enabled) vm.spec.nat_enabled = *patch.nat_enabled;
     if (patch.port_forwards) vm.spec.port_forwards = *patch.port_forwards;
+    if (patch.shared_folders) vm.spec.shared_folders = *patch.shared_folders;
 
     if (!running || patch.apply_on_next_boot) {
         if (patch.memory_mb) vm.spec.memory_mb = *patch.memory_mb;
@@ -264,6 +271,22 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
             msg.fields["forward_" + std::to_string(i)] =
                 std::to_string(vm.spec.port_forwards[i].host_port) + ":" +
                 std::to_string(vm.spec.port_forwards[i].guest_port);
+        }
+        SendRuntimeMessage(vm, msg);
+    }
+
+    if (running && patch.shared_folders) {
+        ipc::Message msg;
+        msg.channel = ipc::Channel::kControl;
+        msg.kind = ipc::Kind::kRequest;
+        msg.type = "runtime.update_shared_folders";
+        msg.vm_id = vm_id;
+        msg.request_id = GetTickCount64();
+        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
+        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
+            const auto& f = vm.spec.shared_folders[i];
+            msg.fields["folder_" + std::to_string(i)] =
+                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
         }
         SendRuntimeMessage(vm, msg);
     }
@@ -786,6 +809,101 @@ bool ManagerService::SendClipboardRelease(const std::string& vm_id) {
     DWORD written = 0;
     return WriteFile(pipe, encoded.data(), static_cast<DWORD>(encoded.size()), &written, nullptr)
         && written == encoded.size();
+}
+
+bool ManagerService::AddSharedFolder(const std::string& vm_id, const SharedFolder& folder, 
+                                      std::string* error) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    auto it = vms_.find(vm_id);
+    if (it == vms_.end()) {
+        if (error) *error = "vm not found";
+        return false;
+    }
+    VmRecord& vm = it->second;
+    
+    // Check for duplicate tag
+    for (const auto& sf : vm.spec.shared_folders) {
+        if (sf.tag == folder.tag) {
+            if (error) *error = "shared folder with tag '" + folder.tag + "' already exists";
+            return false;
+        }
+    }
+    
+    // Check host path exists
+    DWORD attrs = GetFileAttributesA(folder.host_path.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (error) *error = "host path does not exist or is not a directory";
+        return false;
+    }
+    
+    vm.spec.shared_folders.push_back(folder);
+    settings::SaveVmManifest(vm.spec);
+    
+    if (vm.state == VmPowerState::kRunning) {
+        ipc::Message msg;
+        msg.channel = ipc::Channel::kControl;
+        msg.kind = ipc::Kind::kRequest;
+        msg.type = "runtime.update_shared_folders";
+        msg.vm_id = vm_id;
+        msg.request_id = GetTickCount64();
+        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
+        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
+            const auto& f = vm.spec.shared_folders[i];
+            msg.fields["folder_" + std::to_string(i)] =
+                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
+        }
+        SendRuntimeMessage(vm, msg);
+    }
+    
+    return true;
+}
+
+bool ManagerService::RemoveSharedFolder(const std::string& vm_id, const std::string& tag, 
+                                         std::string* error) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    auto it = vms_.find(vm_id);
+    if (it == vms_.end()) {
+        if (error) *error = "vm not found";
+        return false;
+    }
+    VmRecord& vm = it->second;
+    
+    auto sf_it = std::find_if(vm.spec.shared_folders.begin(), vm.spec.shared_folders.end(),
+                              [&tag](const SharedFolder& sf) { return sf.tag == tag; });
+    if (sf_it == vm.spec.shared_folders.end()) {
+        if (error) *error = "shared folder with tag '" + tag + "' not found";
+        return false;
+    }
+    
+    vm.spec.shared_folders.erase(sf_it);
+    settings::SaveVmManifest(vm.spec);
+    
+    if (vm.state == VmPowerState::kRunning) {
+        ipc::Message msg;
+        msg.channel = ipc::Channel::kControl;
+        msg.kind = ipc::Kind::kRequest;
+        msg.type = "runtime.update_shared_folders";
+        msg.vm_id = vm_id;
+        msg.request_id = GetTickCount64();
+        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
+        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
+            const auto& f = vm.spec.shared_folders[i];
+            msg.fields["folder_" + std::to_string(i)] =
+                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
+        }
+        SendRuntimeMessage(vm, msg);
+    }
+    
+    return true;
+}
+
+std::vector<SharedFolder> ManagerService::GetSharedFolders(const std::string& vm_id) const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(vms_mutex_));
+    auto it = vms_.find(vm_id);
+    if (it == vms_.end()) {
+        return {};
+    }
+    return it->second.spec.shared_folders;
 }
 
 bool ManagerService::SendConsoleInput(const std::string& vm_id, const std::string& input) {

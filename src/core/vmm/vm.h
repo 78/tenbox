@@ -17,6 +17,7 @@
 #include "core/device/virtio/virtio_input.h"
 #include "core/device/virtio/virtio_gpu.h"
 #include "core/device/virtio/virtio_serial.h"
+#include "core/device/virtio/virtio_fs.h"
 #include "core/vdagent/vdagent_handler.h"
 #include "core/net/net_backend.h"
 #include "core/arch/x86_64/acpi.h"
@@ -27,6 +28,12 @@
 #include <thread>
 #include <vector>
 
+struct VmSharedFolder {
+    std::string tag;
+    std::string host_path;
+    bool readonly = false;
+};
+
 struct VmConfig {
     std::string kernel_path;
     std::string initrd_path;
@@ -36,6 +43,7 @@ struct VmConfig {
     uint32_t cpu_count = 1;
     bool net_link_up = false;
     std::vector<PortForward> port_forwards;
+    std::vector<VmSharedFolder> shared_folders;  // Initial shared folders
     bool interactive = true;
     std::shared_ptr<ConsolePort> console_port;
     std::shared_ptr<InputPort> input_port;
@@ -71,6 +79,11 @@ public:
     void SendClipboardRequest(uint32_t type);
     void SendClipboardRelease();
 
+    // Dynamic shared folder management (runtime)
+    bool AddSharedFolder(const std::string& tag, const std::string& host_path, bool readonly = false);
+    bool RemoveSharedFolder(const std::string& tag);
+    std::vector<std::string> GetSharedFolderTags() const;
+
 private:
     Vm() = default;
 
@@ -81,6 +94,7 @@ private:
     bool SetupVirtioInput();
     bool SetupVirtioGpu(uint32_t width, uint32_t height);
     bool SetupVirtioSerial();
+    bool SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders);
     bool LoadKernel(const VmConfig& config);
 
     void InputThreadFunc();
@@ -131,6 +145,10 @@ private:
     std::unique_ptr<VirtioSerialDevice> virtio_serial_;
     std::unique_ptr<VirtioMmioDevice> virtio_mmio_serial_;
     std::unique_ptr<VDAgentHandler> vdagent_handler_;
+
+    // VirtIO FS (shared folders) - single device with multiple shares
+    std::unique_ptr<VirtioFsDevice> virtio_fs_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_fs_;
 
     std::vector<x86::VirtioMmioAcpiInfo> virtio_acpi_devs_;
 

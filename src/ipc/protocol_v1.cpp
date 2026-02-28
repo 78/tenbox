@@ -44,6 +44,7 @@ std::vector<std::string> SplitTabs(const std::string& value) {
     bool escaped = false;
     for (char ch : value) {
         if (escaped) {
+            token.push_back('\\');
             token.push_back(ch);
             escaped = false;
             continue;
@@ -59,6 +60,7 @@ std::vector<std::string> SplitTabs(const std::string& value) {
         }
         token.push_back(ch);
     }
+    if (escaped) token.push_back('\\');
     out.push_back(token);
     return out;
 }

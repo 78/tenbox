@@ -1,0 +1,25 @@
+#!/bin/bash
+# Auto-mount virtiofs "shared" and create desktop links for each subdirectory
+
+MOUNT_TAG="shared"
+MOUNT_POINT="/mnt/shared"
+MOUNT_USER="openclaw"
+USER_HOME="/home/$MOUNT_USER"
+DESKTOP_DIR="$USER_HOME/Desktop"
+
+# Wait for devices to be ready
+sleep 1
+
+# Check if already mounted
+if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    echo "virtiofs: $MOUNT_TAG already mounted at $MOUNT_POINT"
+    exit 0
+fi
+
+# Try to mount virtiofs
+if mount -t virtiofs "$MOUNT_TAG" "$MOUNT_POINT" 2>/dev/null; then
+    echo "virtiofs: mounted $MOUNT_TAG at $MOUNT_POINT"
+else
+    echo "virtiofs: no shared folders device available"
+    exit 0
+fi

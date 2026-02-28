@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <unordered_set>
 
 namespace {
 
@@ -596,6 +597,91 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
                     }
                 }
                 vm_->UpdatePortForwards(forwards);
+            }
+        }
+
+        resp.fields["ok"] = "true";
+        Send(resp);
+        return;
+    }
+
+    if (message.channel == ipc::Channel::kControl &&
+        message.kind == ipc::Kind::kRequest &&
+        message.type == "runtime.update_shared_folders") {
+        ipc::Message resp;
+        resp.kind = ipc::Kind::kResponse;
+        resp.channel = ipc::Channel::kControl;
+        resp.type = "runtime.update_shared_folders.result";
+        resp.vm_id = vm_id_;
+        resp.request_id = message.request_id;
+
+        if (!vm_) {
+            resp.fields["ok"] = "false";
+            resp.fields["error"] = "vm not attached";
+            Send(resp);
+            return;
+        }
+
+        auto it_count = message.fields.find("folder_count");
+        if (it_count == message.fields.end()) {
+            resp.fields["ok"] = "false";
+            resp.fields["error"] = "missing folder_count";
+            Send(resp);
+            return;
+        }
+
+        int count = 0;
+        auto [p, ec] = std::from_chars(
+            it_count->second.data(),
+            it_count->second.data() + it_count->second.size(), count);
+        if (ec != std::errc{} || count < 0) {
+            resp.fields["ok"] = "false";
+            resp.fields["error"] = "invalid folder_count";
+            Send(resp);
+            return;
+        }
+
+        struct FolderSpec {
+            std::string tag;
+            std::string host_path;
+            bool readonly;
+        };
+        std::vector<FolderSpec> new_folders;
+        new_folders.reserve(count);
+
+        for (int i = 0; i < count; ++i) {
+            auto it_f = message.fields.find("folder_" + std::to_string(i));
+            if (it_f == message.fields.end()) continue;
+
+            const std::string& val = it_f->second;
+            size_t pos1 = val.find('|');
+            if (pos1 == std::string::npos) continue;
+            size_t pos2 = val.find('|', pos1 + 1);
+            if (pos2 == std::string::npos) continue;
+
+            FolderSpec spec;
+            spec.tag = val.substr(0, pos1);
+            spec.host_path = val.substr(pos1 + 1, pos2 - pos1 - 1);
+            spec.readonly = (val.substr(pos2 + 1) == "1");
+            new_folders.push_back(std::move(spec));
+        }
+
+        std::vector<std::string> current_tags = vm_->GetSharedFolderTags();
+        std::unordered_set<std::string> new_tags;
+        for (const auto& f : new_folders) {
+            new_tags.insert(f.tag);
+        }
+
+        for (const auto& tag : current_tags) {
+            if (new_tags.find(tag) == new_tags.end()) {
+                vm_->RemoveSharedFolder(tag);
+            }
+        }
+
+        std::unordered_set<std::string> current_set(current_tags.begin(), current_tags.end());
+        for (const auto& f : new_folders) {
+            if (current_set.find(f.tag) == current_set.end()) {
+                vm_->AddSharedFolder(f.tag, f.host_path, f.readonly);
             }
         }
 

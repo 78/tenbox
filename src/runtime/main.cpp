@@ -28,6 +28,7 @@ static void PrintUsage(const char* prog) {
         "  --cpus <N>           Number of vCPUs (default: 1, max: 128)\n"
         "  --net                Start with network link up (default: link down)\n"
         "  --forward H:G        Port forward host:H -> guest:G (repeatable)\n"
+        "  --share TAG:PATH[:ro] Share host directory (repeatable)\n"
         "  --version            Show version\n"
         "  --help               Show this help\n",
         prog);
@@ -95,6 +96,31 @@ int main(int argc, char* argv[]) {
                 fprintf(stderr, "Invalid --forward format: %s (expected H:G)\n", v);
                 return 1;
             }
+        } else if (Arg("--share")) {
+            auto v = NextArg(); if (!v) return 1;
+            std::string arg(v);
+            VmSharedFolder sf;
+            sf.readonly = false;
+            
+            size_t first_colon = arg.find(':');
+            if (first_colon == std::string::npos) {
+                fprintf(stderr, "Invalid --share format: %s (expected TAG:PATH[:ro])\n", v);
+                return 1;
+            }
+            sf.tag = arg.substr(0, first_colon);
+            std::string rest = arg.substr(first_colon + 1);
+            
+            if (rest.size() >= 3 && rest.substr(rest.size() - 3) == ":ro") {
+                sf.readonly = true;
+                rest = rest.substr(0, rest.size() - 3);
+            }
+            sf.host_path = rest;
+            
+            if (sf.tag.empty() || sf.host_path.empty()) {
+                fprintf(stderr, "Invalid --share format: %s (empty tag or path)\n", v);
+                return 1;
+            }
+            config.shared_folders.push_back(sf);
         } else if (Arg("--version") || Arg("-v")) {
             PrintVersion();
             return 0;

@@ -140,6 +140,11 @@ public:
     bool SendClipboardRequest(const std::string& vm_id, uint32_t type);
     bool SendClipboardRelease(const std::string& vm_id);
 
+    // Shared folder management
+    bool AddSharedFolder(const std::string& vm_id, const SharedFolder& folder, std::string* error);
+    bool RemoveSharedFolder(const std::string& vm_id, const std::string& tag, std::string* error);
+    std::vector<SharedFolder> GetSharedFolders(const std::string& vm_id) const;
+
 private:
     bool SendRuntimeMessage(VmRecord& vm, const ipc::Message& msg);
     bool EnsurePipeConnected(VmRecord& vm);
