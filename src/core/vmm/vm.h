@@ -18,6 +18,7 @@
 #include "core/device/virtio/virtio_gpu.h"
 #include "core/device/virtio/virtio_serial.h"
 #include "core/device/virtio/virtio_fs.h"
+#include "core/device/virtio/virtio_snd.h"
 #include "core/vdagent/vdagent_handler.h"
 #include "core/guest_agent/guest_agent_handler.h"
 #include "core/net/net_backend.h"
@@ -50,6 +51,7 @@ struct VmConfig {
     std::shared_ptr<InputPort> input_port;
     std::shared_ptr<DisplayPort> display_port;
     std::shared_ptr<ClipboardPort> clipboard_port;
+    std::shared_ptr<AudioPort> audio_port;
     uint32_t display_width = 1024;
     uint32_t display_height = 768;
 };
@@ -101,6 +103,7 @@ private:
     bool SetupVirtioGpu(uint32_t width, uint32_t height);
     bool SetupVirtioSerial();
     bool SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders);
+    bool SetupVirtioSnd();
     bool LoadKernel(const VmConfig& config);
 
     void InputThreadFunc();
@@ -157,6 +160,10 @@ private:
     std::unique_ptr<VirtioFsDevice> virtio_fs_;
     std::unique_ptr<VirtioMmioDevice> virtio_mmio_fs_;
 
+    // VirtIO Sound (audio playback)
+    std::unique_ptr<VirtioSndDevice> virtio_snd_;
+    std::unique_ptr<VirtioMmioDevice> virtio_mmio_snd_;
+
     std::vector<x86::VirtioMmioAcpiInfo> virtio_acpi_devs_;
 
     std::atomic<bool> running_{false};
@@ -167,5 +174,6 @@ private:
     std::shared_ptr<InputPort> input_port_;
     std::shared_ptr<DisplayPort> display_port_;
     std::shared_ptr<ClipboardPort> clipboard_port_;
+    std::shared_ptr<AudioPort> audio_port_;
     uint32_t inject_prev_buttons_ = 0;
 };

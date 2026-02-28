@@ -80,6 +80,16 @@ private:
     std::function<void(const ClipboardEvent&)> event_handler_;
 };
 
+class ManagedAudioPort final : public AudioPort {
+public:
+    void SubmitPcm(const AudioChunk& chunk) override;
+    void SetPcmHandler(std::function<void(const AudioChunk&)> handler);
+
+private:
+    std::mutex mutex_;
+    std::function<void(const AudioChunk&)> pcm_handler_;
+};
+
 class RuntimeControlService {
 public:
     RuntimeControlService(std::string vm_id, std::string pipe_name);
@@ -93,6 +103,7 @@ public:
     std::shared_ptr<ManagedInputPort> GetInputPort() const { return input_port_; }
     std::shared_ptr<ManagedDisplayPort> GetDisplayPort() const { return display_port_; }
     std::shared_ptr<ManagedClipboardPort> GetClipboardPort() const { return clipboard_port_; }
+    std::shared_ptr<ManagedAudioPort> GetAudioPort() const { return audio_port_; }
     void PublishState(const std::string& state, int exit_code = 0);
 
 private:
@@ -108,6 +119,7 @@ private:
     std::shared_ptr<ManagedInputPort> input_port_ = std::make_shared<ManagedInputPort>();
     std::shared_ptr<ManagedDisplayPort> display_port_ = std::make_shared<ManagedDisplayPort>();
     std::shared_ptr<ManagedClipboardPort> clipboard_port_ = std::make_shared<ManagedClipboardPort>();
+    std::shared_ptr<ManagedAudioPort> audio_port_ = std::make_shared<ManagedAudioPort>();
 
     std::atomic<bool> running_{false};
 
@@ -131,6 +143,10 @@ private:
     // but caps memory usage.
     static constexpr size_t kMaxPendingFrames = 8;
     std::deque<std::string> frame_queue_;
+
+    // Bounded queue for audio PCM chunks.
+    static constexpr size_t kMaxPendingAudio = 32;
+    std::deque<std::string> audio_queue_;
 };
 
 std::string EncodeHex(const uint8_t* data, size_t size);

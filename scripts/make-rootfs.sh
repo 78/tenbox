@@ -130,6 +130,7 @@ STEPS=(
     "config_chrome"
     "install_devtools"
     "install_usertools"
+    "install_audio"
     "install_nodejs"
     "install_openclaw"
     "config_locale"
@@ -157,6 +158,7 @@ STEP_DESCRIPTIONS=(
     "Configure Chrome"
     "Install development tools"
     "Install user tools (editor, viewer, etc.)"
+    "Install audio (PulseAudio + ALSA)"
     "Install Node.js 22"
     "Install OpenClaw"
     "Configure locale"
@@ -591,6 +593,21 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
 EOF
 }
 
+do_install_audio() {
+    sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
+if dpkg -l pulseaudio &>/dev/null; then
+    echo "  Audio packages already installed"
+    exit 0
+fi
+echo "Installing PulseAudio + ALSA for virtio-snd..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    pulseaudio pulseaudio-utils \
+    alsa-utils \
+    pavucontrol \
+    xfce4-pulseaudio-plugin
+EOF
+}
+
 do_install_nodejs() {
     # Cache NodeSource setup script (atomic write)
     if [ ! -f "$CACHE_NODESOURCE" ] || [ ! -s "$CACHE_NODESOURCE" ]; then
@@ -826,6 +843,7 @@ run_step "install_chrome" "Installing Chrome"         do_install_chrome
 run_step "config_chrome"  "Configuring Chrome"        do_config_chrome
 run_step "install_devtools" "Installing dev tools"    do_install_devtools
 run_step "install_usertools" "Installing user tools"  do_install_usertools
+run_step "install_audio"  "Installing audio"          do_install_audio
 run_step "install_nodejs" "Installing Node.js"        do_install_nodejs
 run_step "install_openclaw" "Installing OpenClaw"     do_install_openclaw
 run_step "config_locale"  "Configuring locale"        do_config_locale

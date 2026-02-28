@@ -312,20 +312,43 @@ bool ManagerService::StartVm(const std::string& vm_id, std::string* error) {
     PROCESS_INFORMATION pi{};
     si.cb = sizeof(si);
 
+    // Redirect runtime stdout/stderr to a log file in the VM directory
+    HANDLE hLog = INVALID_HANDLE_VALUE;
+    if (!vm.spec.vm_dir.empty()) {
+        std::string log_path = (fs::path(vm.spec.vm_dir) / "runtime.log").string();
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        hLog = CreateFileA(log_path.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                           &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hLog != INVALID_HANDLE_VALUE) {
+            si.dwFlags |= STARTF_USESTDHANDLES;
+            si.hStdOutput = hLog;
+            si.hStdError  = hLog;
+            si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
+        }
+    }
+
     std::vector<char> cmdline(cmd.begin(), cmd.end());
     cmdline.push_back('\0');
 
-    if (!CreateProcessA(
+    BOOL ok = CreateProcessA(
             nullptr,
             cmdline.data(),
             nullptr,
             nullptr,
-            FALSE,
+            hLog != INVALID_HANDLE_VALUE ? TRUE : FALSE,
             CREATE_NO_WINDOW | CREATE_SUSPENDED,
             nullptr,
             nullptr,
             &si,
-            &pi)) {
+            &pi);
+
+    if (hLog != INVALID_HANDLE_VALUE) {
+        CloseHandle(hLog);
+    }
+
+    if (!ok) {
         if (error) *error = "failed to launch vm-runtime process";
         return false;
     }
@@ -621,6 +644,11 @@ void ManagerService::SetClipboardDataCallback(ClipboardDataCallback cb) {
 void ManagerService::SetClipboardRequestCallback(ClipboardRequestCallback cb) {
     std::lock_guard<std::mutex> lock(vms_mutex_);
     clipboard_request_callback_ = std::move(cb);
+}
+
+void ManagerService::SetAudioPcmCallback(AudioPcmCallback cb) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    audio_pcm_callback_ = std::move(cb);
 }
 
 void ManagerService::SetGuestAgentStateCallback(GuestAgentStateCallback cb) {
@@ -1260,6 +1288,33 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
             }
             if (cb) cb(vm_id, connected);
         }
+        return;
+    }
+
+    // Audio PCM events from VM
+    if (msg.channel == ipc::Channel::kAudio &&
+        msg.kind == ipc::Kind::kEvent &&
+        msg.type == "audio.pcm") {
+        AudioChunk chunk;
+        auto get = [&](const char* key) -> uint32_t {
+            auto it = msg.fields.find(key);
+            return (it != msg.fields.end()) ? static_cast<uint32_t>(std::strtoul(it->second.c_str(), nullptr, 10)) : 0;
+        };
+        chunk.sample_rate = get("sample_rate");
+        chunk.channels = static_cast<uint16_t>(get("channels"));
+        if (!msg.payload.empty()) {
+            size_t sample_count = msg.payload.size() / sizeof(int16_t);
+            chunk.pcm.resize(sample_count);
+            std::memcpy(chunk.pcm.data(), msg.payload.data(),
+                         sample_count * sizeof(int16_t));
+        }
+
+        AudioPcmCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(vms_mutex_);
+            cb = audio_pcm_callback_;
+        }
+        if (cb) cb(vm_id, chunk);
         return;
     }
 

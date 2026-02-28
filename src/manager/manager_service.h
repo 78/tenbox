@@ -129,6 +129,11 @@ public:
     void SetClipboardDataCallback(ClipboardDataCallback cb);
     void SetClipboardRequestCallback(ClipboardRequestCallback cb);
 
+    // Audio PCM callback: audio data from VM to host
+    using AudioPcmCallback = std::function<void(const std::string& vm_id,
+        const AudioChunk& chunk)>;
+    void SetAudioPcmCallback(AudioPcmCallback cb);
+
     // Guest Agent state callback
     using GuestAgentStateCallback = std::function<void(const std::string& vm_id, bool connected)>;
     void SetGuestAgentStateCallback(GuestAgentStateCallback cb);
@@ -182,6 +187,7 @@ private:
     ClipboardGrabCallback clipboard_grab_callback_;
     ClipboardDataCallback clipboard_data_callback_;
     ClipboardRequestCallback clipboard_request_callback_;
+    AudioPcmCallback audio_pcm_callback_;
     GuestAgentStateCallback guest_agent_state_callback_;
     void* job_object_ = nullptr;
 };

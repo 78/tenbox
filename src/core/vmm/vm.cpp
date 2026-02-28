@@ -17,6 +17,8 @@ static constexpr uint64_t kVirtioSerialMmioBase = 0xd0000a00;
 static constexpr uint8_t  kVirtioSerialIrq      = 7;
 static constexpr uint64_t kVirtioFsMmioBase     = 0xd0000c00;
 static constexpr uint8_t  kVirtioFsBaseIrq      = 16;
+static constexpr uint64_t kVirtioSndMmioBase    = 0xd0000e00;
+static constexpr uint8_t  kVirtioSndIrq         = 17;
 
 Vm::~Vm() {
     running_ = false;
@@ -69,6 +71,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     vm->input_port_ = config.input_port;
     vm->display_port_ = config.display_port;
     vm->clipboard_port_ = config.clipboard_port;
+    vm->audio_port_ = config.audio_port;
     if (!vm->console_port_ && config.interactive) {
         vm->console_port_ = std::make_shared<StdConsolePort>();
     }
@@ -98,6 +101,9 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
 
     // Always create virtiofs device for dynamic share management
     if (!vm->SetupVirtioFs(config.shared_folders))
+        return nullptr;
+
+    if (!vm->SetupVirtioSnd())
         return nullptr;
 
     // Register virtio-mmio devices for ACPI DSDT so the kernel discovers
@@ -143,6 +149,12 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
             kVirtioFsMmioBase,
             static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
             kVirtioFsBaseIrq});
+    }
+    if (vm->virtio_mmio_snd_) {
+        vm->virtio_acpi_devs_.push_back({
+            kVirtioSndMmioBase,
+            static_cast<uint32_t>(VirtioMmioDevice::kMmioSize),
+            kVirtioSndIrq});
     }
 
     if (!vm->LoadKernel(config)) return nullptr;
@@ -406,6 +418,25 @@ bool Vm::SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders) {
     }
     
     LOG_INFO("VirtIO FS device initialized (mount tag: shared, %zu initial shares)", initial_folders.size());
+    return true;
+}
+
+bool Vm::SetupVirtioSnd() {
+    virtio_snd_ = std::make_unique<VirtioSndDevice>();
+    virtio_snd_->SetMemMap(mem_);
+
+    if (audio_port_) {
+        virtio_snd_->SetAudioPort(audio_port_);
+    }
+
+    virtio_mmio_snd_ = std::make_unique<VirtioMmioDevice>();
+    virtio_mmio_snd_->Init(virtio_snd_.get(), mem_);
+    virtio_mmio_snd_->SetIrqCallback([this]() { InjectIrq(kVirtioSndIrq); });
+    virtio_snd_->SetMmioDevice(virtio_mmio_snd_.get());
+    addr_space_.AddMmioDevice(
+        kVirtioSndMmioBase, VirtioMmioDevice::kMmioSize, virtio_mmio_snd_.get());
+
+    LOG_INFO("VirtIO Sound device initialized (playback)");
     return true;
 }
 

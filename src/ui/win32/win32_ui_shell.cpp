@@ -20,6 +20,7 @@
 #pragma comment(lib, "comctl32.lib")
 
 #include "common/ports.h"
+#include "platform/windows/audio/wasapi_audio_player.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -130,9 +131,16 @@ struct Win32UiShell::Impl {
     int selected_index = -1;
 
     std::unordered_map<std::string, VmUiState> vm_ui_states;
+    std::unordered_map<std::string, std::unique_ptr<WasapiAudioPlayer>> audio_players;
 
     VmUiState& GetVmUiState(const std::string& vm_id) {
         return vm_ui_states[vm_id];
+    }
+
+    WasapiAudioPlayer& GetAudioPlayer(const std::string& vm_id) {
+        auto& ptr = audio_players[vm_id];
+        if (!ptr) ptr = std::make_unique<WasapiAudioPlayer>();
+        return *ptr;
     }
 };
 
@@ -1003,6 +1011,14 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
         });
     });
 
+    manager_.SetAudioPcmCallback(
+        [this](const std::string& vm_id, const AudioChunk& chunk) {
+            if (chunk.pcm.empty()) return;
+            WasapiAudioPlayer& player = impl_->GetAudioPlayer(vm_id);
+            player.SubmitPcm(chunk.sample_rate, chunk.channels,
+                             chunk.pcm.data(), chunk.pcm.size());
+        });
+
     manager_.SetStateChangeCallback([this](const std::string& vm_id) {
         InvokeOnUiThread([this, vm_id]() {
             RefreshVmList();
@@ -1018,6 +1034,7 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                 ui_state.fb_height = 0;
                 ui_state.framebuffer.clear();
                 ui_state.cursor_pixels.clear();
+                impl_->audio_players.erase(vm_id);
             }
 
             bool is_current = (impl_->selected_index >= 0 &&

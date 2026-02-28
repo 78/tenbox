@@ -160,6 +160,7 @@ int main(int argc, char* argv[]) {
         config.input_port = control->GetInputPort();
         config.display_port = control->GetDisplayPort();
         config.clipboard_port = control->GetClipboardPort();
+        config.audio_port = control->GetAudioPort();
     }
 
     auto vm = Vm::Create(config);

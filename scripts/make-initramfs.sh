@@ -89,6 +89,12 @@ VIRTIO_MODS=(
     "crypto/crc32c_generic.ko"
     "lib/libcrc32c.ko"
     "fs/ext4/ext4.ko"
+    # ALSA / virtio-snd modules for audio playback
+    "sound/soundcore.ko"
+    "sound/core/snd.ko"
+    "sound/core/snd-timer.ko"
+    "sound/core/snd-pcm.ko"
+    "sound/virtio/virtio_snd.ko"
 )
 
 copy_module() {
@@ -111,6 +117,8 @@ copy_module() {
     return 1
 }
 
+EXTRA_MODDIR="$SCRIPT_DIR/extra-modules"
+
 for relmod in "${VIRTIO_MODS[@]}"; do
     modname="$(basename "$relmod")"
     if ! copy_module "$relmod"; then
@@ -120,6 +128,9 @@ for relmod in "${VIRTIO_MODS[@]}"; do
         if [ -n "$found" ]; then
             rel="${found#$MODDIR/}"
             copy_module "$rel" || echo "  WARNING: $modname found but copy failed"
+        elif [ -f "$EXTRA_MODDIR/$modname" ]; then
+            cp "$EXTRA_MODDIR/$modname" "$DESTDIR/"
+            echo "  Copied: $modname (from extra-modules/)"
         else
             echo "  WARNING: $modname not found in $KPKG"
         fi
@@ -163,6 +174,14 @@ done
 
 # Load virtio-fs / fuse modules for shared folder support
 for mod in fuse virtiofs; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load ALSA / virtio sound modules for audio playback
+for mod in soundcore snd snd-timer snd-pcm virtio_snd; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"

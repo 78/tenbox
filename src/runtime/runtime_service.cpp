@@ -169,6 +169,22 @@ void ManagedClipboardPort::SetEventHandler(std::function<void(const ClipboardEve
     event_handler_ = std::move(handler);
 }
 
+// ── ManagedAudioPort ──────────────────────────────────────────────────
+
+void ManagedAudioPort::SubmitPcm(const AudioChunk& chunk) {
+    std::function<void(const AudioChunk&)> handler;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        handler = pcm_handler_;
+    }
+    if (handler) handler(chunk);
+}
+
+void ManagedAudioPort::SetPcmHandler(std::function<void(const AudioChunk&)> handler) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pcm_handler_ = std::move(handler);
+}
+
 std::string EncodeHex(const uint8_t* data, size_t size) {
     static constexpr char kDigits[] = "0123456789abcdef";
     std::string out;
@@ -326,6 +342,30 @@ RuntimeControlService::RuntimeControlService(std::string vm_id, std::string pipe
         }
         send_cv_.notify_one();
     });
+
+    audio_port_->SetPcmHandler([this](const AudioChunk& chunk) {
+        ipc::Message event;
+        event.kind = ipc::Kind::kEvent;
+        event.channel = ipc::Channel::kAudio;
+        event.type = "audio.pcm";
+        event.vm_id = vm_id_;
+        event.request_id = next_event_id_++;
+        event.fields["sample_rate"] = std::to_string(chunk.sample_rate);
+        event.fields["channels"] = std::to_string(chunk.channels);
+        event.payload.resize(chunk.pcm.size() * sizeof(int16_t));
+        std::memcpy(event.payload.data(), chunk.pcm.data(),
+                     chunk.pcm.size() * sizeof(int16_t));
+
+        std::string encoded = ipc::Encode(event);
+        {
+            std::lock_guard<std::mutex> lock(send_queue_mutex_);
+            audio_queue_.push_back(std::move(encoded));
+            if (audio_queue_.size() > kMaxPendingAudio) {
+                audio_queue_.pop_front();
+            }
+        }
+        send_cv_.notify_one();
+    });
 }
 
 RuntimeControlService::~RuntimeControlService() {
@@ -356,7 +396,8 @@ bool RuntimeControlService::Start() {
                 } else {
                     send_cv_.wait(lock, [this]() {
                         return !running_ || !console_queue_.empty() ||
-                               !frame_queue_.empty() || console_port_->HasPending();
+                               !frame_queue_.empty() || !audio_queue_.empty() ||
+                               console_port_->HasPending();
                     });
                 }
 
@@ -390,6 +431,13 @@ bool RuntimeControlService::Start() {
                 while (frames_to_send-- > 0 && !frame_queue_.empty()) {
                     batch += std::move(frame_queue_.front());
                     frame_queue_.pop_front();
+                }
+
+                // Send audio PCM chunks.
+                size_t audio_to_send = audio_queue_.size();
+                while (audio_to_send-- > 0 && !audio_queue_.empty()) {
+                    batch += std::move(audio_queue_.front());
+                    audio_queue_.pop_front();
                 }
             }
 
