@@ -50,6 +50,7 @@ enum class S {
     kToolbarStop,
     kToolbarReboot,
     kToolbarShutdown,
+    kToolbarSharedFolders,
 
     // Tabs
     kTabInfo,
@@ -102,6 +103,8 @@ enum class S {
     kDlgBtnCreate,
     kDlgBtnSave,
     kDlgBtnCancel,
+    kDlgBtnClose,
+    kDlgSharedFolders,
 
     // Confirmations
     kConfirmDeleteTitle,

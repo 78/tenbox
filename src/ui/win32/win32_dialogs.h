@@ -13,3 +13,6 @@
 bool ShowCreateVmDialog(HWND parent, ManagerService& mgr, std::string* error);
 bool ShowEditVmDialog(HWND parent, ManagerService& mgr,
                       const VmRecord& rec, std::string* error);
+
+// Modal dialog for managing shared folders of a VM.
+void ShowSharedFoldersDialog(HWND parent, ManagerService& mgr, const std::string& vm_id);

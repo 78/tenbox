@@ -1,0 +1,35 @@
+#include "version.h"
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    TENBOX_VERSION_RC
+PRODUCTVERSION TENBOX_VERSION_RC
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+FILEFLAGS      VS_FF_DEBUG
+#else
+FILEFLAGS      0
+#endif
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      TENBOX_COMPANY_NAME
+            VALUE "FileDescription",  "TenBox VM Runtime"
+            VALUE "FileVersion",      TENBOX_VERSION_STR
+            VALUE "InternalName",     "tenbox-vm-runtime"
+            VALUE "LegalCopyright",   TENBOX_COPYRIGHT
+            VALUE "OriginalFilename", "tenbox-vm-runtime.exe"
+            VALUE "ProductName",      TENBOX_PRODUCT_NAME
+            VALUE "ProductVersion",   TENBOX_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

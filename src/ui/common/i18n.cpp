@@ -29,6 +29,7 @@ static const char* kStringsEn[] = {
     "Stop",                              // kToolbarStop
     "Reboot",                            // kToolbarReboot
     "Shutdown",                          // kToolbarShutdown
+    "Shared Folders",                    // kToolbarSharedFolders
     "Basic Info",                        // kTabInfo
     "Console",                           // kTabConsole
     "Screen",                            // kTabDisplay
@@ -69,6 +70,8 @@ static const char* kStringsEn[] = {
     "Create",                            // kDlgBtnCreate
     "Save",                              // kDlgBtnSave
     "Cancel",                            // kDlgBtnCancel
+    "Close",                             // kDlgBtnClose
+    "Shared Folders",                    // kDlgSharedFolders
     "Delete VM",                         // kConfirmDeleteTitle
     "Are you sure you want to delete '%s'?\nThis will remove all VM files permanently.",  // kConfirmDeleteMsg
     "Confirm Exit",                      // kConfirmExitTitle
@@ -124,6 +127,7 @@ static const char* kStringsZhCN[] = {
     "停止",                              // kToolbarStop
     "重启",                              // kToolbarReboot
     "关机",                              // kToolbarShutdown
+    "共享文件夹",                        // kToolbarSharedFolders
     "基本信息",                          // kTabInfo
     "控制台",                            // kTabConsole
     "屏幕显示",                          // kTabDisplay
@@ -164,6 +168,8 @@ static const char* kStringsZhCN[] = {
     "创建",                              // kDlgBtnCreate
     "保存",                              // kDlgBtnSave
     "取消",                              // kDlgBtnCancel
+    "关闭",                              // kDlgBtnClose
+    "共享文件夹",                        // kDlgSharedFolders
     "删除虚拟机",                        // kConfirmDeleteTitle
     "确认删除 '%s' 吗？\n此操作将永久删除该虚拟机的所有文件。",  // kConfirmDeleteMsg
     "确认退出",                          // kConfirmExitTitle

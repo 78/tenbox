@@ -12,8 +12,9 @@ IDB_TOOLBAR_EDIT      BITMAP "resources/edit.bmp"
 IDB_TOOLBAR_DELETE    BITMAP "resources/delete.bmp"
 IDB_TOOLBAR_START     BITMAP "resources/start.bmp"
 IDB_TOOLBAR_STOP      BITMAP "resources/stop.bmp"
-IDB_TOOLBAR_REBOOT    BITMAP "resources/reboot.bmp"
-IDB_TOOLBAR_SHUTDOWN  BITMAP "resources/shutdown.bmp"
+IDB_TOOLBAR_REBOOT          BITMAP "resources/reboot.bmp"
+IDB_TOOLBAR_SHUTDOWN        BITMAP "resources/shutdown.bmp"
+IDB_TOOLBAR_SHARED_FOLDERS  BITMAP "resources/shared_folders.bmp"
 
 // Version information
 VS_VERSION_INFO VERSIONINFO

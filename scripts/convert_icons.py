@@ -27,6 +27,7 @@ ICONS = [
     "stop",
     "reboot",
     "shutdown",
+    "shared_folders",
 ]
 
 def convert_icon(name: str) -> bool:

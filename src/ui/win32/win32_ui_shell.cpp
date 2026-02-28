@@ -4,7 +4,6 @@
 #include "ui/win32/components/info_tab.h"
 #include "ui/win32/components/console_tab.h"
 #include "ui/win32/components/vm_listbox.h"
-#include "ui/win32/components/shared_folders_tab.h"
 #include "ui/common/i18n.h"
 #include "manager/app_settings.h"
 #include "manager/resource.h"
@@ -35,17 +34,18 @@
 // ── Menu / toolbar command IDs ──
 
 enum CmdId : UINT {
-    IDM_NEW_VM      = 1001,
-    IDM_EXIT        = 1002,
-    IDM_START       = 1010,
-    IDM_STOP        = 1011,
-    IDM_REBOOT      = 1012,
-    IDM_SHUTDOWN    = 1013,
-    IDM_EDIT        = 1014,
-    IDM_DELETE      = 1015,
-    IDM_WEBSITE     = 1020,
-    IDM_CHECK_UPDATE = 1021,
-    IDM_ABOUT       = 1022,
+    IDM_NEW_VM        = 1001,
+    IDM_EXIT          = 1002,
+    IDM_START         = 1010,
+    IDM_STOP          = 1011,
+    IDM_REBOOT        = 1012,
+    IDM_SHUTDOWN      = 1013,
+    IDM_EDIT          = 1014,
+    IDM_DELETE        = 1015,
+    IDM_SHARED_FOLDERS = 1016,
+    IDM_WEBSITE       = 1020,
+    IDM_CHECK_UPDATE  = 1021,
+    IDM_ABOUT         = 1022,
 };
 
 // ── Control IDs ──
@@ -69,6 +69,8 @@ static constexpr int kLeftPaneWidth = 260;
 extern bool ShowCreateVmDialog(HWND parent, ManagerService& mgr, std::string* error);
 extern bool ShowEditVmDialog(HWND parent, ManagerService& mgr,
                              const VmRecord& rec, std::string* error);
+extern void ShowSharedFoldersDialog(HWND parent, ManagerService& mgr,
+                                    const std::string& vm_id);
 
 // ── Static singleton HWND (needed for InvokeOnUiThread) ──
 
@@ -125,7 +127,6 @@ struct Win32UiShell::Impl {
     VmListBox vm_listbox;
     InfoTab info_tab;
     ConsoleTab console_tab;
-    SharedFoldersTab shared_folders_tab;
     std::unique_ptr<DisplayPanel> display_panel;
 
     std::vector<VmRecord> records;
@@ -243,11 +244,12 @@ static HIMAGELIST CreateToolbarImageList(HINSTANCE hinst) {
         IDB_TOOLBAR_STOP,
         IDB_TOOLBAR_REBOOT,
         IDB_TOOLBAR_SHUTDOWN,
+        IDB_TOOLBAR_SHARED_FOLDERS,
     };
 
     HIMAGELIST hil = ImageList_Create(
         kToolbarIconSize, kToolbarIconSize,
-        ILC_COLOR32 | ILC_MASK, 7, 0);
+        ILC_COLOR32 | ILC_MASK, 8, 0);
     if (!hil) return nullptr;
 
     for (UINT id : bmp_ids) {
@@ -283,14 +285,16 @@ static HWND CreateToolbar(HWND parent, HINSTANCE hinst) {
 
     using S = i18n::S;
     const struct { UINT id; const char* text; int icon_idx; } items[] = {
-        {IDM_NEW_VM,   i18n::tr(S::kToolbarNewVm),   0},
-        {IDM_EDIT,     i18n::tr(S::kToolbarEdit),    1},
-        {IDM_DELETE,   i18n::tr(S::kToolbarDelete),  2},
-        {0,            nullptr,                      -1},
-        {IDM_START,    i18n::tr(S::kToolbarStart),   3},
-        {IDM_STOP,     i18n::tr(S::kToolbarStop),    4},
-        {IDM_REBOOT,   i18n::tr(S::kToolbarReboot),  5},
-        {IDM_SHUTDOWN, i18n::tr(S::kToolbarShutdown),6},
+        {IDM_NEW_VM,        i18n::tr(S::kToolbarNewVm),       0},
+        {IDM_EDIT,          i18n::tr(S::kToolbarEdit),        1},
+        {IDM_DELETE,        i18n::tr(S::kToolbarDelete),      2},
+        {0,                 nullptr,                          -1},
+        {IDM_START,         i18n::tr(S::kToolbarStart),       3},
+        {IDM_STOP,          i18n::tr(S::kToolbarStop),        4},
+        {IDM_REBOOT,        i18n::tr(S::kToolbarReboot),      5},
+        {IDM_SHUTDOWN,      i18n::tr(S::kToolbarShutdown),    6},
+        {0,                 nullptr,                          -1},
+        {IDM_SHARED_FOLDERS,i18n::tr(S::kToolbarSharedFolders),  7},
     };
 
     for (const auto& item : items) {
@@ -315,10 +319,9 @@ static HWND CreateToolbar(HWND parent, HINSTANCE hinst) {
 
 using Impl = Win32UiShell::Impl;
 
-static constexpr int kTabInfo     = 0;
-static constexpr int kTabConsole  = 1;
-static constexpr int kTabDisplay  = 2;
-static constexpr int kTabSharedFs = 3;
+static constexpr int kTabInfo    = 0;
+static constexpr int kTabConsole = 1;
+static constexpr int kTabDisplay = 2;
 
 // Resize window to fit VM display at 1:1 pixel ratio
 static void ResizeWindowForDisplay(Impl* p, uint32_t vm_width, uint32_t vm_height) {
@@ -406,7 +409,6 @@ static void LayoutControls(Impl* p) {
     // Hide all right-pane controls first
     p->info_tab.Show(false);
     p->console_tab.Show(false);
-    p->shared_folders_tab.Show(false);
     if (p->display_panel) p->display_panel->SetVisible(false);
 
     bool has_selection = p->selected_index >= 0 &&
@@ -455,9 +457,6 @@ static void LayoutControls(Impl* p) {
                     Impl::kResizeDebounceMs, nullptr);
             }
         }
-    } else if (cur_tab == kTabSharedFs) {
-        p->shared_folders_tab.Show(true);
-        p->shared_folders_tab.Layout(px, py, pw, ph);
     }
 }
 
@@ -478,12 +477,13 @@ static void UpdateCommandStates(Impl* p) {
         }
     };
 
-    EnableCmd(IDM_START,    has_sel && !running);
-    EnableCmd(IDM_STOP,     has_sel && running);
-    EnableCmd(IDM_REBOOT,   has_sel && running && !stopping && ga_ok);
-    EnableCmd(IDM_SHUTDOWN, has_sel && running && !stopping && ga_ok);
-    EnableCmd(IDM_EDIT,     has_sel);
-    EnableCmd(IDM_DELETE,   has_sel && !running);
+    EnableCmd(IDM_START,          has_sel && !running);
+    EnableCmd(IDM_STOP,           has_sel && running);
+    EnableCmd(IDM_REBOOT,         has_sel && running && !stopping && ga_ok);
+    EnableCmd(IDM_SHUTDOWN,       has_sel && running && !stopping && ga_ok);
+    EnableCmd(IDM_EDIT,           has_sel);
+    EnableCmd(IDM_DELETE,         has_sel && !running);
+    EnableCmd(IDM_SHARED_FOLDERS, has_sel);
 
     p->console_tab.SetEnabled(running);
 }
@@ -523,16 +523,6 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         UINT cmd = LOWORD(wp);
         UINT code = HIWORD(wp);
 
-        // Delegate to SharedFoldersTab
-        if (p->selected_index >= 0 &&
-            p->selected_index < static_cast<int>(p->records.size())) {
-            const std::string& vm_id = p->records[p->selected_index].spec.vm_id;
-            if (p->shared_folders_tab.HandleCommand(hwnd, cmd, code,
-                    shell->manager_, vm_id)) {
-                return 0;
-            }
-        }
-
         // ListBox selection change
         if (cmd == VmListBox::kControlId && code == LBN_SELCHANGE) {
             int sel = static_cast<int>(SendMessageA(p->vm_listbox.handle(), LB_GETCURSEL, 0, 0));
@@ -564,10 +554,6 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                 } else {
                     p->display_panel->Clear();
-                }
-
-                if (new_state.current_tab == kTabSharedFs) {
-                    p->shared_folders_tab.Refresh(shell->manager_, new_vm_id);
                 }
 
                 LayoutControls(p);
@@ -684,6 +670,14 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SendMessageA(p->statusbar, SB_SETTEXTA, 0, reinterpret_cast<LPARAM>(status.c_str()));
             return 0;
         }
+        case IDM_SHARED_FOLDERS: {
+            if (p->selected_index < 0 ||
+                p->selected_index >= static_cast<int>(p->records.size()))
+                break;
+            const std::string& vm_id = p->records[p->selected_index].spec.vm_id;
+            ShowSharedFoldersDialog(hwnd, shell->manager_, vm_id);
+            return 0;
+        }
         case IDM_EDIT: {
             if (p->selected_index < 0 ||
                 p->selected_index >= static_cast<int>(p->records.size()))
@@ -742,11 +736,6 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (p->selected_index >= 0 &&
                 p->selected_index < static_cast<int>(p->records.size())) {
                 p->GetVmUiState(p->records[p->selected_index].spec.vm_id).current_tab = cur_tab;
-            }
-            if (cur_tab == kTabSharedFs && p->selected_index >= 0 &&
-                p->selected_index < static_cast<int>(p->records.size())) {
-                p->shared_folders_tab.Refresh(shell->manager_,
-                    p->records[p->selected_index].spec.vm_id);
             }
             LayoutControls(p);
         }
@@ -891,7 +880,6 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     impl_->vm_listbox.Create(impl_->hwnd, hinst, impl_->ui_font);
     impl_->info_tab.Create(impl_->hwnd, hinst, impl_->ui_font);
     impl_->console_tab.Create(impl_->hwnd, hinst, impl_->mono_font, impl_->ui_font);
-    impl_->shared_folders_tab.Create(impl_->hwnd, hinst, impl_->ui_font);
 
     // Tab control
     impl_->tab = CreateWindowExA(0, WC_TABCONTROLA, nullptr,
@@ -912,9 +900,6 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
             reinterpret_cast<LPARAM>(&ti));
         ti.pszText = const_cast<char*>(i18n::tr(i18n::S::kTabDisplay));
         SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabDisplay,
-            reinterpret_cast<LPARAM>(&ti));
-        ti.pszText = const_cast<char*>(i18n::tr(i18n::S::kTabSharedFolders));
-        SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabSharedFs,
             reinterpret_cast<LPARAM>(&ti));
     }
 
