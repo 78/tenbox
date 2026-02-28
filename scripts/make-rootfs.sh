@@ -5,8 +5,8 @@ set -e
 
 ROOTFS_SIZE="20G"
 SUITE="bookworm"
-MIRROR="https://mirrors.tuna.tsinghua.edu.cn/debian"
-INCLUDE_PKGS="systemd-sysv,udev,dbus,\
+MIRROR="https://mirrors.ustc.edu.cn/debian"
+INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,isc-dhcp-client,\
 ca-certificates,curl,wget,\
 procps,psmisc,\
@@ -22,6 +22,7 @@ BUILD_DIR="$SCRIPT_DIR/../build"
 mkdir -p "$BUILD_DIR"
 OUTPUT="$(realpath -m "${1:-$BUILD_DIR/share/rootfs.qcow2}")"
 CACHE_TAR="$BUILD_DIR/.debootstrap-${SUITE}-base.tar"
+CACHE_CHROME="$BUILD_DIR/.google-chrome-stable_current_amd64.deb"
 
 # DrvFS (/mnt/*) does not support mknod through loop devices.
 # Build everything on the native Linux filesystem, copy result back.
@@ -78,15 +79,37 @@ exit 101
 PRC
 sudo chmod +x "$MOUNT_DIR/usr/sbin/policy-rc.d"
 
+# Download Google Chrome (with cache)
+if [ -f "$CACHE_CHROME" ]; then
+    echo "  Using cached Chrome: $CACHE_CHROME"
+else
+    echo "  Downloading Google Chrome..."
+    wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -O "$CACHE_CHROME"
+fi
+sudo cp "$CACHE_CHROME" "$MOUNT_DIR/tmp/chrome.deb"
+
 sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
 echo "root:tenbox" | chpasswd
+
+# Create openclaw user with sudo privileges
+useradd -m -s /bin/bash openclaw
+echo "openclaw:openclaw" | chpasswd
+usermod -aG sudo openclaw
+echo "openclaw ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/openclaw
+chmod 440 /etc/sudoers.d/openclaw
+
 echo "tenbox-vm" > /etc/hostname
+cat > /etc/hosts << 'HOSTS'
+127.0.0.1   localhost
+127.0.0.1   tenbox-vm
+::1         localhost ip6-localhost ip6-loopback
+HOSTS
 echo "/dev/vda / ext4 defaults 0 1" > /etc/fstab
 
 cat > /etc/apt/sources.list << 'APT'
-deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm main contrib non-free non-free-firmware
-deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm-updates main contrib non-free non-free-firmware
-deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian bookworm main contrib non-free non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian bookworm-updates main contrib non-free non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware
 APT
 
 apt-get update
@@ -104,6 +127,61 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
 # SPICE vdagent for clipboard sharing with host
 DEBIAN_FRONTEND=noninteractive apt-get install -y spice-vdagent
 
+# Google Chrome browser
+echo "Installing Google Chrome..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/chrome.deb
+rm -f /tmp/chrome.deb
+
+# Chrome policy: disable welcome page and first run
+mkdir -p /etc/opt/chrome/policies/managed
+cat > /etc/opt/chrome/policies/managed/no_first_run.json << 'CHROME'
+{
+    "BrowserSignin": 0,
+    "SyncDisabled": true,
+    "PasswordManagerEnabled": false,
+    "AutofillAddressEnabled": false,
+    "AutofillCreditCardEnabled": false,
+    "TranslateEnabled": false,
+    "RestoreOnStartup": 5,
+    "MetricsReportingEnabled": false
+}
+CHROME
+mkdir -p /home/openclaw/.config/google-chrome && touch "/home/openclaw/.config/google-chrome/First Run"
+chown -R openclaw:openclaw /home/openclaw/.config
+
+# Set Chrome as default browser
+update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/google-chrome-stable 200
+update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/bin/google-chrome-stable 200
+mkdir -p /home/openclaw/.config
+cat > /home/openclaw/.config/mimeapps.list << 'MIME'
+[Default Applications]
+x-scheme-handler/http=google-chrome.desktop
+x-scheme-handler/https=google-chrome.desktop
+text/html=google-chrome.desktop
+application/xhtml+xml=google-chrome.desktop
+MIME
+chown -R openclaw:openclaw /home/openclaw/.config
+
+# Development tools
+echo "Installing development tools..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    python3 python3-pip python3-venv \
+    g++ make cmake git
+
+# Node.js 22 (from NodeSource)
+echo "Installing Node.js 22..."
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+
+# Configure npm to use Alibaba Cloud mirror (global + user level)
+npm config set registry https://registry.npmmirror.com --global
+echo "registry=https://registry.npmmirror.com" >> /etc/npmrc
+su - openclaw -c "npm config set registry https://registry.npmmirror.com"
+
+# OpenClaw
+echo "Installing OpenClaw..."
+curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard
+
 # Chinese locale
 sed -i 's/^# *zh_CN.UTF-8/zh_CN.UTF-8/' /etc/locale.gen
 sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
@@ -117,26 +195,17 @@ mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
 cat > /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf << 'INNER'
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin root --noclear %I 115200 linux
+ExecStart=-/sbin/agetty --autologin openclaw --noclear %I 115200 linux
 INNER
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf << 'LDM'
 [Seat:*]
-autologin-user=root
+autologin-user=openclaw
 autologin-user-timeout=0
 autologin-session=xfce
 user-session=xfce
 greeter-session=lightdm-gtk-greeter
 LDM
-
-# Allow root autologin via LightDM (default PAM config blocks root)
-# Completely rewrite the PAM config to allow root
-cat > /etc/pam.d/lightdm-autologin << 'PAM'
-auth    required    pam_env.so
-auth    required    pam_permit.so
-account required    pam_unix.so
-session required    pam_unix.so
-PAM
 
 # Auto-resize display when host window changes (virtio-gpu hotplug)
 echo "Setting up virtio-gpu auto-resize..."
@@ -145,21 +214,22 @@ ACTION=="change", SUBSYSTEM=="drm", ENV{HOTPLUG}=="1", RUN+="/usr/bin/bash -c '/
 UDEV
 echo "  Created: /etc/udev/rules.d/95-virtio-gpu-resize.rules"
 
-cat > /usr/local/bin/virtio-gpu-resize.sh << 'RESIZE'
+OPENCLAW_UID=$(id -u openclaw)
+cat > /usr/local/bin/virtio-gpu-resize.sh << RESIZE
 #!/bin/bash
 sleep 0.1
 export DISPLAY=:0
 
 # Try to find valid XAUTHORITY
-for auth in /root/.Xauthority /var/run/lightdm/root/:0 /run/user/0/gdm/Xauthority; do
-    if [ -f "$auth" ]; then
-        export XAUTHORITY="$auth"
+for auth in /home/openclaw/.Xauthority /var/run/lightdm/openclaw/:0 /run/user/${OPENCLAW_UID}/gdm/Xauthority; do
+    if [ -f "\$auth" ]; then
+        export XAUTHORITY="\$auth"
         break
     fi
 done
 
 for output in Virtual-1 Virtual-0; do
-    xrandr --output "$output" --auto 2>/dev/null && break
+    xrandr --output "\$output" --auto 2>/dev/null && break
 done
 RESIZE
 chmod +x /usr/local/bin/virtio-gpu-resize.sh
@@ -216,6 +286,17 @@ sudo umount "$MOUNT_DIR"
 MOUNT_DIR=""
 
 echo "[5/5] Converting to qcow2..."
-qemu-img convert -f raw -O qcow2 -o cluster_size=65536 "$WORK_DIR/rootfs.raw" "$OUTPUT"
+# Prefer Windows qemu-img.exe (supports zstd), fallback to WSL version
+WIN_QEMU="/mnt/c/Program Files/qemu/qemu-img.exe"
+if [ -x "$WIN_QEMU" ]; then
+    echo "  Using Windows qemu-img with zstd compression..."
+    # Convert WSL paths to Windows paths for qemu-img.exe
+    WIN_RAW=$(wslpath -w "$WORK_DIR/rootfs.raw")
+    WIN_OUTPUT=$(wslpath -w "$OUTPUT")
+    "$WIN_QEMU" convert -f raw -O qcow2 -o cluster_size=65536,compression_type=zstd -c "$WIN_RAW" "$WIN_OUTPUT"
+else
+    echo "  Using WSL qemu-img with zlib compression..."
+    qemu-img convert -f raw -O qcow2 -o cluster_size=65536 -c "$WORK_DIR/rootfs.raw" "$OUTPUT"
+fi
 
 echo "Done: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"

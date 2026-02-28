@@ -25,6 +25,19 @@ FetchContent_Declare(
 set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(zlib)
 
+# zstd — required for qcow2 zstd compressed cluster support
+FetchContent_Declare(
+    zstd
+    GIT_REPOSITORY https://github.com/facebook/zstd.git
+    GIT_TAG        v1.5.6
+    SOURCE_SUBDIR  build/cmake
+)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(zstd)
+
 # lwIP — lightweight TCP/IP stack for NAT networking
 FetchContent_Declare(
     lwip

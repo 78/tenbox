@@ -33,10 +33,12 @@ target_include_directories(tenbox_core
         ${CMAKE_BINARY_DIR}
         ${zlib_SOURCE_DIR}
         ${zlib_BINARY_DIR}
+        ${zstd_SOURCE_DIR}/lib
         ${LWIP_INCLUDE_DIRS}
 )
 target_link_libraries(tenbox_core
     PUBLIC
         zlibstatic
+        libzstd_static
         lwipcore
 )

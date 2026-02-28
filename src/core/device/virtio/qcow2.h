@@ -91,6 +91,7 @@ private:
 
     std::vector<uint64_t> l1_table_;  // in host byte order
     uint64_t file_end_ = 0;          // current end of file (for append allocations)
+    uint8_t compression_type_ = 0;   // 0=zlib (deflate), 1=zstd
 
     // L2 LRU cache
     struct L2CacheEntry {
