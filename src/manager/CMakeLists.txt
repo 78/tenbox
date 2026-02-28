@@ -16,7 +16,6 @@ target_link_libraries(tenbox-manager
     PRIVATE
         tenbox_ipc
         tenbox_ui_shell_win32
-        tenbox_tray_windows
         nlohmann_json::nlohmann_json
         shell32
         advapi32

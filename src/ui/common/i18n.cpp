@@ -31,6 +31,7 @@ static const char* kStringsEn[] = {
     "Basic Info",                        // kTabInfo
     "Console",                           // kTabConsole
     "Screen",                            // kTabDisplay
+    "Shared Folders",                    // kTabSharedFolders
     "ID:",                               // kLabelId
     "Location:",                         // kLabelLocation
     "Kernel:",                           // kLabelKernel
@@ -81,6 +82,20 @@ static const char* kStringsEn[] = {
     "CPU / Memory changes require VM to be stopped",  // kCpuMemoryChangeWarning
     "Full input capture (system keys) | Press Right Alt to release",  // kDisplayHintCaptured
     "Click to capture system keys",  // kDisplayHintNormal
+    "Help",                                  // kMenuHelp
+    "Website",                               // kMenuWebsite
+    "Check for Updates",                     // kMenuCheckUpdate
+    "Tag",                                   // kSfColTag
+    "Host Path",                             // kSfColHostPath
+    "Mode",                                  // kSfColMode
+    "Add...",                                // kSfBtnAdd
+    "Remove",                                // kSfBtnRemove
+    "Read Only",                             // kSfModeReadOnly
+    "Read/Write",                            // kSfModeReadWrite
+    "Select folder to share",                // kSfBrowseTitle
+    "Please select a shared folder to remove.",  // kSfNoSelection
+    "Confirm Remove",                        // kSfConfirmRemoveTitle
+    "Remove shared folder '%s'?",            // kSfConfirmRemoveMsg
 };
 
 // Simplified Chinese strings; order must match enum S
@@ -106,6 +121,7 @@ static const char* kStringsZhCN[] = {
     "基本信息",                          // kTabInfo
     "控制台",                            // kTabConsole
     "屏幕显示",                          // kTabDisplay
+    "共享文件夹",                        // kTabSharedFolders
     "标识:",                             // kLabelId
     "位置:",                             // kLabelLocation
     "内核:",                             // kLabelKernel
@@ -156,6 +172,20 @@ static const char* kStringsZhCN[] = {
     "更改 CPU/内存需要先停止虚拟机",     // kCpuMemoryChangeWarning
     "已捕获全部输入（含系统键）| 按右 Alt 释放",  // kDisplayHintCaptured
     "点击以捕获系统键",  // kDisplayHintNormal
+    "帮助",                                  // kMenuHelp
+    "官方网站",                              // kMenuWebsite
+    "检查更新",                              // kMenuCheckUpdate
+    "标签",                                  // kSfColTag
+    "主机路径",                              // kSfColHostPath
+    "模式",                                  // kSfColMode
+    "添加...",                               // kSfBtnAdd
+    "移除",                                  // kSfBtnRemove
+    "只读",                                  // kSfModeReadOnly
+    "读写",                                  // kSfModeReadWrite
+    "选择要共享的文件夹",                     // kSfBrowseTitle
+    "请先选择要移除的共享文件夹。",           // kSfNoSelection
+    "确认移除",                              // kSfConfirmRemoveTitle
+    "确认移除共享文件夹 '%s'？",             // kSfConfirmRemoveMsg
 };
 
 void InitLanguage() {

@@ -14,6 +14,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <windowsx.h>
+#include <shellapi.h>
 #include <shlobj.h>
 
 #pragma comment(lib, "comctl32.lib")
@@ -41,6 +42,8 @@ enum CmdId : UINT {
     IDM_SHUTDOWN    = 1013,
     IDM_EDIT        = 1014,
     IDM_DELETE      = 1015,
+    IDM_WEBSITE     = 1020,
+    IDM_CHECK_UPDATE = 1021,
 };
 
 // ── Control IDs ──
@@ -207,6 +210,11 @@ static HMENU BuildMenuBar() {
     AppendMenuA(vm_menu, MF_STRING, IDM_REBOOT,   i18n::tr(S::kMenuReboot));
     AppendMenuA(vm_menu, MF_STRING, IDM_SHUTDOWN, i18n::tr(S::kMenuShutdown));
     AppendMenuA(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(vm_menu), i18n::tr(S::kMenuVm));
+
+    HMENU help_menu = CreatePopupMenu();
+    AppendMenuA(help_menu, MF_STRING, IDM_WEBSITE,      i18n::tr(S::kMenuWebsite));
+    AppendMenuA(help_menu, MF_STRING, IDM_CHECK_UPDATE,  i18n::tr(S::kMenuCheckUpdate));
+    AppendMenuA(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(help_menu), i18n::tr(S::kMenuHelp));
 
     return bar;
 }
@@ -587,6 +595,12 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_EXIT:
             SendMessage(hwnd, WM_CLOSE, 0, 0);
             return 0;
+        case IDM_WEBSITE:
+            ShellExecuteA(hwnd, "open", "https://tenbox.ai/", nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
+        case IDM_CHECK_UPDATE:
+            ShellExecuteA(hwnd, "open", "https://github.com/78/tenbox/releases", nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
         case IDM_START: {
             if (p->selected_index < 0 ||
                 p->selected_index >= static_cast<int>(p->records.size()))
@@ -880,7 +894,7 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
         ti.pszText = const_cast<char*>(i18n::tr(i18n::S::kTabDisplay));
         SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabDisplay,
             reinterpret_cast<LPARAM>(&ti));
-        ti.pszText = const_cast<char*>("Shared Folders");
+        ti.pszText = const_cast<char*>(i18n::tr(i18n::S::kTabSharedFolders));
         SendMessageA(impl_->tab, TCM_INSERTITEMA, kTabSharedFs,
             reinterpret_cast<LPARAM>(&ti));
     }

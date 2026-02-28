@@ -1,6 +1,5 @@
 #include "manager/manager_service.h"
 #include "manager/app_settings.h"
-#include "platform/tray/windows/tray_app.h"
 #include "version.h"
 
 #include "ui/win32/win32_ui_shell.h"
@@ -10,7 +9,6 @@ using UiShell = Win32UiShell;
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <thread>
 #include <vector>
 
 static std::string ResolveDefaultRuntimeExePath() {
@@ -131,27 +129,8 @@ int main(int argc, char* argv[]) {
 
     UiShell ui(manager);
 
-    WindowsTrayApp tray(
-        "TenBox Manager",
-        [&]() {
-            UiShell::InvokeOnUiThread([&]() { ui.Show(); });
-        },
-        [&]() {
-            UiShell::InvokeOnUiThread([&]() {
-                manager.ShutdownAll();
-                ui.Quit();
-            });
-        });
-
-    std::thread tray_thread([&]() {
-        if (tray.Init()) tray.Run();
-    });
-
     ui.Show();
     ui.Run();
-
-    tray.RequestExit();
-    if (tray_thread.joinable()) tray_thread.join();
 
     manager.ShutdownAll();
     return 0;

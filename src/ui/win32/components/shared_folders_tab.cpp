@@ -16,21 +16,21 @@ void SharedFoldersTab::Create(HWND parent, HINSTANCE hinst, HFONT ui_font) {
     LVCOLUMNA col{};
     col.mask = LVCF_TEXT | LVCF_WIDTH;
     col.cx = 200;
-    col.pszText = const_cast<char*>("Tag");
+    col.pszText = const_cast<char*>(i18n::tr(i18n::S::kSfColTag));
     ListView_InsertColumn(listview_, 0, &col);
     col.cx = 560;
-    col.pszText = const_cast<char*>("Host Path");
+    col.pszText = const_cast<char*>(i18n::tr(i18n::S::kSfColHostPath));
     ListView_InsertColumn(listview_, 1, &col);
     col.cx = 140;
-    col.pszText = const_cast<char*>("Mode");
+    col.pszText = const_cast<char*>(i18n::tr(i18n::S::kSfColMode));
     ListView_InsertColumn(listview_, 2, &col);
 
     // Create buttons
-    add_btn_ = CreateWindowExA(0, "BUTTON", "Add...",
+    add_btn_ = CreateWindowExA(0, "BUTTON", i18n::tr(i18n::S::kSfBtnAdd),
         WS_CHILD | BS_PUSHBUTTON,
         0, 0, 0, 0, parent,
         reinterpret_cast<HMENU>(kAddButtonId), hinst, nullptr);
-    del_btn_ = CreateWindowExA(0, "BUTTON", "Remove",
+    del_btn_ = CreateWindowExA(0, "BUTTON", i18n::tr(i18n::S::kSfBtnRemove),
         WS_CHILD | BS_PUSHBUTTON,
         0, 0, 0, 0, parent,
         reinterpret_cast<HMENU>(kRemoveButtonId), hinst, nullptr);
@@ -80,7 +80,7 @@ void SharedFoldersTab::Refresh(ManagerService& manager, const std::string& vm_id
         
         ListView_SetItemText(listview_, idx, 1, const_cast<char*>(sf.host_path.c_str()));
         ListView_SetItemText(listview_, idx, 2, 
-            const_cast<char*>(sf.readonly ? "Read Only" : "Read/Write"));
+            const_cast<char*>(sf.readonly ? i18n::tr(i18n::S::kSfModeReadOnly) : i18n::tr(i18n::S::kSfModeReadWrite)));
     }
 }
 
@@ -91,7 +91,7 @@ bool SharedFoldersTab::HandleCommand(HWND hwnd, UINT cmd, UINT code,
         // Use folder browser dialog
         BROWSEINFOA bi = {};
         bi.hwndOwner = hwnd;
-        bi.lpszTitle = "Select folder to share";
+        bi.lpszTitle = i18n::tr(i18n::S::kSfBrowseTitle);
         bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
         
         LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
@@ -130,7 +130,7 @@ bool SharedFoldersTab::HandleCommand(HWND hwnd, UINT cmd, UINT code,
     if (cmd == kRemoveButtonId && code == BN_CLICKED) {
         int sel = ListView_GetNextItem(listview_, -1, LVNI_SELECTED);
         if (sel < 0) {
-            MessageBoxA(hwnd, "Please select a shared folder to remove.",
+            MessageBoxA(hwnd, i18n::tr(i18n::S::kSfNoSelection),
                        i18n::tr(i18n::S::kError), MB_OK | MB_ICONWARNING);
             return true;
         }
@@ -138,8 +138,8 @@ bool SharedFoldersTab::HandleCommand(HWND hwnd, UINT cmd, UINT code,
         char tag_buf[64] = {};
         ListView_GetItemText(listview_, sel, 0, tag_buf, sizeof(tag_buf));
         
-        std::string prompt = "Remove shared folder '" + std::string(tag_buf) + "'?";
-        if (MessageBoxA(hwnd, prompt.c_str(), "Confirm Remove",
+        std::string prompt = i18n::fmt(i18n::S::kSfConfirmRemoveMsg, tag_buf);
+        if (MessageBoxA(hwnd, prompt.c_str(), i18n::tr(i18n::S::kSfConfirmRemoveTitle),
                 MB_YESNO | MB_ICONQUESTION) == IDYES) {
             std::string error;
             if (manager.RemoveSharedFolder(vm_id, tag_buf, &error)) {

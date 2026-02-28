@@ -55,6 +55,7 @@ enum class S {
     kTabInfo,
     kTabConsole,
     kTabDisplay,
+    kTabSharedFolders,
 
     // Detail panel labels
     kLabelId,
@@ -121,6 +122,24 @@ enum class S {
     // Display panel hints
     kDisplayHintCaptured,
     kDisplayHintNormal,
+
+    // Help menu
+    kMenuHelp,
+    kMenuWebsite,
+    kMenuCheckUpdate,
+
+    // Shared folders tab
+    kSfColTag,
+    kSfColHostPath,
+    kSfColMode,
+    kSfBtnAdd,
+    kSfBtnRemove,
+    kSfModeReadOnly,
+    kSfModeReadWrite,
+    kSfBrowseTitle,
+    kSfNoSelection,
+    kSfConfirmRemoveTitle,
+    kSfConfirmRemoveMsg,
 
     kCount  // Must be last
 };
