@@ -70,6 +70,7 @@ static const char* kStringsEn[] = {
     "Create",                            // kDlgBtnCreate
     "Save",                              // kDlgBtnSave
     "Cancel",                            // kDlgBtnCancel
+    "...",                               // kDlgBtnBrowse
     "Close",                             // kDlgBtnClose
     "Shared Folders",                    // kDlgSharedFolders
     "Delete VM",                         // kConfirmDeleteTitle
@@ -170,6 +171,7 @@ static const char* kStringsZhCN[] = {
     "创建",                              // kDlgBtnCreate
     "保存",                              // kDlgBtnSave
     "取消",                              // kDlgBtnCancel
+    "...",                               // kDlgBtnBrowse
     "关闭",                              // kDlgBtnClose
     "共享文件夹",                        // kDlgSharedFolders
     "删除虚拟机",                        // kConfirmDeleteTitle

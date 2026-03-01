@@ -7,6 +7,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <commdlg.h>
 #include <commctrl.h>
 #include <windowsx.h>
 #include <shlobj.h>
@@ -190,16 +191,20 @@ private:
 // ════════════════════════════════════════════════════════════
 
 enum CreateDlgId {
-    IDC_CR_NAME     = 100,
-    IDC_CR_KERNEL   = 101,
-    IDC_CR_INITRD   = 102,
-    IDC_CR_DISK     = 103,
-    IDC_CR_MEMORY   = 104,
-    IDC_CR_CPUS     = 105,
-    IDC_CR_NAT      = 106,
-    IDC_CR_LOC_LBL  = 107,
-    IDC_CR_OK       = IDOK,
-    IDC_CR_CANCEL   = IDCANCEL,
+    IDC_CR_NAME       = 100,
+    IDC_CR_KERNEL     = 101,
+    IDC_CR_INITRD     = 102,
+    IDC_CR_DISK       = 103,
+    IDC_CR_MEMORY     = 104,
+    IDC_CR_CPUS       = 105,
+    IDC_CR_NAT        = 106,
+    IDC_CR_LOCATION   = 107,
+    IDC_CR_BR_KERNEL  = 108,
+    IDC_CR_BR_INITRD  = 109,
+    IDC_CR_BR_DISK    = 110,
+    IDC_CR_BR_LOC     = 111,
+    IDC_CR_OK         = IDOK,
+    IDC_CR_CANCEL     = IDCANCEL,
 };
 
 struct CreateDlgData {
@@ -207,6 +212,48 @@ struct CreateDlgData {
     bool created;
     std::string error;
 };
+
+static std::string BrowseForFile(HWND owner, const char* filter, const char* current_path) {
+    char file_buf[MAX_PATH]{};
+    if (current_path && *current_path)
+        strncpy(file_buf, current_path, MAX_PATH - 1);
+
+    std::string init_dir;
+    if (current_path && *current_path) {
+        namespace fs = std::filesystem;
+        init_dir = fs::path(current_path).parent_path().string();
+    }
+
+    OPENFILENAMEA ofn{};
+    ofn.lStructSize  = sizeof(ofn);
+    ofn.hwndOwner    = owner;
+    ofn.lpstrFilter  = filter;
+    ofn.lpstrFile    = file_buf;
+    ofn.nMaxFile     = MAX_PATH;
+    ofn.Flags        = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    if (!init_dir.empty())
+        ofn.lpstrInitialDir = init_dir.c_str();
+
+    if (GetOpenFileNameA(&ofn))
+        return std::string(file_buf);
+    return {};
+}
+
+static std::string BrowseForFolder(HWND owner, const char* title) {
+    BROWSEINFOA bi{};
+    bi.hwndOwner = owner;
+    bi.lpszTitle = title;
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+
+    LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+    if (pidl) {
+        char path_buf[MAX_PATH]{};
+        SHGetPathFromIDListA(pidl, path_buf);
+        CoTaskMemFree(pidl);
+        return std::string(path_buf);
+    }
+    return {};
+}
 
 static INT_PTR CALLBACK CreateDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     auto* data = reinterpret_cast<CreateDlgData*>(GetWindowLongPtrA(dlg, DWLP_USER));
@@ -237,13 +284,36 @@ static INT_PTR CALLBACK CreateDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) 
         CheckDlgButton(dlg, IDC_CR_NAT, BST_CHECKED);
 
         auto vm_storage = settings::DefaultVmStorageDir();
-        SetDlgItemTextA(dlg, IDC_CR_LOC_LBL, vm_storage.c_str());
+        SetDlgItemTextA(dlg, IDC_CR_LOCATION, vm_storage.c_str());
 
         return TRUE;
     }
 
     case WM_COMMAND:
         switch (LOWORD(wp)) {
+        case IDC_CR_BR_KERNEL: {
+            auto cur = GetDlgText(dlg, IDC_CR_KERNEL);
+            auto path = BrowseForFile(dlg, "Kernel Image (vmlinuz*)\0vmlinuz*\0All Files (*.*)\0*.*\0", cur.c_str());
+            if (!path.empty()) SetDlgItemTextA(dlg, IDC_CR_KERNEL, path.c_str());
+            return TRUE;
+        }
+        case IDC_CR_BR_INITRD: {
+            auto cur = GetDlgText(dlg, IDC_CR_INITRD);
+            auto path = BrowseForFile(dlg, "Initrd Image (*.cpio.gz;*.img)\0*.cpio.gz;*.img\0All Files (*.*)\0*.*\0", cur.c_str());
+            if (!path.empty()) SetDlgItemTextA(dlg, IDC_CR_INITRD, path.c_str());
+            return TRUE;
+        }
+        case IDC_CR_BR_DISK: {
+            auto cur = GetDlgText(dlg, IDC_CR_DISK);
+            auto path = BrowseForFile(dlg, "Disk Image (*.qcow2;*.img;*.raw)\0*.qcow2;*.img;*.raw\0All Files (*.*)\0*.*\0", cur.c_str());
+            if (!path.empty()) SetDlgItemTextA(dlg, IDC_CR_DISK, path.c_str());
+            return TRUE;
+        }
+        case IDC_CR_BR_LOC: {
+            auto path = BrowseForFolder(dlg, i18n::tr(i18n::S::kDlgLabelLocation));
+            if (!path.empty()) SetDlgItemTextA(dlg, IDC_CR_LOCATION, path.c_str());
+            return TRUE;
+        }
         case IDOK: {
             int mem_idx = static_cast<int>(SendMessage(GetDlgItem(dlg, IDC_CR_MEMORY), CB_GETCURSEL, 0, 0));
             int cpu_idx = static_cast<int>(SendMessage(GetDlgItem(dlg, IDC_CR_CPUS), CB_GETCURSEL, 0, 0));
@@ -253,6 +323,7 @@ static INT_PTR CALLBACK CreateDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) 
             req.source_kernel = GetDlgText(dlg, IDC_CR_KERNEL);
             req.source_initrd = GetDlgText(dlg, IDC_CR_INITRD);
             req.source_disk   = GetDlgText(dlg, IDC_CR_DISK);
+            req.storage_dir   = GetDlgText(dlg, IDC_CR_LOCATION);
             req.memory_mb     = (mem_idx >= 0 && mem_idx < kNumOptions)
                                     ? kMemoryOptionsMb[mem_idx] : 4096;
             req.cpu_count     = (cpu_idx >= 0 && cpu_idx < kNumOptions)
@@ -295,22 +366,29 @@ bool ShowCreateVmDialog(HWND parent, ManagerService& mgr, std::string* error) {
         WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CENTER);
 
     int lx = 8, lw = 40, ex = 52, ew = W - 60, y = 8, rh = 14, sp = 18;
+    int bw = 16;              // browse button width
+    int ew_br = ew - bw - 2;  // edit width when browse button is present
+    int bx = ex + ew_br + 2;  // browse button x
 
     b.AddStatic(0,          i18n::tr(S::kDlgLabelName),   lx, y, lw, rh);
     b.AddEdit(IDC_CR_NAME,              ex, y-2, ew, rh); y += sp;
     b.AddStatic(0,          i18n::tr(S::kDlgLabelKernel), lx, y, lw, rh);
-    b.AddEdit(IDC_CR_KERNEL,            ex, y-2, ew, rh); y += sp;
+    b.AddEdit(IDC_CR_KERNEL,            ex, y-2, ew_br, rh);
+    b.AddButton(IDC_CR_BR_KERNEL, i18n::tr(S::kDlgBtnBrowse), bx, y-2, bw, rh); y += sp;
     b.AddStatic(0,          i18n::tr(S::kDlgLabelInitrd), lx, y, lw, rh);
-    b.AddEdit(IDC_CR_INITRD,            ex, y-2, ew, rh); y += sp;
+    b.AddEdit(IDC_CR_INITRD,            ex, y-2, ew_br, rh);
+    b.AddButton(IDC_CR_BR_INITRD, i18n::tr(S::kDlgBtnBrowse), bx, y-2, bw, rh); y += sp;
     b.AddStatic(0,          i18n::tr(S::kDlgLabelDisk),   lx, y, lw, rh);
-    b.AddEdit(IDC_CR_DISK,              ex, y-2, ew, rh); y += sp;
+    b.AddEdit(IDC_CR_DISK,              ex, y-2, ew_br, rh);
+    b.AddButton(IDC_CR_BR_DISK, i18n::tr(S::kDlgBtnBrowse), bx, y-2, bw, rh); y += sp;
     b.AddStatic(0,          i18n::tr(S::kDlgLabelMemory), lx, y, lw, rh);
     b.AddComboBox(IDC_CR_MEMORY,        ex, y-2, ew, 100); y += sp;
     b.AddStatic(0,          i18n::tr(S::kDlgLabelVcpus),  lx, y, lw, rh);
     b.AddComboBox(IDC_CR_CPUS,          ex, y-2, ew, 100); y += sp;
     b.AddCheckBox(IDC_CR_NAT, i18n::tr(S::kDlgEnableNat), ex, y, ew, rh); y += sp;
     b.AddStatic(0,          i18n::tr(S::kDlgLabelLocation), lx, y, lw, rh);
-    b.AddStatic(IDC_CR_LOC_LBL, "",     ex, y, ew, rh); y += sp + 4;
+    b.AddEdit(IDC_CR_LOCATION,          ex, y-2, ew_br, rh);
+    b.AddButton(IDC_CR_BR_LOC, i18n::tr(S::kDlgBtnBrowse), bx, y-2, bw, rh); y += sp + 4;
 
     b.AddButton(IDCANCEL, i18n::tr(S::kDlgBtnCancel), W - 110, y, 48, 14);
     b.AddDefButton(IDOK,  i18n::tr(S::kDlgBtnCreate), W - 56, y, 48, 14);

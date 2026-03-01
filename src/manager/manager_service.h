@@ -74,6 +74,7 @@ struct VmCreateRequest {
     std::string source_initrd;
     std::string source_disk;
     std::string cmdline;
+    std::string storage_dir;   // empty = use default
     uint64_t memory_mb = 4096;
     uint32_t cpu_count = 4;
     bool nat_enabled = false;

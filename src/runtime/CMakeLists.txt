@@ -2,6 +2,7 @@ add_executable(tenbox-vm-runtime
     ${CMAKE_SOURCE_DIR}/src/runtime/main.cpp
     ${CMAKE_SOURCE_DIR}/src/runtime/runtime_service.cpp
     ${CMAKE_SOURCE_DIR}/src/runtime/runtime.rc
+    ${CMAKE_SOURCE_DIR}/src/runtime/app.manifest
 )
 
 target_include_directories(tenbox-vm-runtime

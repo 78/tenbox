@@ -132,7 +132,9 @@ bool ManagerService::CreateVm(const VmCreateRequest& req, std::string* error) {
     }
 
     std::string uuid = settings::GenerateUuid();
-    std::string vm_dir = (fs::path(settings::DefaultVmStorageDir()) / uuid).string();
+    std::string base_dir = req.storage_dir.empty()
+        ? settings::DefaultVmStorageDir() : req.storage_dir;
+    std::string vm_dir = (fs::path(base_dir) / uuid).string();
 
     std::error_code ec;
     fs::create_directories(vm_dir, ec);
@@ -308,7 +310,9 @@ bool ManagerService::StartVm(const std::string& vm_id, std::string* error) {
     vm.runtime.pipe_name = "tenbox_vm_" + vm.spec.vm_id;
     const std::string cmd = BuildRuntimeCommand(runtime_exe_path_, vm.spec, vm.runtime.pipe_name);
 
-    // Convert UTF-8 command line to wide string (UTF-16) for Unicode support
+    // Convert UTF-8 command line to wide string (UTF-16) for CreateProcessW.
+    // Manager process has activeCodePage=UTF-8 manifest, so all std::string
+    // paths are UTF-8 encoded.
     int wide_len = MultiByteToWideChar(CP_UTF8, 0, cmd.c_str(), -1, nullptr, 0);
     std::vector<wchar_t> wide_cmd(wide_len);
     MultiByteToWideChar(CP_UTF8, 0, cmd.c_str(), -1, wide_cmd.data(), wide_len);
@@ -370,6 +374,7 @@ bool ManagerService::StartVm(const std::string& vm_id, std::string* error) {
         StartReadThread(vm_id, vm);
     } else {
         vm.state = VmPowerState::kCrashed;
+        if (error) *error = "runtime process started but IPC connection failed (check runtime.log in VM directory)";
     }
     return vm.state == VmPowerState::kRunning;
 }

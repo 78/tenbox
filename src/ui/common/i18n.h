@@ -103,6 +103,7 @@ enum class S {
     kDlgBtnCreate,
     kDlgBtnSave,
     kDlgBtnCancel,
+    kDlgBtnBrowse,
     kDlgBtnClose,
     kDlgSharedFolders,
 

@@ -5,13 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <vector>
 #include <string>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <shellapi.h>
-#endif
 
 static void PrintVersion() {
     fprintf(stderr, "TenBox vm-runtime v" TENBOX_VERSION "\n");
@@ -45,31 +39,6 @@ int main(int argc, char* argv[]) {
     // Set line buffering for stdout/stderr so logs flush on newline
     setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
     setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
-
-#ifdef _WIN32
-    // On Windows, use GetCommandLineW to get Unicode command line arguments
-    // because main(argc, argv) receives ANSI-encoded arguments
-    int wargc = 0;
-    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
-    if (!wargv) {
-        fprintf(stderr, "Failed to get command line arguments\n");
-        return 1;
-    }
-
-    // Convert wide strings to UTF-8
-    std::vector<std::string> utf8_args(wargc);
-    std::vector<char*> utf8_argv(wargc);
-    for (int i = 0; i < wargc; i++) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
-        utf8_args[i].resize(len);
-        WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, utf8_args[i].data(), len, nullptr, nullptr);
-        utf8_argv[i] = utf8_args[i].data();
-    }
-    LocalFree(wargv);
-
-    argc = wargc;
-    argv = utf8_argv.data();
-#endif
 
     VmConfig config;
     std::string vm_id = "default";
