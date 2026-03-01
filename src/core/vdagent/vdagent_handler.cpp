@@ -54,27 +54,48 @@ void VDAgentHandler::OnDataReceived(const uint8_t* data, size_t len) {
                 break;
             }
 
-            if (chunk.size >= sizeof(VDAgentMessage)) {
-                VDAgentMessage msg;
-                std::memcpy(&msg, recv_buffer_.data() + sizeof(VDAgentChunkHeader), sizeof(msg));
+            const uint8_t* chunk_payload = recv_buffer_.data() + sizeof(VDAgentChunkHeader);
 
-                const uint8_t* msg_data = recv_buffer_.data() + sizeof(VDAgentChunkHeader) + sizeof(VDAgentMessage);
+            if (!has_pending_msg_) {
+                // First chunk of a new message - must contain VDAgentMessage header
+                if (chunk.size < sizeof(VDAgentMessage)) {
+                    recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
+                    continue;
+                }
 
-                if (msg.type == VD_AGENT_ANNOUNCE_CAPABILITIES) {
+                std::memcpy(&pending_msg_, chunk_payload, sizeof(VDAgentMessage));
+                pending_data_.clear();
+
+                uint32_t data_in_chunk = chunk.size - static_cast<uint32_t>(sizeof(VDAgentMessage));
+                const uint8_t* payload_start = chunk_payload + sizeof(VDAgentMessage);
+                pending_data_.insert(pending_data_.end(), payload_start, payload_start + data_in_chunk);
+                has_pending_msg_ = true;
+            } else {
+                // Continuation chunk - raw payload only
+                pending_data_.insert(pending_data_.end(), chunk_payload, chunk_payload + chunk.size);
+            }
+
+            recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
+
+            // Check if we have collected the full message
+            if (pending_data_.size() >= pending_msg_.size) {
+                has_pending_msg_ = false;
+
+                if (pending_msg_.type == VD_AGENT_ANNOUNCE_CAPABILITIES) {
                     uint32_t request = 0;
-                    if (msg.size >= sizeof(uint32_t)) {
-                        std::memcpy(&request, msg_data, sizeof(request));
+                    if (pending_msg_.size >= sizeof(uint32_t)) {
+                        std::memcpy(&request, pending_data_.data(), sizeof(request));
                     }
-                    HandleAnnounceCapabilitiesLocked(msg_data, msg.size);
+                    HandleAnnounceCapabilitiesLocked(pending_data_.data(), pending_msg_.size);
                     if (request) {
                         need_send_caps = true;
                     }
                 } else {
-                    ProcessMessage(msg, msg_data);
+                    ProcessMessage(pending_msg_, pending_data_.data());
                 }
-            }
 
-            recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
+                pending_data_.clear();
+            }
         }
     }
 
@@ -230,26 +251,48 @@ void VDAgentHandler::HandleClipboardRelease(const uint8_t* data, uint32_t size) 
 void VDAgentHandler::SendMessage(uint32_t type, const uint8_t* data, size_t len) {
     if (!serial_device_) return;
 
-    std::vector<uint8_t> buffer;
-    buffer.resize(sizeof(VDAgentChunkHeader) + sizeof(VDAgentMessage) + len);
-
-    VDAgentChunkHeader chunk;
-    chunk.port = 1;
-    chunk.size = static_cast<uint32_t>(sizeof(VDAgentMessage) + len);
-
     VDAgentMessage msg;
     msg.protocol = VD_AGENT_PROTOCOL;
     msg.type = type;
     msg.opaque = 0;
     msg.size = static_cast<uint32_t>(len);
 
-    std::memcpy(buffer.data(), &chunk, sizeof(chunk));
-    std::memcpy(buffer.data() + sizeof(chunk), &msg, sizeof(msg));
-    if (len > 0 && data) {
-        std::memcpy(buffer.data() + sizeof(chunk) + sizeof(msg), data, len);
+    // First chunk carries the VDAgentMessage header + as much payload as fits
+    const uint32_t max_payload = VD_AGENT_MAX_CHUNK_SIZE;
+    uint32_t first_data_len = std::min(static_cast<uint32_t>(len),
+                                       max_payload - static_cast<uint32_t>(sizeof(VDAgentMessage)));
+
+    {
+        VDAgentChunkHeader chunk;
+        chunk.port = 1;
+        chunk.size = static_cast<uint32_t>(sizeof(VDAgentMessage)) + first_data_len;
+
+        std::vector<uint8_t> buffer(sizeof(VDAgentChunkHeader) + chunk.size);
+        std::memcpy(buffer.data(), &chunk, sizeof(chunk));
+        std::memcpy(buffer.data() + sizeof(chunk), &msg, sizeof(msg));
+        if (first_data_len > 0 && data) {
+            std::memcpy(buffer.data() + sizeof(chunk) + sizeof(msg), data, first_data_len);
+        }
+
+        serial_device_->SendData(port_id_, buffer.data(), buffer.size());
     }
 
-    serial_device_->SendData(port_id_, buffer.data(), buffer.size());
+    // Subsequent chunks carry only raw payload data (no VDAgentMessage header)
+    size_t offset = first_data_len;
+    while (offset < len) {
+        uint32_t chunk_data_len = std::min(static_cast<uint32_t>(len - offset), max_payload);
+
+        VDAgentChunkHeader chunk;
+        chunk.port = 1;
+        chunk.size = chunk_data_len;
+
+        std::vector<uint8_t> buffer(sizeof(VDAgentChunkHeader) + chunk_data_len);
+        std::memcpy(buffer.data(), &chunk, sizeof(chunk));
+        std::memcpy(buffer.data() + sizeof(chunk), data + offset, chunk_data_len);
+
+        serial_device_->SendData(port_id_, buffer.data(), buffer.size());
+        offset += chunk_data_len;
+    }
 }
 
 void VDAgentHandler::SendAnnounceCapabilities() {

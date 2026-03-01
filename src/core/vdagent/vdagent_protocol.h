@@ -134,3 +134,4 @@ struct VDAgentClipboardRelease {
 
 constexpr uint32_t VD_AGENT_PROTOCOL = 1;
 constexpr uint32_t VD_AGENT_MAX_DATA_SIZE = 1024 * 1024;  // 1MB max clipboard size
+constexpr uint32_t VD_AGENT_MAX_CHUNK_SIZE = 2048;         // Max payload per chunk over virtio-serial

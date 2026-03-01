@@ -58,9 +58,13 @@ private:
     uint32_t port_id_ = 0;
     ClipboardCallback clipboard_callback_;
 
-    // Message reassembly buffer
+    // Stream reassembly buffer (raw bytes from virtio-serial)
     std::vector<uint8_t> recv_buffer_;
-    uint32_t expected_size_ = 0;
+
+    // Multi-chunk message reassembly
+    VDAgentMessage pending_msg_{};
+    std::vector<uint8_t> pending_data_;
+    bool has_pending_msg_ = false;
 
     // Peer capabilities
     std::vector<uint32_t> guest_caps_;
