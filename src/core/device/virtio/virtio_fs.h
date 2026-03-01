@@ -428,6 +428,7 @@ private:
     InodeInfo* GetInode(uint64_t inode);
     uint64_t GetOrCreateInode(const std::string& path, bool is_dir, const std::string& share_tag);
     void RemoveInode(uint64_t inode);
+    void RemoveInodeByPath(const std::string& path);
     uint64_t AllocFileHandle(HANDLE h, bool is_dir, const std::string& path, const std::string& share_tag);
     FileHandle* GetFileHandle(uint64_t fh);
     void CloseFileHandle(uint64_t fh);

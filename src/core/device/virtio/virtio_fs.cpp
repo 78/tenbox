@@ -1294,7 +1294,7 @@ void VirtioFsDevice::HandleUnlink(const FuseInHeader* in_hdr, const uint8_t* in_
         return;
     }
 
-    RemoveInode(0);
+    RemoveInodeByPath(file_path);
     WriteErrorResponse(out_buf, in_hdr->unique, FUSE_OK);
 }
 
@@ -1328,6 +1328,7 @@ void VirtioFsDevice::HandleRmdir(const FuseInHeader* in_hdr, const uint8_t* in_d
         return;
     }
 
+    RemoveInodeByPath(dir_path);
     WriteErrorResponse(out_buf, in_hdr->unique, FUSE_OK);
 }
 
@@ -1379,6 +1380,52 @@ void VirtioFsDevice::HandleRename(const FuseInHeader* in_hdr, const uint8_t* in_
         return;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        auto HasPrefix = [](const std::string& path, const std::string& prefix) -> bool {
+            if (path.size() < prefix.size()) return false;
+            if (path.compare(0, prefix.size(), prefix) != 0) return false;
+            return path.size() == prefix.size() || path[prefix.size()] == '\\';
+        };
+
+        std::vector<std::string> stale_paths;
+        for (const auto& [path, _] : path_to_inode_) {
+            if (HasPrefix(path, new_path)) {
+                stale_paths.push_back(path);
+            }
+        }
+
+        for (const auto& path : stale_paths) {
+            auto it = path_to_inode_.find(path);
+            if (it == path_to_inode_.end()) continue;
+            uint64_t inode = it->second;
+            path_to_inode_.erase(it);
+            inodes_.erase(inode);
+        }
+
+        std::vector<std::pair<std::string, std::string>> renames;
+        for (const auto& [path, _] : path_to_inode_) {
+            if (HasPrefix(path, old_path)) {
+                std::string suffix = path.substr(old_path.size());
+                renames.emplace_back(path, new_path + suffix);
+            }
+        }
+
+        for (const auto& [old_cached_path, new_cached_path] : renames) {
+            auto it = path_to_inode_.find(old_cached_path);
+            if (it == path_to_inode_.end()) continue;
+            uint64_t inode = it->second;
+            path_to_inode_.erase(it);
+            path_to_inode_[new_cached_path] = inode;
+
+            auto inode_it = inodes_.find(inode);
+            if (inode_it != inodes_.end()) {
+                inode_it->second.host_path = new_cached_path;
+            }
+        }
+    }
+
     WriteErrorResponse(out_buf, in_hdr->unique, FUSE_OK);
 }
 
@@ -1424,7 +1471,8 @@ int32_t VirtioFsDevice::FillAttr(const std::string& path, FuseAttr* attr, uint64
     attr->mtime = FiletimeToUnix(fad.ftLastWriteTime);
     attr->ctime = FiletimeToUnix(fad.ftCreationTime);
 
-    if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+    bool is_dir = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    if (is_dir) {
         attr->mode = FUSE_S_IFDIR | 0777;
         attr->nlink = 2;
     } else {
@@ -1432,7 +1480,10 @@ int32_t VirtioFsDevice::FillAttr(const std::string& path, FuseAttr* attr, uint64
         attr->nlink = 1;
     }
 
-    if (share_readonly || (fad.dwFileAttributes & FILE_ATTRIBUTE_READONLY)) {
+    // On Windows, FILE_ATTRIBUTE_READONLY on directories is not a reliable
+    // writability signal; only treat it as read-only for regular files.
+    bool host_readonly = !is_dir && ((fad.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0);
+    if (share_readonly || host_readonly) {
         attr->mode &= ~0222;
     }
 
@@ -1529,6 +1580,18 @@ void VirtioFsDevice::RemoveInode(uint64_t inode) {
         path_to_inode_.erase(it->second.host_path);
         inodes_.erase(it);
     }
+}
+
+void VirtioFsDevice::RemoveInodeByPath(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto path_it = path_to_inode_.find(path);
+    if (path_it == path_to_inode_.end()) {
+        return;
+    }
+
+    uint64_t inode = path_it->second;
+    path_to_inode_.erase(path_it);
+    inodes_.erase(inode);
 }
 
 uint64_t VirtioFsDevice::AllocFileHandle(HANDLE h, bool is_dir, const std::string& path, const std::string& share_tag) {
