@@ -3,7 +3,7 @@
 #include "ui/win32/win32_display_panel.h"
 #include "ui/win32/components/info_tab.h"
 #include "ui/win32/components/console_tab.h"
-#include "ui/win32/components/vm_listbox.h"
+#include "ui/win32/components/vm_listview.h"
 #include "ui/common/i18n.h"
 #include "manager/app_settings.h"
 #include "manager/resource.h"
@@ -63,7 +63,7 @@ static constexpr UINT WM_INVOKE = WM_APP + 100;
 // Track if we initiated the clipboard change (to avoid echo)
 static bool g_clipboard_from_vm = false;
 
-static constexpr int kLeftPaneWidth = 260;
+static constexpr int kDefaultLeftPaneWidth = 280;
 
 // ── Forward declarations for dialog helpers (win32_dialogs.cpp) ──
 
@@ -125,13 +125,22 @@ struct Win32UiShell::Impl {
     HFONT mono_font   = nullptr;
 
     // Components
-    VmListBox vm_listbox;
+    VmListView vm_listview;
     InfoTab info_tab;
     ConsoleTab console_tab;
     std::unique_ptr<DisplayPanel> display_panel;
 
     std::vector<VmRecord> records;
     int selected_index = -1;
+
+    // Splitter between left pane (VM list) and right pane (tabs)
+    int left_pane_width = kDefaultLeftPaneWidth;
+    bool splitter_dragging = false;
+    int splitter_drag_start_x = 0;
+    int splitter_drag_start_width = 0;
+    static constexpr int kSplitterWidth    = 4;
+    static constexpr int kMinLeftPaneWidth = 180;
+    static constexpr int kMaxLeftPaneWidth = 500;
 
     std::unordered_map<std::string, VmUiState> vm_ui_states;
     std::unordered_map<std::string, std::unique_ptr<WasapiAudioPlayer>> audio_players;
@@ -357,7 +366,7 @@ static void ResizeWindowForDisplay(Impl* p, uint32_t vm_width, uint32_t vm_heigh
     int tab_extra_w = tab_padding.right - tab_padding.left - 100;
     int tab_extra_h = tab_padding.bottom - tab_padding.top - 100;
 
-    int target_cw = kLeftPaneWidth + 2 + tab_extra_w + static_cast<int>(vm_width);
+    int target_cw = p->left_pane_width + Impl::kSplitterWidth + tab_extra_w + static_cast<int>(vm_width);
     int target_ch = tb_h + tab_extra_h + static_cast<int>(vm_height) + sb_h;
 
     RECT wr = {0, 0, target_cw, target_ch};
@@ -415,9 +424,10 @@ static void LayoutControls(Impl* p) {
     int content_h   = ch - tb_h - sb_h;
     if (content_h < 0) content_h = 0;
 
-    MoveWindow(p->vm_listbox.handle(), 0, content_top, kLeftPaneWidth, content_h, TRUE);
+    MoveWindow(p->vm_listview.handle(), 0, content_top, p->left_pane_width, content_h, TRUE);
+    p->vm_listview.UpdateColumnWidth();
 
-    int rx = kLeftPaneWidth + 2;
+    int rx = p->left_pane_width + Impl::kSplitterWidth;
     int rw = cw - rx;
     if (rw < 0) rw = 0;
 
@@ -503,6 +513,13 @@ static void UpdateCommandStates(Impl* p) {
     p->console_tab.SetEnabled(running);
 }
 
+// ── Splitter hit-test ──
+
+static bool HitTestSplitter(Impl* p, int client_x) {
+    return client_x >= p->left_pane_width &&
+           client_x <  p->left_pane_width + Impl::kSplitterWidth;
+}
+
 // ── WndProc ──
 
 static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -515,6 +532,19 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SIZE:
         if (p) LayoutControls(p);
         return 0;
+
+    case WM_SETCURSOR:
+        if (p && reinterpret_cast<HWND>(wp) == hwnd &&
+            LOWORD(lp) == HTCLIENT) {
+            POINT pt;
+            GetCursorPos(&pt);
+            ScreenToClient(hwnd, &pt);
+            if (p->splitter_dragging || HitTestSplitter(p, pt.x)) {
+                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
+        }
+        break;
 
     case WM_TIMER:
         if (p && wp == Impl::kResizeTimerId) {
@@ -537,50 +567,6 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND: {
         UINT cmd = LOWORD(wp);
         UINT code = HIWORD(wp);
-
-        // ListBox selection change
-        if (cmd == VmListBox::kControlId && code == LBN_SELCHANGE) {
-            int sel = static_cast<int>(SendMessageA(p->vm_listbox.handle(), LB_GETCURSEL, 0, 0));
-            if (sel != LB_ERR && sel != p->selected_index) {
-                if (p->selected_index >= 0 &&
-                    p->selected_index < static_cast<int>(p->records.size())) {
-                    int cur_tab = static_cast<int>(SendMessage(p->tab, TCM_GETCURSEL, 0, 0));
-                    const std::string& old_vm_id = p->records[p->selected_index].spec.vm_id;
-                    p->GetVmUiState(old_vm_id).current_tab = cur_tab;
-                }
-
-                p->selected_index = sel;
-                const std::string& new_vm_id = p->records[sel].spec.vm_id;
-                VmUiState& new_state = p->GetVmUiState(new_vm_id);
-
-                p->last_sent_display_w = 0;
-                p->last_sent_display_h = 0;
-
-                p->info_tab.Update(&p->records[sel].spec);
-                UpdateCommandStates(p);
-
-                SendMessage(p->tab, TCM_SETCURSEL, new_state.current_tab, 0);
-
-                p->console_tab.SetText(new_state.console_state.text.c_str());
-
-                p->display_available = (new_state.fb_width > 0 && new_state.fb_height > 0);
-                if (p->display_available && !new_state.framebuffer.empty()) {
-                    p->display_panel->RestoreFramebuffer(
-                        new_state.fb_width, new_state.fb_height, new_state.framebuffer);
-                    if (!new_state.cursor_pixels.empty()) {
-                        p->display_panel->RestoreCursor(new_state.cursor, new_state.cursor_pixels);
-                    }
-                    if (new_state.current_tab == kTabDisplay) {
-                        ResizeWindowForDisplay(p, new_state.fb_width, new_state.fb_height);
-                    }
-                } else {
-                    p->display_panel->Clear();
-                }
-
-                LayoutControls(p);
-            }
-            return 0;
-        }
 
         // Console send button
         if (cmd == ConsoleTab::kSendBtnId && code == BN_CLICKED) {
@@ -746,10 +732,8 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     } else {
                         int new_sel = p->selected_index;
                         p->selected_index = -1;
-                        SendMessageA(p->vm_listbox.handle(), LB_SETCURSEL, new_sel, 0);
-                        SendMessageA(hwnd, WM_COMMAND,
-                            MAKEWPARAM(VmListBox::kControlId, LBN_SELCHANGE),
-                            reinterpret_cast<LPARAM>(p->vm_listbox.handle()));
+                        ListView_SetItemState(p->vm_listview.handle(), new_sel,
+                            LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
                     }
                     SendMessageA(p->statusbar, SB_SETTEXTA, 0,
                         reinterpret_cast<LPARAM>(i18n::tr(i18n::S::kStatusVmDeleted)));
@@ -765,6 +749,60 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_NOTIFY: {
         auto* nmhdr = reinterpret_cast<NMHDR*>(lp);
+
+        LRESULT lr = 0;
+        if (p->vm_listview.HandleNotify(nmhdr, p->records, p->ui_font, &lr))
+            return lr;
+
+        if (nmhdr->idFrom == VmListView::kControlId &&
+            nmhdr->code == LVN_ITEMCHANGED) {
+            auto* nmlv = reinterpret_cast<NMLISTVIEW*>(nmhdr);
+            if ((nmlv->uChanged & LVIF_STATE) &&
+                (nmlv->uNewState & LVIS_SELECTED) &&
+                !(nmlv->uOldState & LVIS_SELECTED)) {
+                int sel = nmlv->iItem;
+                if (sel >= 0 && sel < static_cast<int>(p->records.size()) &&
+                    sel != p->selected_index) {
+                    if (p->selected_index >= 0 &&
+                        p->selected_index < static_cast<int>(p->records.size())) {
+                        int cur_tab = static_cast<int>(SendMessage(p->tab, TCM_GETCURSEL, 0, 0));
+                        const std::string& old_vm_id = p->records[p->selected_index].spec.vm_id;
+                        p->GetVmUiState(old_vm_id).current_tab = cur_tab;
+                    }
+
+                    p->selected_index = sel;
+                    const std::string& new_vm_id = p->records[sel].spec.vm_id;
+                    VmUiState& new_state = p->GetVmUiState(new_vm_id);
+
+                    p->last_sent_display_w = 0;
+                    p->last_sent_display_h = 0;
+
+                    p->info_tab.Update(&p->records[sel].spec);
+                    UpdateCommandStates(p);
+
+                    SendMessage(p->tab, TCM_SETCURSEL, new_state.current_tab, 0);
+
+                    p->console_tab.SetText(new_state.console_state.text.c_str());
+
+                    p->display_available = (new_state.fb_width > 0 && new_state.fb_height > 0);
+                    if (p->display_available && !new_state.framebuffer.empty()) {
+                        p->display_panel->RestoreFramebuffer(
+                            new_state.fb_width, new_state.fb_height, new_state.framebuffer);
+                        if (!new_state.cursor_pixels.empty()) {
+                            p->display_panel->RestoreCursor(new_state.cursor, new_state.cursor_pixels);
+                        }
+                        if (new_state.current_tab == kTabDisplay) {
+                            ResizeWindowForDisplay(p, new_state.fb_width, new_state.fb_height);
+                        }
+                    } else {
+                        p->display_panel->Clear();
+                    }
+
+                    LayoutControls(p);
+                }
+            }
+        }
+
         if (nmhdr->idFrom == IDC_TAB && nmhdr->code == TCN_SELCHANGE) {
             int cur_tab = static_cast<int>(SendMessage(p->tab, TCM_GETCURSEL, 0, 0));
             if (p->selected_index >= 0 &&
@@ -776,44 +814,63 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     }
 
-    case WM_MEASUREITEM: {
-        auto* mis = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
-        if (p->vm_listbox.HandleMeasureItem(mis))
-            return TRUE;
+    case WM_LBUTTONDOWN:
+        if (p && HitTestSplitter(p, GET_X_LPARAM(lp))) {
+            p->splitter_dragging = true;
+            p->splitter_drag_start_x = GET_X_LPARAM(lp);
+            p->splitter_drag_start_width = p->left_pane_width;
+            SetCapture(hwnd);
+            return 0;
+        }
         break;
-    }
 
-    case WM_DRAWITEM: {
-        auto* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
-        if (p->vm_listbox.HandleDrawItem(dis, p->records, p->ui_font))
-            return TRUE;
+    case WM_MOUSEMOVE:
+        if (p && p->splitter_dragging) {
+            int dx = GET_X_LPARAM(lp) - p->splitter_drag_start_x;
+            int new_w = p->splitter_drag_start_width + dx;
+            if (new_w < Impl::kMinLeftPaneWidth) new_w = Impl::kMinLeftPaneWidth;
+            if (new_w > Impl::kMaxLeftPaneWidth) new_w = Impl::kMaxLeftPaneWidth;
+            if (new_w != p->left_pane_width) {
+                p->left_pane_width = new_w;
+                LayoutControls(p);
+            }
+            return 0;
+        }
+        if (p && p->vm_listview.HandleDragMove(lp)) return 0;
         break;
-    }
+
+    case WM_LBUTTONUP:
+        if (p && p->splitter_dragging) {
+            p->splitter_dragging = false;
+            ReleaseCapture();
+            return 0;
+        }
+        if (p && p->vm_listview.HandleDragEnd(lp)) return 0;
+        break;
 
     case WM_CONTEXTMENU: {
-        // Right-click on VM listbox: show VM menu only when clicking on the selected VM
-        if (p && reinterpret_cast<HWND>(wp) == p->vm_listbox.handle() &&
+        if (p && reinterpret_cast<HWND>(wp) == p->vm_listview.handle() &&
             p->selected_index >= 0 && p->selected_index < static_cast<int>(p->records.size())) {
             int x = GET_X_LPARAM(lp);
             int y = GET_Y_LPARAM(lp);
             int idx = -1;
             if (x != -1 && y != -1) {
-                POINT pt = {x, y};
-                ScreenToClient(p->vm_listbox.handle(), &pt);
-                DWORD hit = static_cast<DWORD>(SendMessage(p->vm_listbox.handle(),
-                    LB_ITEMFROMPOINT, 0, MAKELPARAM(pt.x, pt.y)));
-                if (HIWORD(hit) == 0 && LOWORD(hit) == static_cast<UINT>(p->selected_index)) {
+                LVHITTESTINFO hti{};
+                hti.pt = {x, y};
+                ScreenToClient(p->vm_listview.handle(), &hti.pt);
+                int hit = ListView_HitTest(p->vm_listview.handle(), &hti);
+                if (hit >= 0 && hit == p->selected_index) {
                     idx = p->selected_index;
                 }
             } else {
-                idx = p->selected_index;  // Keyboard (Shift+F10): use current selection
+                idx = p->selected_index;
             }
             if (idx >= 0) {
                 HMENU vm_menu = GetSubMenu(p->menu_bar, 1);
                 if (vm_menu) {
                     if (x == -1 && y == -1) {
                         RECT rc;
-                        GetWindowRect(p->vm_listbox.handle(), &rc);
+                        GetWindowRect(p->vm_listview.handle(), &rc);
                         x = (rc.left + rc.right) / 2;
                         y = (rc.top + rc.bottom) / 2;
                     }
@@ -950,7 +1007,18 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
         reinterpret_cast<HMENU>(IDC_STATUSBAR), hinst, nullptr);
 
     // Components
-    impl_->vm_listbox.Create(impl_->hwnd, hinst, impl_->ui_font);
+    impl_->vm_listview.Create(impl_->hwnd, hinst, impl_->ui_font);
+    impl_->vm_listview.SetDragDropCallback([this](int from, int to) {
+        if (from == to) return;
+        auto item = std::move(impl_->records[from]);
+        impl_->records.erase(impl_->records.begin() + from);
+        impl_->records.insert(impl_->records.begin() + to, std::move(item));
+        impl_->selected_index = to;
+        impl_->vm_listview.Populate(impl_->records, to);
+        impl_->info_tab.Update(&impl_->records[to].spec);
+        UpdateCommandStates(impl_.get());
+        manager_.ReorderVm(from, to);
+    });
     impl_->info_tab.Create(impl_->hwnd, hinst, impl_->ui_font);
     impl_->console_tab.Create(impl_->hwnd, hinst, impl_->mono_font, impl_->ui_font);
 
@@ -1192,7 +1260,7 @@ void Win32UiShell::RefreshVmList() {
         impl_->selected_index = static_cast<int>(impl_->records.size()) - 1;
     }
 
-    impl_->vm_listbox.Populate(impl_->records, impl_->selected_index);
+    impl_->vm_listview.Populate(impl_->records, impl_->selected_index);
 
     const VmSpec* spec = nullptr;
     if (impl_->selected_index >= 0 &&

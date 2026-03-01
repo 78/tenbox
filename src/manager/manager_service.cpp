@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <filesystem>
 #include <sstream>
@@ -123,6 +125,30 @@ void ManagerService::InitJobObject() {
     job_object_ = job;
 }
 
+VmRecord* ManagerService::FindVm(const std::string& vm_id) {
+    for (auto& vm : vms_) {
+        if (vm.spec.vm_id == vm_id) return &vm;
+    }
+    return nullptr;
+}
+
+const VmRecord* ManagerService::FindVm(const std::string& vm_id) const {
+    for (const auto& vm : vms_) {
+        if (vm.spec.vm_id == vm_id) return &vm;
+    }
+    return nullptr;
+}
+
+bool ManagerService::EraseVm(const std::string& vm_id) {
+    for (auto it = vms_.begin(); it != vms_.end(); ++it) {
+        if (it->spec.vm_id == vm_id) {
+            vms_.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
 // ── VM lifecycle ─────────────────────────────────────────────────────
 
 bool ManagerService::CreateVm(const VmCreateRequest& req, std::string* error) {
@@ -169,9 +195,11 @@ bool ManagerService::CreateVm(const VmCreateRequest& req, std::string* error) {
     spec.memory_mb   = req.memory_mb;
     spec.cpu_count   = req.cpu_count;
     spec.nat_enabled = req.nat_enabled;
+    spec.creation_time = static_cast<int64_t>(std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::now()));
 
     settings::SaveVmManifest(spec);
-    vms_.emplace(uuid, VmRecord{spec});
+    vms_.push_back(VmRecord{spec});
     SaveVmPaths();
     return true;
 }
@@ -189,26 +217,26 @@ bool ManagerService::DeleteVm(const std::string& vm_id, std::string* error) {
     // Step 2: Get VM directory and ensure read thread is stopped
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) {
+        VmRecord* vm = FindVm(vm_id);
+        if (!vm) {
             if (error) *error = "vm not found";
             return false;
         }
         
-        vm_dir = it->second.spec.vm_dir;
+        vm_dir = vm->spec.vm_dir;
         
         // Stop read thread if still running
-        if (it->second.runtime.read_thread.joinable()) {
-            it->second.runtime.read_running.store(false);
-            if (it->second.runtime.pipe_handle) {
-                CancelIoEx(reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle), nullptr);
+        if (vm->runtime.read_thread.joinable()) {
+            vm->runtime.read_running.store(false);
+            if (vm->runtime.pipe_handle) {
+                CancelIoEx(reinterpret_cast<HANDLE>(vm->runtime.pipe_handle), nullptr);
             }
             // Move thread out to join outside the lock
-            read_thread_to_join = std::move(it->second.runtime.read_thread);
+            read_thread_to_join = std::move(vm->runtime.read_thread);
         }
         
         // Erase VM record
-        vms_.erase(it);
+        EraseVm(vm_id);
     }
     
     // Step 3: Join read thread outside the lock (if needed)
@@ -231,12 +259,12 @@ bool ManagerService::DeleteVm(const std::string& vm_id, std::string* error) {
 }
 
 bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patch, std::string* error) {
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
         if (error) *error = "vm not found";
         return false;
     }
-    VmRecord& vm = it->second;
+    VmRecord& vm = *vmp;
     const bool running = vm.state == VmPowerState::kRunning || vm.state == VmPowerState::kStarting;
     const bool has_offline_fields = patch.memory_mb.has_value() || patch.cpu_count.has_value();
 
@@ -297,12 +325,12 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
 }
 
 bool ManagerService::StartVm(const std::string& vm_id, std::string* error) {
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
         if (error) *error = "vm not found";
         return false;
     }
-    VmRecord& vm = it->second;
+    VmRecord& vm = *vmp;
     if (vm.state == VmPowerState::kRunning || vm.state == VmPowerState::kStarting) {
         return true;
     }
@@ -371,6 +399,9 @@ bool ManagerService::StartVm(const std::string& vm_id, std::string* error) {
 
     if (EnsurePipeConnected(vm)) {
         vm.state = VmPowerState::kRunning;
+        vm.spec.last_boot_time = static_cast<int64_t>(std::chrono::system_clock::to_time_t(
+            std::chrono::system_clock::now()));
+        settings::SaveVmManifest(vm.spec);
         StartReadThread(vm_id, vm);
     } else {
         vm.state = VmPowerState::kCrashed;
@@ -386,12 +417,12 @@ bool ManagerService::StopVm(const std::string& vm_id, std::string* error) {
     
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) {
+        VmRecord* vmp = FindVm(vm_id);
+        if (!vmp) {
             if (error) *error = "vm not found";
             return false;
         }
-        VmRecord& vm = it->second;
+        VmRecord& vm = *vmp;
         if (vm.state == VmPowerState::kStopped) return true;
 
         vm.state = VmPowerState::kStopping;
@@ -429,24 +460,24 @@ bool ManagerService::StopVm(const std::string& vm_id, std::string* error) {
     // Cleanup handles and update state (inside lock)
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) {
+        VmRecord* vmp = FindVm(vm_id);
+        if (!vmp) {
             if (error) *error = "vm not found";
             return false;
         }
-        CleanupRuntimeHandles(it->second);
-        it->second.state = VmPowerState::kStopped;
+        CleanupRuntimeHandles(*vmp);
+        vmp->state = VmPowerState::kStopped;
     }
     return true;
 }
 
 bool ManagerService::RebootVm(const std::string& vm_id, std::string* error) {
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
         if (error) *error = "vm not found";
         return false;
     }
-    VmRecord& vm = it->second;
+    VmRecord& vm = *vmp;
     if (vm.state == VmPowerState::kStopped) {
         return StartVm(vm_id, error);
     }
@@ -465,12 +496,12 @@ bool ManagerService::RebootVm(const std::string& vm_id, std::string* error) {
 }
 
 bool ManagerService::ShutdownVm(const std::string& vm_id, std::string* error) {
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
         if (error) *error = "vm not found";
         return false;
     }
-    VmRecord& vm = it->second;
+    VmRecord& vm = *vmp;
     if (vm.state == VmPowerState::kStopped) return true;
 
     vm.state = VmPowerState::kStopping;
@@ -486,8 +517,7 @@ bool ManagerService::ShutdownVm(const std::string& vm_id, std::string* error) {
 }
 
 void ManagerService::ShutdownAll() {
-    for (auto& [id, vm] : vms_) {
-        (void)id;
+    for (auto& vm : vms_) {
         std::string ignored;
         StopVm(vm.spec.vm_id, &ignored);
         if (vm.runtime.read_thread.joinable()) {
@@ -499,19 +529,13 @@ void ManagerService::ShutdownAll() {
 // ── Queries ──────────────────────────────────────────────────────────
 
 std::vector<VmRecord> ManagerService::ListVms() const {
-    std::vector<VmRecord> out;
-    out.reserve(vms_.size());
-    for (const auto& [id, vm] : vms_) {
-        (void)id;
-        out.push_back(vm);
-    }
-    return out;
+    return vms_;
 }
 
 std::optional<VmRecord> ManagerService::GetVm(const std::string& vm_id) const {
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) return std::nullopt;
-    return it->second;
+    const VmRecord* vm = FindVm(vm_id);
+    if (!vm) return std::nullopt;
+    return *vm;
 }
 
 // ── Settings persistence ─────────────────────────────────────────────
@@ -522,20 +546,32 @@ void ManagerService::SaveAppSettings() {
 
 void ManagerService::SaveVmPaths() {
     settings_.vm_paths.clear();
-    for (const auto& [id, vm] : vms_) {
-        (void)id;
+    settings_.vm_paths.reserve(vms_.size());
+    for (const auto& vm : vms_) {
         settings_.vm_paths.push_back(vm.spec.vm_dir);
     }
     SaveAppSettings();
+}
+
+void ManagerService::ReorderVm(int from, int to) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    if (from < 0 || from >= static_cast<int>(vms_.size())) return;
+    if (to < 0 || to >= static_cast<int>(vms_.size())) return;
+    if (from == to) return;
+
+    if (from < to) {
+        std::rotate(vms_.begin() + from, vms_.begin() + from + 1, vms_.begin() + to + 1);
+    } else {
+        std::rotate(vms_.begin() + to, vms_.begin() + from, vms_.begin() + from + 1);
+    }
+    SaveVmPaths();
 }
 
 void ManagerService::LoadVms() {
     for (const auto& vm_path : settings_.vm_paths) {
         VmSpec spec;
         if (settings::LoadVmManifest(vm_path, spec) && !spec.vm_id.empty()) {
-            // Avoid relying on argument evaluation order when moving `spec`.
-            const auto vm_id = spec.vm_id;
-            vms_.emplace(vm_id, VmRecord{std::move(spec)});
+            vms_.push_back(VmRecord{std::move(spec)});
         }
     }
 }
@@ -664,18 +700,18 @@ void ManagerService::SetGuestAgentStateCallback(GuestAgentStateCallback cb) {
 }
 
 bool ManagerService::IsGuestAgentConnected(const std::string& vm_id) const {
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) return false;
-    return it->second.guest_agent_connected;
+    const VmRecord* vm = FindVm(vm_id);
+    if (!vm) return false;
+    return vm->guest_agent_connected;
 }
 
 bool ManagerService::SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -699,9 +735,9 @@ bool ManagerService::SendPointerEvent(const std::string& vm_id,
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -725,9 +761,9 @@ bool ManagerService::SendWheelEvent(const std::string& vm_id, int32_t delta) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -749,9 +785,9 @@ bool ManagerService::SetDisplaySize(const std::string& vm_id, uint32_t width, ui
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -775,9 +811,9 @@ bool ManagerService::SendClipboardGrab(const std::string& vm_id,
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -806,9 +842,9 @@ bool ManagerService::SendClipboardData(const std::string& vm_id, uint32_t type,
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -833,9 +869,9 @@ bool ManagerService::SendClipboardRequest(const std::string& vm_id, uint32_t typ
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -857,9 +893,9 @@ bool ManagerService::SendClipboardRelease(const std::string& vm_id) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -879,12 +915,12 @@ bool ManagerService::SendClipboardRelease(const std::string& vm_id) {
 bool ManagerService::AddSharedFolder(const std::string& vm_id, const SharedFolder& folder, 
                                       std::string* error) {
     std::lock_guard<std::mutex> lock(vms_mutex_);
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
         if (error) *error = "vm not found";
         return false;
     }
-    VmRecord& vm = it->second;
+    VmRecord& vm = *vmp;
     
     // Check for duplicate tag
     for (const auto& sf : vm.spec.shared_folders) {
@@ -926,12 +962,12 @@ bool ManagerService::AddSharedFolder(const std::string& vm_id, const SharedFolde
 bool ManagerService::RemoveSharedFolder(const std::string& vm_id, const std::string& tag, 
                                          std::string* error) {
     std::lock_guard<std::mutex> lock(vms_mutex_);
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
         if (error) *error = "vm not found";
         return false;
     }
-    VmRecord& vm = it->second;
+    VmRecord& vm = *vmp;
     
     auto sf_it = std::find_if(vm.spec.shared_folders.begin(), vm.spec.shared_folders.end(),
                               [&tag](const SharedFolder& sf) { return sf.tag == tag; });
@@ -964,20 +1000,20 @@ bool ManagerService::RemoveSharedFolder(const std::string& vm_id, const std::str
 
 std::vector<SharedFolder> ManagerService::GetSharedFolders(const std::string& vm_id) const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(vms_mutex_));
-    auto it = vms_.find(vm_id);
-    if (it == vms_.end()) {
+    const VmRecord* vm = FindVm(vm_id);
+    if (!vm) {
         return {};
     }
-    return it->second.spec.shared_folders;
+    return vm->spec.shared_folders;
 }
 
 bool ManagerService::SendConsoleInput(const std::string& vm_id, const std::string& input) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return false;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
+        const VmRecord* vm = FindVm(vm_id);
+        if (!vm) return false;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -1053,11 +1089,11 @@ void ManagerService::HandleProcessExit(const std::string& vm_id) {
     bool needs_reboot = false;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return;
-        if (it->second.state != VmPowerState::kRunning &&
-            it->second.state != VmPowerState::kStopping) return;
-        auto& vm = it->second;
+        VmRecord* vmp = FindVm(vm_id);
+        if (!vmp) return;
+        if (vmp->state != VmPowerState::kRunning &&
+            vmp->state != VmPowerState::kStopping) return;
+        VmRecord& vm = *vmp;
         CleanupRuntimeHandles(vm);
         // Exit code 128 indicates a reboot request from the guest
         needs_reboot = vm.reboot_pending || (vm.last_exit_code == 128);
@@ -1094,11 +1130,11 @@ void ManagerService::PipeReadThreadFunc(const std::string& vm_id) {
     std::atomic<bool>* running_flag = nullptr;
     {
         std::lock_guard<std::mutex> lock(vms_mutex_);
-        auto it = vms_.find(vm_id);
-        if (it == vms_.end()) return;
-        pipe = reinterpret_cast<HANDLE>(it->second.runtime.pipe_handle);
-        process = reinterpret_cast<HANDLE>(it->second.runtime.process_handle);
-        running_flag = &it->second.runtime.read_running;
+        VmRecord* vm = FindVm(vm_id);
+        if (!vm) return;
+        pipe = reinterpret_cast<HANDLE>(vm->runtime.pipe_handle);
+        process = reinterpret_cast<HANDLE>(vm->runtime.process_handle);
+        running_flag = &vm->runtime.read_running;
     }
     if (!pipe || pipe == INVALID_HANDLE_VALUE || !running_flag) return;
 
@@ -1258,19 +1294,19 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
         auto it = msg.fields.find("state");
         if (it != msg.fields.end()) {
             std::lock_guard<std::mutex> lock(vms_mutex_);
-            auto vm_it = vms_.find(vm_id);
-            if (vm_it != vms_.end()) {
+            VmRecord* vm = FindVm(vm_id);
+            if (vm) {
                 const std::string& state_str = it->second;
                 if (state_str == "running") {
-                    vm_it->second.state = VmPowerState::kRunning;
+                    vm->state = VmPowerState::kRunning;
                 } else if (state_str == "starting") {
-                    vm_it->second.state = VmPowerState::kStarting;
+                    vm->state = VmPowerState::kStarting;
                 } else if (state_str == "stopped") {
-                    vm_it->second.state = VmPowerState::kStopped;
+                    vm->state = VmPowerState::kStopped;
                 } else if (state_str == "crashed") {
-                    vm_it->second.state = VmPowerState::kCrashed;
+                    vm->state = VmPowerState::kCrashed;
                 } else if (state_str == "rebooting") {
-                    vm_it->second.reboot_pending = true;
+                    vm->reboot_pending = true;
                 }
             }
         }
@@ -1287,9 +1323,9 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
             GuestAgentStateCallback cb;
             {
                 std::lock_guard<std::mutex> lock(vms_mutex_);
-                auto vm_it = vms_.find(vm_id);
-                if (vm_it != vms_.end()) {
-                    vm_it->second.guest_agent_connected = connected;
+                VmRecord* vm = FindVm(vm_id);
+                if (vm) {
+                    vm->guest_agent_connected = connected;
                 }
                 cb = guest_agent_state_callback_;
             }

@@ -198,6 +198,13 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
                 }
             }
         }
+
+        if (j.contains("creation_time") && j["creation_time"].is_number_integer()) {
+            spec.creation_time = j["creation_time"].get<int64_t>();
+        }
+        if (j.contains("last_boot_time") && j["last_boot_time"].is_number_integer()) {
+            spec.last_boot_time = j["last_boot_time"].get<int64_t>();
+        }
     } catch (...) {
         return false;
     }
@@ -226,6 +233,8 @@ void SaveVmManifest(const VmSpec& spec) {
     j["memory_mb"]   = spec.memory_mb;
     j["cpu_count"]   = spec.cpu_count;
     j["nat_enabled"] = spec.nat_enabled;
+    if (spec.creation_time > 0) j["creation_time"] = spec.creation_time;
+    if (spec.last_boot_time > 0) j["last_boot_time"] = spec.last_boot_time;
 
     json fwds = json::array();
     for (const auto& f : spec.port_forwards) {

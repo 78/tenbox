@@ -12,7 +12,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 struct PipeParseState {
@@ -96,6 +95,7 @@ public:
 
     std::vector<VmRecord> ListVms() const;
     std::optional<VmRecord> GetVm(const std::string& vm_id) const;
+    void ReorderVm(int from, int to);
 
     const std::string& data_dir() const { return data_dir_; }
     settings::AppSettings& app_settings() { return settings_; }
@@ -158,6 +158,10 @@ public:
     std::vector<SharedFolder> GetSharedFolders(const std::string& vm_id) const;
 
 private:
+    VmRecord* FindVm(const std::string& vm_id);
+    const VmRecord* FindVm(const std::string& vm_id) const;
+    bool EraseVm(const std::string& vm_id);
+
     bool SendRuntimeMessage(VmRecord& vm, const ipc::Message& msg);
     bool EnsurePipeConnected(VmRecord& vm);
     void CloseRuntime(VmRecord& vm);
@@ -178,7 +182,7 @@ private:
     std::string runtime_exe_path_;
     std::string data_dir_;
     settings::AppSettings settings_;
-    std::unordered_map<std::string, VmRecord> vms_;
+    std::vector<VmRecord> vms_;
     std::mutex vms_mutex_;
     ConsoleCallback console_callback_;
     StateChangeCallback state_change_callback_;

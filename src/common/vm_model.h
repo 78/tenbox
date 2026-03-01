@@ -37,6 +37,8 @@ struct VmSpec {
     bool nat_enabled = false;
     std::vector<PortForward> port_forwards;
     std::vector<SharedFolder> shared_folders;
+    int64_t creation_time = 0;   // Unix timestamp (seconds since epoch), 0 = not set
+    int64_t last_boot_time = 0;  // Unix timestamp when VM was last started
 };
 
 struct VmMutablePatch {

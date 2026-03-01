@@ -3,6 +3,8 @@
 #include "ui/common/i18n.h"
 
 #include <cstring>
+#include <ctime>
+#include <string>
 
 void InfoTab::Create(HWND parent, HINSTANCE hinst, HFONT ui_font) {
     for (int i = 0; i < kDetailRows; ++i) {
@@ -37,9 +39,9 @@ void InfoTab::Layout(HWND hwnd, HFONT ui_font, int px, int py, int pw, int ph) {
 
     const char* kLabels[] = {
         i18n::tr(i18n::S::kLabelId), i18n::tr(i18n::S::kLabelLocation),
-        i18n::tr(i18n::S::kLabelKernel), i18n::tr(i18n::S::kLabelDisk),
         i18n::tr(i18n::S::kLabelMemory), i18n::tr(i18n::S::kLabelVcpus),
-        i18n::tr(i18n::S::kLabelNat)
+        i18n::tr(i18n::S::kLabelNat),
+        i18n::tr(i18n::S::kLabelCreatedTime), i18n::tr(i18n::S::kLabelLastBootTime)
     };
     int label_w = 0;
     for (const char* lbl : kLabels) {
@@ -65,13 +67,31 @@ void InfoTab::Layout(HWND hwnd, HFONT ui_font, int px, int py, int pw, int ph) {
     }
 }
 
+namespace {
+
+std::string FormatTimestamp(int64_t ts) {
+    if (ts <= 0) return "";
+    time_t t = static_cast<time_t>(ts);
+    struct tm tm_buf {};
+#ifdef _WIN32
+    if (localtime_s(&tm_buf, &t) != 0) return "";
+#else
+    if (!localtime_r(&t, &tm_buf)) return "";
+#endif
+    char buf[32];
+    size_t n = strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm_buf);
+    return n > 0 ? std::string(buf, n) : "";
+}
+
+}  // namespace
+
 void InfoTab::Update(const VmSpec* spec) {
     using S = i18n::S;
     const char* label_texts[] = {
         i18n::tr(S::kLabelId), i18n::tr(S::kLabelLocation),
-        i18n::tr(S::kLabelKernel), i18n::tr(S::kLabelDisk),
         i18n::tr(S::kLabelMemory), i18n::tr(S::kLabelVcpus),
-        i18n::tr(S::kLabelNat)
+        i18n::tr(S::kLabelNat),
+        i18n::tr(S::kLabelCreatedTime), i18n::tr(S::kLabelLastBootTime)
     };
     for (int i = 0; i < kDetailRows; ++i)
         SetWindowTextA(labels_[i], label_texts[i]);
@@ -87,10 +107,9 @@ void InfoTab::Update(const VmSpec* spec) {
 
     SetWindowTextA(values_[0], spec->vm_id.c_str());
     SetWindowTextA(values_[1], spec->vm_dir.c_str());
-    SetWindowTextA(values_[2], spec->kernel_path.c_str());
-    SetWindowTextA(values_[3],
-        spec->disk_path.empty() ? i18n::tr(S::kNone) : spec->disk_path.c_str());
-    SetWindowTextA(values_[4], mb_str.c_str());
-    SetWindowTextA(values_[5], cpu_str.c_str());
-    SetWindowTextA(values_[6], spec->nat_enabled ? i18n::tr(S::kNatEnabled) : i18n::tr(S::kNatDisabled));
+    SetWindowTextA(values_[2], mb_str.c_str());
+    SetWindowTextA(values_[3], cpu_str.c_str());
+    SetWindowTextA(values_[4], spec->nat_enabled ? i18n::tr(S::kNatEnabled) : i18n::tr(S::kNatDisabled));
+    SetWindowTextA(values_[5], FormatTimestamp(spec->creation_time).c_str());
+    SetWindowTextA(values_[6], FormatTimestamp(spec->last_boot_time).c_str());
 }

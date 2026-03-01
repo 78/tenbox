@@ -61,8 +61,8 @@ enum class S {
     // Detail panel labels
     kLabelId,
     kLabelLocation,
-    kLabelKernel,
-    kLabelDisk,
+    kLabelCreatedTime,
+    kLabelLastBootTime,
     kLabelMemory,
     kLabelVcpus,
     kLabelNat,

@@ -36,8 +36,8 @@ static const char* kStringsEn[] = {
     "Shared Folders",                    // kTabSharedFolders
     "ID:",                               // kLabelId
     "Location:",                         // kLabelLocation
-    "Kernel:",                           // kLabelKernel
-    "Disk:",                             // kLabelDisk
+    "Created:",                          // kLabelCreatedTime
+    "Last boot:",                        // kLabelLastBootTime
     "Memory:",                           // kLabelMemory
     "vCPUs:",                            // kLabelVcpus
     "NAT:",                              // kLabelNat
@@ -137,8 +137,8 @@ static const char* kStringsZhCN[] = {
     "共享文件夹",                        // kTabSharedFolders
     "标识:",                             // kLabelId
     "位置:",                             // kLabelLocation
-    "内核:",                             // kLabelKernel
-    "磁盘:",                             // kLabelDisk
+    "创建时间:",                         // kLabelCreatedTime
+    "上次开机:",                         // kLabelLastBootTime
     "内存:",                             // kLabelMemory
     "vCPU:",                           // kLabelVcpus
     "网络:",                             // kLabelNat
