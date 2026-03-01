@@ -553,6 +553,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 const std::string& new_vm_id = p->records[sel].spec.vm_id;
                 VmUiState& new_state = p->GetVmUiState(new_vm_id);
 
+                p->last_sent_display_w = 0;
+                p->last_sent_display_h = 0;
+
                 p->info_tab.Update(&p->records[sel].spec);
                 UpdateCommandStates(p);
 
@@ -566,6 +569,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         new_state.fb_width, new_state.fb_height, new_state.framebuffer);
                     if (!new_state.cursor_pixels.empty()) {
                         p->display_panel->RestoreCursor(new_state.cursor, new_state.cursor_pixels);
+                    }
+                    if (new_state.current_tab == kTabDisplay) {
+                        ResizeWindowForDisplay(p, new_state.fb_width, new_state.fb_height);
                     }
                 } else {
                     p->display_panel->Clear();
