@@ -35,7 +35,28 @@ static void PrintUsage(const char* prog, const char* default_runtime) {
         prog, default_runtime);
 }
 
+static constexpr const char* kMutexName = "TenBoxManager_SingleInstance";
+static constexpr const char* kWndClass = "TenBoxManagerWin32";
+
+static bool ActivateExistingInstance() {
+    HWND hwnd = FindWindowA(kWndClass, nullptr);
+    if (hwnd) {
+        if (IsIconic(hwnd))
+            ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
+        return true;
+    }
+    return false;
+}
+
 int main(int argc, char* argv[]) {
+    HANDLE hMutex = CreateMutexA(nullptr, FALSE, kMutexName);
+    if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(hMutex);
+        ActivateExistingInstance();
+        return 0;
+    }
+
     std::string runtime_exe = ResolveDefaultRuntimeExePath();
 
     for (int i = 1; i < argc; ++i) {
@@ -133,5 +154,6 @@ int main(int argc, char* argv[]) {
     ui.Run();
 
     manager.ShutdownAll();
+    if (hMutex) CloseHandle(hMutex);
     return 0;
 }
