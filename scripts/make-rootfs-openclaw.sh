@@ -6,13 +6,11 @@
 #   - Checkpoint system: resume from last successful step after failure
 #   - APT cache: reuse downloaded packages across runs
 #   - External script cache: NodeSource, OpenClaw install scripts
-#   - Edit mode: modify existing rootfs without full rebuild
 #
 # Usage:
 #   ./make-rootfs.sh [output.qcow2]           # Normal run (resume if interrupted)
 #   ./make-rootfs.sh --force [output.qcow2]   # Force rebuild from scratch
 #   ./make-rootfs.sh --from-step N            # Resume from step N
-#   ./make-rootfs.sh --edit                   # Edit existing rootfs (from cached raw)
 #   ./make-rootfs.sh --list-steps             # Show all steps
 #   ./make-rootfs.sh --status                 # Show current progress
 
@@ -23,8 +21,8 @@ SUITE="bookworm"
 MIRROR="https://mirrors.ustc.edu.cn/debian"
 MIRROR_SECURITY="https://mirrors.ustc.edu.cn/debian-security"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-openclaw}"
-USER_PASSWORD="${USER_PASSWORD:-openclaw}"
+USER_NAME="${USER_NAME:-terrence}"
+USER_PASSWORD="${USER_PASSWORD:-terrence}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,isc-dhcp-client,\
 ca-certificates,curl,wget,\
@@ -52,11 +50,12 @@ CACHE_TAR="$CACHE_DIR/debootstrap-${SUITE}-base.tar"
 CACHE_CHROME="$CACHE_DIR/google-chrome-stable_current_amd64.deb"
 CACHE_NODESOURCE="$SCRIPTS_CACHE_DIR/nodesource_setup_22.x.sh"
 CACHE_OPENCLAW="$SCRIPTS_CACHE_DIR/openclaw_install.sh"
-CACHE_RAW="$CACHE_DIR/rootfs.raw"
+
+# Work dir must be on WSL Linux FS (/tmp), not NTFS (DrvFS /mnt/*) - loop devices need mknod
+WORK_DIR="/tmp/tenbox-rootfs-openclaw"
 
 # Parse arguments
 FORCE_REBUILD=false
-EDIT_MODE=false
 FROM_STEP=0
 LIST_STEPS=false
 SHOW_STATUS=false
@@ -73,15 +72,12 @@ Options:
   --status        Show current build progress
   --list-steps    Show all build steps with numbers
   --force         Force rebuild from scratch (clear all checkpoints)
-  --edit          Edit existing rootfs using cached raw image
   --from-step N   Resume from step N (use --list-steps to see numbers)
 
 Examples:
   ./make-rootfs.sh                    # Normal build (resume if interrupted)
   ./make-rootfs.sh --status           # Check progress
   ./make-rootfs.sh --force            # Rebuild from scratch
-  ./make-rootfs.sh --edit             # Edit existing rootfs
-  ./make-rootfs.sh --edit --from-step 14   # Edit from specific step
 HELP
     exit 0
 }
@@ -93,10 +89,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE_REBUILD=true
-            shift
-            ;;
-        --edit)
-            EDIT_MODE=true
             shift
             ;;
         --from-step)
@@ -201,12 +193,6 @@ if $SHOW_STATUS; then
         fi
         printf "  %2d. %-20s %s\n" "$i" "${STEPS[$i]}" "$status"
     done
-    echo ""
-    if [ -f "$CACHE_RAW" ]; then
-        echo "Cached rootfs.raw: $(du -h "$CACHE_RAW" | cut -f1) (--edit available)"
-    else
-        echo "Cached rootfs.raw: not found (--edit not available)"
-    fi
     exit 0
 fi
 
@@ -214,7 +200,7 @@ fi
 if $FORCE_REBUILD; then
     echo "Force rebuild: clearing all checkpoints and work directory..."
     rm -f "$CHECKPOINT_DIR"/*.done
-    rm -f "$CHECKPOINT_DIR/.work_dir"
+    rm -rf "$WORK_DIR"
 fi
 
 # Clear checkpoints from specified step onwards
@@ -236,40 +222,15 @@ mark_done() {
     touch "$CHECKPOINT_DIR/$1.done"
 }
 
-# Handle --edit mode: restore from cached raw image
-if $EDIT_MODE; then
-    if [ ! -f "$CACHE_RAW" ]; then
-        echo "Error: No cached rootfs.raw found at $CACHE_RAW"
-        echo "Run a full build first, or use --force to rebuild from scratch."
-        exit 1
-    fi
-    echo "Edit mode: using cached rootfs.raw"
-    
-    # Mark early steps as done (we have a complete image)
-    touch "$CHECKPOINT_DIR/create_image.done"
-    touch "$CHECKPOINT_DIR/debootstrap.done"
-    
-    # If --from-step not specified, default to config_services
-    if [ "$FROM_STEP" -eq 0 ]; then
-        for i in "${!STEPS[@]}"; do
-            if [ "${STEPS[$i]}" = "config_services" ]; then
-                FROM_STEP=$i
-                break
-            fi
-        done
-        echo "  Defaulting to --from-step $FROM_STEP (config_services)"
-    fi
-fi
-
 # DrvFS (/mnt/*) does not support mknod through loop devices.
 # Build everything on the native Linux filesystem, copy result back.
-WORK_DIR=$(mktemp -d /tmp/make-rootfs.XXXXXX)
 MOUNT_DIR=""
+mkdir -p "$WORK_DIR"
 
 cleanup() {
     echo "Cleaning up..."
     if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
-        for sub in proc sys dev; do
+        for sub in dev/pts proc sys dev; do
             mountpoint -q "$MOUNT_DIR/$sub" 2>/dev/null && \
                 sudo umount -l "$MOUNT_DIR/$sub" 2>/dev/null || true
         done
@@ -278,35 +239,21 @@ cleanup() {
     fi
     # Don't remove WORK_DIR on failure so we can resume
     if [ "${BUILD_SUCCESS:-false}" = "true" ]; then
-        # Save raw image to cache for future --edit runs
-        if [ -f "$WORK_DIR/rootfs.raw" ]; then
-            echo "Saving rootfs.raw to cache for future edits..."
-            cp "$WORK_DIR/rootfs.raw" "$CACHE_RAW"
-        fi
         rm -rf "$WORK_DIR"
-        rm -f "$CHECKPOINT_DIR/.work_dir"
     else
         echo "Work directory preserved for resume: $WORK_DIR"
-        # Save work dir path for resume
-        echo "$WORK_DIR" > "$CHECKPOINT_DIR/.work_dir"
     fi
 }
 trap cleanup EXIT
 
-# Try to reuse existing work directory
-if [ -f "$CHECKPOINT_DIR/.work_dir" ]; then
-    SAVED_WORK_DIR=$(cat "$CHECKPOINT_DIR/.work_dir")
-    if [ -d "$SAVED_WORK_DIR" ] && [ -f "$SAVED_WORK_DIR/rootfs.raw" ]; then
-        echo "Resuming with existing work directory: $SAVED_WORK_DIR"
-        rm -rf "$WORK_DIR"
-        WORK_DIR="$SAVED_WORK_DIR"
-        
-        # Clear runtime checkpoints (mount states don't persist across runs)
-        rm -f "$CHECKPOINT_DIR/mount_image.done"
-        rm -f "$CHECKPOINT_DIR/setup_chroot.done"
-        rm -f "$CHECKPOINT_DIR/cleanup_chroot.done"
-        rm -f "$CHECKPOINT_DIR/unmount_image.done"
-    fi
+# Resume: reuse existing work directory if it has rootfs.raw (fixed path, no .work_dir needed)
+if [ -d "$WORK_DIR" ] && [ -f "$WORK_DIR/rootfs.raw" ]; then
+    echo "Resuming with existing work directory: $WORK_DIR"
+    # Clear runtime checkpoints (mount states don't persist across runs)
+    rm -f "$CHECKPOINT_DIR/mount_image.done"
+    rm -f "$CHECKPOINT_DIR/setup_chroot.done"
+    rm -f "$CHECKPOINT_DIR/cleanup_chroot.done"
+    rm -f "$CHECKPOINT_DIR/unmount_image.done"
 fi
 
 MOUNT_DIR="$WORK_DIR/mnt"
@@ -336,13 +283,8 @@ run_step() {
 
 do_create_image() {
     if [ ! -f "$WORK_DIR/rootfs.raw" ]; then
-        if $EDIT_MODE && [ -f "$CACHE_RAW" ]; then
-            echo "  Copying cached rootfs.raw to work directory..."
-            cp "$CACHE_RAW" "$WORK_DIR/rootfs.raw"
-        else
-            truncate -s "$ROOTFS_SIZE" "$WORK_DIR/rootfs.raw"
-            mkfs.ext4 -F "$WORK_DIR/rootfs.raw"
-        fi
+        truncate -s "$ROOTFS_SIZE" "$WORK_DIR/rootfs.raw"
+        mkfs.ext4 -F "$WORK_DIR/rootfs.raw"
     fi
 }
 
@@ -381,6 +323,8 @@ do_setup_chroot() {
     mountpoint -q "$MOUNT_DIR/proc" 2>/dev/null || sudo mount --bind /proc "$MOUNT_DIR/proc"
     mountpoint -q "$MOUNT_DIR/sys" 2>/dev/null || sudo mount --bind /sys "$MOUNT_DIR/sys"
     mountpoint -q "$MOUNT_DIR/dev" 2>/dev/null || sudo mount --bind /dev "$MOUNT_DIR/dev"
+    sudo mkdir -p "$MOUNT_DIR/dev/pts"
+    mountpoint -q "$MOUNT_DIR/dev/pts" 2>/dev/null || sudo mount -t devpts devpts "$MOUNT_DIR/dev/pts"
     
     # Prevent service start failures in chroot
     sudo tee "$MOUNT_DIR/usr/sbin/policy-rc.d" > /dev/null << 'PRC'
@@ -707,7 +651,7 @@ if [ -f /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf ]; then
 fi
 
 mkdir -p /etc/polkit-1/rules.d
-cp /tmp/rootfs-services/50-openclaw-power.rules /etc/polkit-1/rules.d/
+cp /tmp/rootfs-services/50-terrence-power.rules /etc/polkit-1/rules.d/
 
 mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
 cp /tmp/rootfs-services/serial-getty-autologin.conf /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
@@ -855,6 +799,7 @@ EOF
         sudo umount "$MOUNT_DIR/var/cache/apt/archives" || true
     
     # Unmount proc/sys/dev
+    sudo umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
     sudo umount "$MOUNT_DIR/proc" "$MOUNT_DIR/sys" "$MOUNT_DIR/dev" 2>/dev/null || true
 }
 
@@ -909,7 +854,6 @@ run_step "convert_qcow2"  "Converting to qcow2"       do_convert_qcow2
 
 # Mark build as successful
 BUILD_SUCCESS=true
-rm -f "$CHECKPOINT_DIR/.work_dir"
 rm -f "$CHECKPOINT_DIR"/*.done
 
 echo ""

@@ -5,8 +5,8 @@ sleep 0.1
 export DISPLAY=:0
 
 # Try to find valid XAUTHORITY
-OPENCLAW_UID=$(id -u openclaw 2>/dev/null || echo 1000)
-for auth in /home/openclaw/.Xauthority /var/run/lightdm/openclaw/:0 /run/user/${OPENCLAW_UID}/gdm/Xauthority; do
+TERRENCE_UID=$(id -u terrence 2>/dev/null || echo 1000)
+for auth in /home/terrence/.Xauthority /var/run/lightdm/terrence/:0 /run/user/${TERRENCE_UID}/gdm/Xauthority; do
     if [ -f "$auth" ]; then
         export XAUTHORITY="$auth"
         break

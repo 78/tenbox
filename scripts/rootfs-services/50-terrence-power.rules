@@ -1,6 +1,6 @@
-// Allow openclaw user to shutdown, reboot, suspend without password
+// Allow terrence user to shutdown, reboot, suspend without password
 polkit.addRule(function(action, subject) {
-    if (subject.user == "openclaw" &&
+    if (subject.user == "terrence" &&
         (action.id == "org.freedesktop.login1.reboot" ||
          action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
          action.id == "org.freedesktop.login1.power-off" ||

@@ -2,7 +2,7 @@
 # Sync desktop links with /mnt/shared subdirectories
 
 MOUNT_POINT="/mnt/shared"
-MOUNT_USER="openclaw"
+MOUNT_USER="terrence"
 USER_HOME="/home/$MOUNT_USER"
 DESKTOP_DIR="$USER_HOME/Desktop"
 
