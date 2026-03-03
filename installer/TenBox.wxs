@@ -10,7 +10,7 @@
            InstallerVersion="500"
            Compressed="yes">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of TenBox is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Installer UI with directory selection -->
@@ -20,7 +20,7 @@
     <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectDir)\installer\license.rtf" />
 
     <!-- Completion dialog: "Launch TenBox" checkbox -->
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch TenBox" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchCheckbox)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <SetProperty Id="WixShellExecTarget" Value="[INSTALLFOLDER]tenbox-manager.exe"
                  After="CostFinalize" Sequence="ui" />

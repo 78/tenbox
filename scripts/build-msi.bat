@@ -46,17 +46,19 @@ if not exist "%WIX_PATH%" (
     exit /b 1
 )
 "%WIX_PATH%" build "%PROJECT_DIR%\installer\TenBox.wxs" ^
+    "%PROJECT_DIR%\installer\zh-CN.wxl" ^
     -arch x64 ^
+    -culture zh-CN ^
     -ext WixToolset.UI.wixext ^
     -ext WixToolset.Util.wixext ^
     -d ProductVersion=%VERSION% ^
     -d BuildDir=%BUILD_DIR% ^
     -d ProjectDir=%PROJECT_DIR% ^
-    -o "%BUILD_DIR%\TenBox-%VERSION%.msi"
+    -o "%BUILD_DIR%\TenBox_%VERSION%.msi"
 if errorlevel 1 (
     echo ERROR: WiX build failed.
     exit /b 1
 )
 
 echo.
-echo Success: %BUILD_DIR%\TenBox-%VERSION%.msi
+echo Success: %BUILD_DIR%\TenBox_%VERSION%.msi

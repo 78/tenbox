@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="zh-CN">
+  <String Id="DowngradeError" Value="已安装了更新版本的 TenBox，无法降级安装。" />
+  <String Id="LaunchCheckbox" Value="启动 TenBox" />
+</WixLocalization>
