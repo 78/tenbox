@@ -50,6 +50,10 @@ public:
     // Restore cursor from cached state (e.g. when switching back to a VM).
     void RestoreCursor(const CursorInfo& cursor, const std::vector<uint8_t>& pixels);
 
+    // Enable or disable scaling mode (fit framebuffer to panel, preserving aspect ratio).
+    // When disabled (default), the framebuffer is rendered 1:1 centered.
+    void SetScaling(bool enabled);
+
     // Move/resize the window.
     void SetBounds(int x, int y, int w, int h);
 
@@ -98,6 +102,8 @@ private:
     // Cursor state
     std::mutex cursor_mutex_;
     HCURSOR custom_cursor_ = nullptr;
+
+    bool scaling_ = false;
 
     KeyEventCallback key_cb_;
     PointerEventCallback pointer_cb_;

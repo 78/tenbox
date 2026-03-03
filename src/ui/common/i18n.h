@@ -132,6 +132,7 @@ enum class S {
     // View menu
     kMenuView,
     kMenuViewToolbar,
+    kMenuViewAdaptiveDisplay,
 
     // Help menu
     kMenuHelp,

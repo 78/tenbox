@@ -47,7 +47,8 @@ enum CmdId : UINT {
     IDM_EDIT          = 1014,
     IDM_DELETE        = 1015,
     IDM_SHARED_FOLDERS = 1016,
-    IDM_VIEW_TOOLBAR   = 1017,
+    IDM_VIEW_TOOLBAR           = 1017,
+    IDM_VIEW_ADAPTIVE_DISPLAY  = 1018,
     IDM_WEBSITE        = 1020,
     IDM_CHECK_UPDATE  = 1021,
     IDM_ABOUT         = 1022,
@@ -221,7 +222,7 @@ static ATOM RegisterMainClass(HINSTANCE hinst) {
 
 // ── Menu building ──
 
-static HMENU BuildMenuBar(bool show_toolbar) {
+static HMENU BuildMenuBar(bool show_toolbar, bool adaptive_display) {
     using S = i18n::S;
     HMENU bar = CreateMenu();
 
@@ -246,6 +247,8 @@ static HMENU BuildMenuBar(bool show_toolbar) {
     HMENU view_menu = CreatePopupMenu();
     AppendMenuA(view_menu, MF_STRING | (show_toolbar ? MF_CHECKED : MF_UNCHECKED),
                IDM_VIEW_TOOLBAR, i18n::tr(S::kMenuViewToolbar));
+    AppendMenuA(view_menu, MF_STRING | (adaptive_display ? MF_CHECKED : MF_UNCHECKED),
+               IDM_VIEW_ADAPTIVE_DISPLAY, i18n::tr(S::kMenuViewAdaptiveDisplay));
     AppendMenuA(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(view_menu), i18n::tr(S::kMenuView));
 
     HMENU help_menu = CreatePopupMenu();
@@ -478,10 +481,12 @@ static void LayoutControls(Impl* p) {
             p->display_panel->SetVisible(true);
             p->display_panel->SetBounds(px, py, pw, ph);
 
+            bool adaptive = g_shell && g_shell->manager_.app_settings().adaptive_display;
+
             uint32_t disp_w = pw > 0 ? (static_cast<uint32_t>(pw) & ~7u) : 0;
             uint32_t disp_h = ph > 0 ? static_cast<uint32_t>(ph) : 0;
 
-            if (p->display_available && disp_w > 0 && disp_h > 0 &&
+            if (adaptive && p->display_available && disp_w > 0 && disp_h > 0 &&
                 (disp_w != p->last_sent_display_w || disp_h != p->last_sent_display_h)) {
                 p->pending_display_w = disp_w;
                 p->pending_display_h = disp_h;
@@ -735,6 +740,23 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             shell->manager_.SaveAppSettings();
             LayoutControls(p);
+            return 0;
+        }
+        case IDM_VIEW_ADAPTIVE_DISPLAY: {
+            auto& adaptive = shell->manager_.app_settings().adaptive_display;
+            adaptive = !adaptive;
+            HMENU view_menu = GetSubMenu(p->menu_bar, 2);
+            if (view_menu) {
+                CheckMenuItem(view_menu, IDM_VIEW_ADAPTIVE_DISPLAY,
+                    MF_BYCOMMAND | (adaptive ? MF_CHECKED : MF_UNCHECKED));
+            }
+            if (p->display_panel) {
+                p->display_panel->SetScaling(!adaptive);
+            }
+            shell->manager_.SaveAppSettings();
+            if (adaptive) {
+                LayoutControls(p);
+            }
             return 0;
         }
         case IDM_EDIT: {
@@ -1032,7 +1054,8 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     int h = (geo.height > 0) ? geo.height : 680;
 
     i18n::InitLanguage();
-    impl_->menu_bar = BuildMenuBar(manager_.app_settings().show_toolbar);
+    impl_->menu_bar = BuildMenuBar(manager_.app_settings().show_toolbar,
+                                    manager_.app_settings().adaptive_display);
 
     impl_->hwnd = CreateWindowExA(0, kWndClass, i18n::tr(i18n::S::kAppTitle),
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -1099,6 +1122,7 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     // Display panel
     impl_->display_panel = std::make_unique<DisplayPanel>();
     impl_->display_panel->Create(impl_->hwnd, hinst, 0, 0, 400, 300);
+    impl_->display_panel->SetScaling(!manager_.app_settings().adaptive_display);
     impl_->display_panel->SetKeyCallback(
         [this](uint32_t evdev_code, bool pressed) {
             if (impl_->selected_index < 0 ||

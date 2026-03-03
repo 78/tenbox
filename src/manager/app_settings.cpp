@@ -93,6 +93,9 @@ AppSettings LoadSettings(const std::string& data_dir) {
         if (j.contains("show_toolbar") && j["show_toolbar"].is_boolean()) {
             s.show_toolbar = j["show_toolbar"].get<bool>();
         }
+        if (j.contains("adaptive_display") && j["adaptive_display"].is_boolean()) {
+            s.adaptive_display = j["adaptive_display"].get<bool>();
+        }
         if (j.contains("vm_paths") && j["vm_paths"].is_array()) {
             auto default_storage = DefaultVmStorageDir();
             for (auto& item : j["vm_paths"]) {
@@ -133,9 +136,10 @@ void SaveSettings(const std::string& data_dir, const AppSettings& s) {
     }
 
     json j;
-    j["window"]       = w;
-    j["show_toolbar"] = s.show_toolbar;
-    j["vm_paths"]     = vm_paths_json;
+    j["window"]           = w;
+    j["show_toolbar"]     = s.show_toolbar;
+    j["adaptive_display"] = s.adaptive_display;
+    j["vm_paths"]         = vm_paths_json;
 
     auto path = fs::path(data_dir) / "settings.json";
     std::ofstream ofs(path, std::ios::trunc);

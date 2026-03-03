@@ -91,6 +91,7 @@ static const char* kStringsEn[] = {
     "Click to capture system keys",  // kDisplayHintNormal
     "View",                                 // kMenuView
     "Toolbar",                              // kMenuViewToolbar
+    "Adaptive Display",                     // kMenuViewAdaptiveDisplay
     "Help",                                 // kMenuHelp
     "Website",                               // kMenuWebsite
     "Check for Updates",                     // kMenuCheckUpdate
@@ -227,6 +228,7 @@ static const char* kStringsZhCN[] = {
     "点击以捕获系统键",                       // kDisplayHintNormal
     "视图",                                  // kMenuView
     "工具栏",                                // kMenuViewToolbar
+    "自适应大小",                            // kMenuViewAdaptiveDisplay
     "帮助",                                  // kMenuHelp
     "官方网站",                              // kMenuWebsite
     "检查更新",                              // kMenuCheckUpdate
