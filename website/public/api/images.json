@@ -4,23 +4,24 @@
       "id": "copaw",
       "version": "0.0.4",
       "name": "XFCE + CoPaw 0.0.4",
+      "description": "一个基于 Debian 12 的 XFCE 桌面环境，预装了 CoPaw 0.0.4 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/copaw-0.0.4/vmlinuz",
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw-0.0.4/vmlinuz",
           "sha256": ""
         },
         {
           "name": "initrd.gz",
-          "url": "https://files.xiaozhi.me/tenbox/copaw-0.0.4/initrd.gz",
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw-0.0.4/initramfs.cpio.gz",
           "sha256": ""
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/copaw-0.0.4/rootfs.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw-0.0.4/rootfs-copaw-0.0.4.qcow2",
           "sha256": ""
         }
       ]

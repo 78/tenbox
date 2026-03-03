@@ -1,6 +1,7 @@
 add_library(tenbox_ui_shell_win32 STATIC
     ${CMAKE_SOURCE_DIR}/src/ui/win32/win32_ui_shell.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/win32/win32_dialogs.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/win32/create_vm_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/win32/win32_display_panel.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/win32/components/info_tab.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/win32/components/console_tab.cpp
@@ -16,4 +17,4 @@ target_include_directories(tenbox_ui_shell_win32
         ${CMAKE_BINARY_DIR}
 )
 
-target_link_libraries(tenbox_ui_shell_win32 PUBLIC comctl32 uxtheme ole32)
+target_link_libraries(tenbox_ui_shell_win32 PUBLIC comctl32 uxtheme ole32 winhttp bcrypt)

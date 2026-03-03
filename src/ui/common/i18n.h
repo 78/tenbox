@@ -166,6 +166,24 @@ enum class S {
     kSfConfirmRemoveTitle,
     kSfConfirmRemoveMsg,
 
+    // Online image dialog
+    kImgFetchOnline,
+    kImgLoadingOnline,
+    kImgCached,
+    kImgDownloading,
+    kImgDownloadingFile,
+    kImgBtnNext,
+    kImgBtnBack,
+    kImgBtnRetry,
+    kImgBtnLoad,
+    kImgBtnDeleteCache,
+    kImgSource,
+    kImgNoDescription,
+    kImgConfirmDeleteCacheTitle,
+    kImgConfirmDeleteCacheMsg,
+    kImgCacheDeleted,
+    kImgCacheDeleteFailed,
+
     kCount  // Must be last
 };
 

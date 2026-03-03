@@ -208,7 +208,6 @@ enum CreateDlgId {
     IDC_CR_BR_DISK    = 110,
     IDC_CR_BR_LOC     = 111,
     IDC_CR_OK         = IDOK,
-    IDC_CR_CANCEL     = IDCANCEL,
 };
 
 struct CreateDlgData {
@@ -370,9 +369,6 @@ static INT_PTR CALLBACK CreateDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) 
             }
             return TRUE;
         }
-        case IDCANCEL:
-            EndDialog(dlg, IDCANCEL);
-            return TRUE;
         }
         break;
 
@@ -415,8 +411,7 @@ bool ShowCreateVmDialog(HWND parent, ManagerService& mgr, std::string* error) {
     b.AddEdit(IDC_CR_LOCATION,          ex, y-2, ew_br, rh);
     b.AddButton(IDC_CR_BR_LOC, i18n::tr(S::kDlgBtnBrowse), bx, y-2, bw, rh); y += sp + 4;
 
-    b.AddDefButton(IDOK,     i18n::tr(S::kDlgBtnCreate), W - 110, y, 48, 14);
-    b.AddButton(IDCANCEL,    i18n::tr(S::kDlgBtnCancel), W - 56, y, 48, 14);
+    b.AddDefButton(IDOK,     i18n::tr(S::kDlgBtnCreate), W - 56, y, 48, 14);
 
     CreateDlgData data{&mgr, false, ""};
     DialogBoxIndirectParamA(GetModuleHandle(nullptr), b.Build(), parent,
@@ -437,7 +432,6 @@ enum EditDlgId {
     IDC_ED_NAT      = 203,
     IDC_ED_WARN     = 204,
     IDC_ED_OK       = IDOK,
-    IDC_ED_CANCEL   = IDCANCEL,
 };
 
 struct EditDlgData {
@@ -515,9 +509,6 @@ static INT_PTR CALLBACK EditDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return TRUE;
         }
-        case IDCANCEL:
-            EndDialog(dlg, IDCANCEL);
-            return TRUE;
         }
         break;
 
@@ -547,8 +538,7 @@ bool ShowEditVmDialog(HWND parent, ManagerService& mgr,
     b.AddCheckBox(IDC_ED_NAT, i18n::tr(S::kDlgEnableNat), ex, y, ew, rh); y += sp;
     b.AddStatic(IDC_ED_WARN, "",       lx, y, W - 16, rh); y += sp + 4;
 
-    b.AddDefButton(IDOK,     i18n::tr(S::kDlgBtnSave),  W - 110, y, 48, 14);
-    b.AddButton(IDCANCEL,    i18n::tr(S::kDlgBtnCancel), W - 56, y, 48, 14);
+    b.AddDefButton(IDOK,     i18n::tr(S::kDlgBtnSave),  W - 56, y, 48, 14);
 
     EditDlgData data{&mgr, rec, false, ""};
     DialogBoxIndirectParamA(GetModuleHandle(nullptr), b.Build(), parent,
@@ -566,7 +556,6 @@ enum SfDlgId {
     IDC_SF_LIST    = 300,
     IDC_SF_ADD     = 301,
     IDC_SF_REMOVE  = 302,
-    IDC_SF_CLOSE   = IDCANCEL,
 };
 
 struct SfDlgData {
@@ -642,7 +631,6 @@ static INT_PTR CALLBACK SfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         int btn_x = gap + list_w + gap;
         MoveWindow(GetDlgItem(dlg, IDC_SF_ADD),    btn_x, gap,                          btn_w, btn_h, FALSE);
         MoveWindow(GetDlgItem(dlg, IDC_SF_REMOVE), btn_x, gap + btn_h + btn_gap,        btn_w, btn_h, FALSE);
-        MoveWindow(GetDlgItem(dlg, IDC_SF_CLOSE),  btn_x, rc.bottom - gap - btn_h,      btn_w, btn_h, FALSE);
 
         SfRefreshList(data);
         return TRUE;
@@ -696,9 +684,6 @@ static INT_PTR CALLBACK SfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return TRUE;
         }
-        case IDC_SF_CLOSE:
-            EndDialog(dlg, IDCANCEL);
-            return TRUE;
         }
         break;
 
@@ -720,7 +705,6 @@ void ShowSharedFoldersDialog(HWND parent, ManagerService& mgr, const std::string
     int btn_h = 14, btn_w = 50;
     b.AddButton(IDC_SF_ADD,    i18n::tr(S::kSfBtnAdd),    0, 0, btn_w, btn_h);
     b.AddButton(IDC_SF_REMOVE, i18n::tr(S::kSfBtnRemove), 0, 0, btn_w, btn_h);
-    b.AddButton(IDC_SF_CLOSE,  i18n::tr(S::kDlgBtnClose), 0, 0, btn_w, btn_h);
 
     SfDlgData data{&mgr, vm_id, nullptr};
     DialogBoxIndirectParamA(GetModuleHandle(nullptr), b.Build(), parent,

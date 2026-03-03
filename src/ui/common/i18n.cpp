@@ -118,6 +118,22 @@ static const char* kStringsEn[] = {
     "Please select a shared folder to remove.",  // kSfNoSelection
     "Confirm Remove",                        // kSfConfirmRemoveTitle
     "Remove shared folder '%s'?",            // kSfConfirmRemoveMsg
+    "Fetch online images...",                // kImgFetchOnline
+    "Loading online images...",              // kImgLoadingOnline
+    "(cached)",                              // kImgCached
+    "Downloading...",                        // kImgDownloading
+    "Downloading file %d/%d: %s",            // kImgDownloadingFile
+    "Next",                                  // kImgBtnNext
+    "Back",                                  // kImgBtnBack
+    "Retry",                                 // kImgBtnRetry
+    "Load",                                  // kImgBtnLoad
+    "Delete Cache",                          // kImgBtnDeleteCache
+    "Image Source:",                         // kImgSource
+    "No description available.",             // kImgNoDescription
+    "Delete Cached Image",                   // kImgConfirmDeleteCacheTitle
+    "Delete cache for '%s'?\nDownloaded files will be removed.",  // kImgConfirmDeleteCacheMsg
+    "Cache deleted.",                        // kImgCacheDeleted
+    "Failed to delete cache: %s",            // kImgCacheDeleteFailed
 };
 
 // Simplified Chinese strings; order must match enum S
@@ -229,6 +245,22 @@ static const char* kStringsZhCN[] = {
     "请先选择要移除的共享文件夹。",           // kSfNoSelection
     "确认移除",                              // kSfConfirmRemoveTitle
     "确认移除共享文件夹 '%s'？",             // kSfConfirmRemoveMsg
+    "获取在线镜像...",                       // kImgFetchOnline
+    "正在加载在线镜像...",                   // kImgLoadingOnline
+    "(已缓存)",                              // kImgCached
+    "正在下载...",                           // kImgDownloading
+    "正在下载文件 %d/%d: %s",                // kImgDownloadingFile
+    "下一步",                                // kImgBtnNext
+    "上一步",                                // kImgBtnBack
+    "重试",                                  // kImgBtnRetry
+    "加载",                                  // kImgBtnLoad
+    "删除缓存",                              // kImgBtnDeleteCache
+    "镜像源:",                               // kImgSource
+    "暂无描述信息。",                        // kImgNoDescription
+    "删除缓存镜像",                          // kImgConfirmDeleteCacheTitle
+    "确认删除 '%s' 的缓存吗？\n已下载文件将被移除。",  // kImgConfirmDeleteCacheMsg
+    "缓存已删除。",                          // kImgCacheDeleted
+    "删除缓存失败：%s",                      // kImgCacheDeleteFailed
 };
 
 void InitLanguage() {

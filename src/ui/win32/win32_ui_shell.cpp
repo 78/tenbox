@@ -1,5 +1,6 @@
 #include "ui/win32/win32_ui_shell.h"
 #include "ui/win32/win32_dialogs.h"
+#include "ui/win32/create_vm_dialog.h"
 #include "ui/win32/win32_display_panel.h"
 #include "ui/win32/components/info_tab.h"
 #include "ui/win32/components/console_tab.h"
@@ -587,7 +588,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         switch (cmd) {
         case IDM_NEW_VM: {
             std::string error;
-            if (ShowCreateVmDialog(hwnd, shell->manager_, &error)) {
+            if (ShowCreateVmDialog2(hwnd, shell->manager_, &error)) {
                 shell->RefreshVmList();
             } else if (!error.empty()) {
                 MessageBoxA(hwnd, error.c_str(), i18n::tr(i18n::S::kError), MB_OK | MB_ICONERROR);

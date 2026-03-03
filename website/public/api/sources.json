@@ -2,7 +2,7 @@
   "sources": [
     {
       "name": "China Mainland",
-      "url": "https://files.xiaozhi.me/tenbox/images.json"
+      "url": "https://tenbox.ai/api/images.json"
     }
   ]
 }
