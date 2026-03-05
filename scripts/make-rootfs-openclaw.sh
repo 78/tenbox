@@ -579,9 +579,13 @@ echo "Installing OpenClaw..."
 su - $USER_NAME -c 'bash /tmp/openclaw_install.sh --no-onboard'
 rm -f /tmp/openclaw_install.sh
 
-# Ensure npm global bin is in PATH for future sessions
+# Ensure npm global bin and OpenClaw env vars are set for interactive sessions
 if ! grep -q 'npm-global/bin' /home/$USER_NAME/.bashrc 2>/dev/null; then
-    echo 'export PATH="\$HOME/.npm-global/bin:\$PATH"' >> /home/$USER_NAME/.bashrc
+    cat >> /home/$USER_NAME/.bashrc << 'BASHRC'
+export PATH="\$HOME/.npm-global/bin:\$PATH"
+export NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+export OPENCLAW_NO_RESPAWN=1
+BASHRC
 fi
 EOF
 
@@ -609,6 +613,7 @@ openclaw config set gateway.auth.mode token
 openclaw config set gateway.auth.token tenbox
 openclaw config set gateway.controlUi.allowInsecureAuth true
 openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true
+openclaw config set gateway.controlUi.allowedOrigins '["*"]'
 SCRIPT
     sudo chmod +x "$MOUNT_DIR/tmp/openclaw_config.sh"
 
@@ -656,6 +661,9 @@ Environment=OPENCLAW_SYSTEMD_UNIT=openclaw-gateway.service
 Environment=OPENCLAW_SERVICE_MARKER=openclaw
 Environment=OPENCLAW_SERVICE_KIND=gateway
 Environment=OPENCLAW_SERVICE_VERSION=\$OC_VERSION
+Environment=NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+Environment=OPENCLAW_NO_RESPAWN=1
+Environment=DISPLAY=:0
 
 [Install]
 WantedBy=default.target
@@ -666,6 +674,10 @@ UNIT
     mkdir -p "\$UNIT_DIR/default.target.wants"
     ln -sf ../openclaw-gateway.service "\$UNIT_DIR/default.target.wants/openclaw-gateway.service"
 fi
+
+# Enable lingering so gateway starts at boot even before user login
+mkdir -p /var/lib/systemd/linger
+touch /var/lib/systemd/linger/$USER_NAME
 EOF
 }
 
