@@ -5,8 +5,8 @@ class IpcClientWrapper: ObservableObject {
     private let client = TBIpcClient()
     @Published var isConnected = false
 
-    // Display
-    var onFrame: ((Data, UInt32, UInt32, UInt32) -> Void)?
+    // Display: (pixels, dirtyW, dirtyH, stride, resourceW, resourceH, dirtyX, dirtyY)
+    var onFrame: ((Data, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32) -> Void)?
     var onDisplayState: ((Bool, UInt32, UInt32) -> Void)?
 
     // Audio
@@ -93,8 +93,8 @@ class IpcClientWrapper: ObservableObject {
 
     private func startReceiveLoop() {
         client.startReceiveLoop(
-            frameHandler: { [weak self] pixels, w, h, stride in
-                self?.onFrame?(pixels, w, h, stride)
+            frameHandler: { [weak self] pixels, w, h, stride, resW, resH, dirtyX, dirtyY in
+                self?.onFrame?(pixels, w, h, stride, resW, resH, dirtyX, dirtyY)
             },
             audioHandler: { [weak self] pcm, rate, channels in
                 self?.onAudio?(pcm, rate, channels)

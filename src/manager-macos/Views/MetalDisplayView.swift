@@ -81,7 +81,9 @@ class MetalDisplayRenderer: NSObject, MTKViewDelegate {
         fragment float4 fragmentShader(VertexOut in [[stage_in]],
                                        texture2d<float> tex [[texture(0)]]) {
             constexpr sampler s(mag_filter::linear, min_filter::linear);
-            return tex.sample(s, in.texCoord);
+            float4 color = tex.sample(s, in.texCoord);
+            color.a = 1.0;
+            return color;
         }
         """
 
@@ -89,28 +91,38 @@ class MetalDisplayRenderer: NSObject, MTKViewDelegate {
         return try? device.makeLibrary(source: shaderSource, options: options)
     }
 
-    func updateFramebuffer(pixels: UnsafeRawPointer, width: Int, height: Int, stride: Int) {
+    func blitDirtyRect(
+        pixels: UnsafeRawPointer,
+        dirtyX: Int, dirtyY: Int,
+        dirtyWidth: Int, dirtyHeight: Int,
+        srcStride: Int,
+        resourceWidth: Int, resourceHeight: Int
+    ) {
         textureLock.lock()
         defer { textureLock.unlock() }
 
-        if texture == nil || textureWidth != width || textureHeight != height {
+        if texture == nil || textureWidth != resourceWidth || textureHeight != resourceHeight {
             let desc = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .bgra8Unorm,
-                width: width,
-                height: height,
+                width: resourceWidth,
+                height: resourceHeight,
                 mipmapped: false
             )
             desc.usage = [.shaderRead]
             texture = device.makeTexture(descriptor: desc)
-            textureWidth = width
-            textureHeight = height
+            textureWidth = resourceWidth
+            textureHeight = resourceHeight
         }
 
+        let clampedW = min(dirtyWidth, resourceWidth - dirtyX)
+        let clampedH = min(dirtyHeight, resourceHeight - dirtyY)
+        guard clampedW > 0 && clampedH > 0 else { return }
+
         texture?.replace(
-            region: MTLRegionMake2D(0, 0, width, height),
+            region: MTLRegionMake2D(dirtyX, dirtyY, clampedW, clampedH),
             mipmapLevel: 0,
             withBytes: pixels,
-            bytesPerRow: stride
+            bytesPerRow: srcStride
         )
     }
 

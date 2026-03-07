@@ -72,9 +72,30 @@ class AppState: ObservableObject {
 
     private var bridge = TenBoxBridgeWrapper()
     private var activeSessions: [String: WeakRef<VmSession>] = [:]
+    private var stateObserver: NSObjectProtocol?
 
     init() {
         refreshVmList()
+        stateObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("TenBoxVmStateChanged"),
+            object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self = self else { return }
+            self.refreshVmList()
+            if let vmId = note.object as? String,
+               let session = self.activeSessions[vmId]?.value {
+                let newState = self.vms.first(where: { $0.id == vmId })?.state ?? .stopped
+                if newState == .stopped || newState == .crashed {
+                    session.disconnect()
+                }
+            }
+        }
+    }
+
+    deinit {
+        if let obs = stateObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
     }
 
     func registerSession(_ session: VmSession, for vmId: String) {

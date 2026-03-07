@@ -34,18 +34,22 @@ class VmSession: ObservableObject {
             self?.guestAgentConnected = conn
         }
 
-        ipcClient.onFrame = { [weak self] pixels, w, h, stride in
+        ipcClient.onFrame = { [weak self] pixels, w, h, stride, resW, resH, dirtyX, dirtyY in
             guard let self = self, let renderer = self.renderer else { return }
-            let newAspect = CGFloat(w) / CGFloat(max(h, 1))
+            let newAspect = CGFloat(resW) / CGFloat(max(resH, 1))
             if abs(self.displayAspect - newAspect) > 0.01 {
-                self.displayAspect = newAspect
+                DispatchQueue.main.async { self.displayAspect = newAspect }
             }
             pixels.withUnsafeBytes { ptr in
-                renderer.updateFramebuffer(
+                renderer.blitDirtyRect(
                     pixels: ptr.baseAddress!,
-                    width: Int(w),
-                    height: Int(h),
-                    stride: Int(stride)
+                    dirtyX: Int(dirtyX),
+                    dirtyY: Int(dirtyY),
+                    dirtyWidth: Int(w),
+                    dirtyHeight: Int(h),
+                    srcStride: Int(stride),
+                    resourceWidth: Int(resW),
+                    resourceHeight: Int(resH)
                 )
             }
         }

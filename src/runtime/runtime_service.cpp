@@ -840,6 +840,7 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
             return;
         }
     }
+
 }
 
 void RuntimeControlService::RunLoop() {

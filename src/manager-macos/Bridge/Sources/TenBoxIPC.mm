@@ -95,7 +95,7 @@ static std::string HexDecode(const std::string& hex) {
 
     ipc::Message msg;
     msg.channel = ipc::Channel::kInput;
-    msg.kind = ipc::Kind::kEvent;
+    msg.kind = ipc::Kind::kRequest;
     msg.type = "input.key_event";
     msg.fields["key_code"] = std::to_string(code);
     msg.fields["pressed"] = pressed ? "1" : "0";
@@ -109,7 +109,7 @@ static std::string HexDecode(const std::string& hex) {
 
     ipc::Message msg;
     msg.channel = ipc::Channel::kInput;
-    msg.kind = ipc::Kind::kEvent;
+    msg.kind = ipc::Kind::kRequest;
     msg.type = "input.pointer_event";
     msg.fields["x"] = std::to_string(x);
     msg.fields["y"] = std::to_string(y);
@@ -124,7 +124,7 @@ static std::string HexDecode(const std::string& hex) {
 
     ipc::Message msg;
     msg.channel = ipc::Channel::kInput;
-    msg.kind = ipc::Kind::kEvent;
+    msg.kind = ipc::Kind::kRequest;
     msg.type = "input.wheel_event";
     msg.fields["delta"] = std::to_string(delta);
 
@@ -230,7 +230,7 @@ static std::string HexDecode(const std::string& hex) {
 
 #pragma mark - Receive Loop
 
-- (void)startReceiveLoopWithFrameHandler:(void (^)(NSData *, uint32_t, uint32_t, uint32_t))frameHandler
+- (void)startReceiveLoopWithFrameHandler:(void (^)(NSData *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))frameHandler
                             audioHandler:(void (^)(NSData *, uint32_t, uint16_t))audioHandler
                          consoleHandler:(void (^)(NSString *))consoleHandler
                     clipboardGrabHandler:(void (^)(NSArray<NSNumber *> *))clipboardGrabHandler
@@ -242,7 +242,7 @@ static std::string HexDecode(const std::string& hex) {
                        disconnectHandler:(void (^)(void))disconnectHandler {
     _running = true;
 
-    typedef void (^FrameBlock)(NSData *, uint32_t, uint32_t, uint32_t);
+    typedef void (^FrameBlock)(NSData *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     typedef void (^AudioBlock)(NSData *, uint32_t, uint16_t);
     typedef void (^ConsoleBlock)(NSString *);
     typedef void (^ClipGrabBlock)(NSArray<NSNumber *> *);
@@ -285,21 +285,30 @@ static std::string HexDecode(const std::string& hex) {
                 }
             }
 
-            // Display frame
+            // Display frame (dirty rect update within a resource)
             if (msg.type == "display.frame") {
-                uint32_t w = 0, h = 0, stride = 0;
-                auto wi = msg.fields.find("width");
-                auto hi = msg.fields.find("height");
-                auto si = msg.fields.find("stride");
-                if (wi != msg.fields.end()) w = std::stoul(wi->second);
-                if (hi != msg.fields.end()) h = std::stoul(hi->second);
-                if (si != msg.fields.end()) stride = std::stoul(si->second);
+                auto getU32 = [&](const char* key) -> uint32_t {
+                    auto fi = msg.fields.find(key);
+                    return (fi != msg.fields.end()) ? static_cast<uint32_t>(std::stoul(fi->second)) : 0;
+                };
+                uint32_t w = getU32("width");
+                uint32_t h = getU32("height");
+                uint32_t stride = getU32("stride");
+                uint32_t resW = getU32("resource_width");
+                uint32_t resH = getU32("resource_height");
+                uint32_t dirtyX = getU32("dirty_x");
+                uint32_t dirtyY = getU32("dirty_y");
+
+                if (resW == 0) resW = w;
+                if (resH == 0) resH = h;
+
+                if (w == 0 || h == 0 || stride == 0 || msg.payload.empty()) {
+                    continue;
+                }
 
                 NSData* pixels = [NSData dataWithBytes:msg.payload.data()
                                                 length:msg.payload.size()];
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    fh(pixels, w, h, stride);
-                });
+                fh(pixels, w, h, stride, resW, resH, dirtyX, dirtyY);
             }
             // Audio PCM
             else if (msg.type == "audio.pcm") {

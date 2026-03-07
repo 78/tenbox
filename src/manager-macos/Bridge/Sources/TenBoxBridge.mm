@@ -14,6 +14,17 @@ static std::unordered_map<std::string, std::unique_ptr<ipc::UnixSocketConnection
 static std::unordered_map<std::string, std::thread> g_accept_threads;
 static std::unordered_map<std::string, NSTask*> g_tasks;
 
+// Ensure all background accept threads are detached before global destructors
+// run.  A joinable std::thread that is destructed calls std::terminate.
+__attribute__((destructor))
+static void CleanupAcceptThreads() {
+    std::lock_guard<std::mutex> lock(g_server_mutex);
+    for (auto& [_, t] : g_accept_threads) {
+        if (t.joinable()) t.detach();
+    }
+    g_accept_threads.clear();
+}
+
 static bool SendControlCommand(const std::string& vmIdStr, const std::string& command) {
     std::lock_guard<std::mutex> lock(g_server_mutex);
     auto it = g_accepted.find(vmIdStr);
@@ -292,6 +303,41 @@ static NSString* GetVmsDir() {
                                                      options:NSJSONWritingPrettyPrinted
                                                        error:nil];
     [newData writeToFile:configPath atomically:YES];
+
+    NSString* capturedVmId = [vmId copy];
+    NSString* capturedConfigPath = [configPath copy];
+    task.terminationHandler = ^(NSTask* t) {
+        std::string vmIdStr = capturedVmId.UTF8String;
+        {
+            std::lock_guard<std::mutex> lock(g_server_mutex);
+            g_tasks.erase(vmIdStr);
+            g_accepted.erase(vmIdStr);
+            g_servers.erase(vmIdStr);
+            auto it = g_accept_threads.find(vmIdStr);
+            if (it != g_accept_threads.end()) {
+                if (it->second.joinable()) it->second.detach();
+                g_accept_threads.erase(it);
+            }
+        }
+        NSData* data = [NSData dataWithContentsOfFile:capturedConfigPath];
+        if (data) {
+            NSMutableDictionary* cfg = [[NSJSONSerialization JSONObjectWithData:data
+                                                                       options:NSJSONReadingMutableContainers
+                                                                         error:nil] mutableCopy];
+            if (cfg) {
+                cfg[@"state"] = (t.terminationStatus == 0) ? @"stopped" : @"crashed";
+                NSData* out = [NSJSONSerialization dataWithJSONObject:cfg
+                                                             options:NSJSONWritingPrettyPrinted
+                                                               error:nil];
+                [out writeToFile:capturedConfigPath atomically:YES];
+            }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:@"TenBoxVmStateChanged"
+                              object:capturedVmId];
+        });
+    };
 
     return YES;
 }

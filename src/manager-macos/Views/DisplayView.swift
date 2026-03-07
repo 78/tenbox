@@ -75,26 +75,19 @@ class DisplayViewModel: ObservableObject {
     }
 
     private func setupInputHandler(client: IpcClientWrapper) {
-        inputHandler.onEvent = { [weak client] event in
+        inputHandler.onKeyEvent = { [weak client] code, pressed in
             guard let client = client, client.isConnected else { return }
-            switch event.type {
-            case InputHandler.EV_KEY:
-                if event.code >= InputHandler.BTN_LEFT {
-                    client.sendPointer(x: 0, y: 0, buttons: event.value > 0 ? UInt32(event.code) : 0)
-                } else {
-                    client.sendKey(code: event.code, pressed: event.value != 0)
-                }
-            case InputHandler.EV_ABS:
-                if event.code == InputHandler.ABS_X {
-                    client.sendPointer(x: event.value, y: 0, buttons: 0)
-                }
-            case InputHandler.EV_REL:
-                if event.code == InputHandler.REL_WHEEL {
-                    client.sendScroll(delta: event.value)
-                }
-            default:
-                break
-            }
+            client.sendKey(code: code, pressed: pressed)
+        }
+
+        inputHandler.onPointerEvent = { [weak client] x, y, buttons in
+            guard let client = client, client.isConnected else { return }
+            client.sendPointer(x: x, y: y, buttons: buttons)
+        }
+
+        inputHandler.onWheelEvent = { [weak client] delta in
+            guard let client = client, client.isConnected else { return }
+            client.sendScroll(delta: delta)
         }
     }
 
@@ -191,6 +184,9 @@ class InputMTKView: MTKView {
             NotificationCenter.default.addObserver(
                 self, selector: #selector(windowDidResignKey),
                 name: NSWindow.didResignKeyNotification, object: win)
+            DispatchQueue.main.async { [weak self] in
+                win.makeFirstResponder(self)
+            }
         }
     }
 
@@ -202,6 +198,16 @@ class InputMTKView: MTKView {
         NotificationCenter.default.removeObserver(self)
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if self == window?.firstResponder {
+            if event.type == .keyDown {
+                inputHandler?.handleKeyDown(event)
+            }
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
         inputHandler?.handleKeyDown(event)
     }
@@ -210,37 +216,76 @@ class InputMTKView: MTKView {
         inputHandler?.handleKeyUp(event)
     }
 
+    override func flagsChanged(with event: NSEvent) {
+        inputHandler?.handleFlagsChanged(event)
+    }
+
+    private func localMousePosition(for event: NSEvent) -> (Int32, Int32)? {
+        let loc = convert(event.locationInWindow, from: nil)
+        let w = bounds.width
+        let h = bounds.height
+        guard w > 0 && h > 0 else { return nil }
+        let nx = max(0, min(loc.x / w, 1.0))
+        let ny = max(0, min(1.0 - loc.y / h, 1.0))
+        return (Int32(nx * 32767), Int32(ny * 32767))
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        inputHandler?.handleMouseDown(event)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseButton(button: 0, pressed: true, absX: x, absY: y)
     }
 
     override func mouseUp(with event: NSEvent) {
-        inputHandler?.handleMouseUp(event)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseButton(button: 0, pressed: false, absX: x, absY: y)
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        inputHandler?.handleMouseDown(event)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseButton(button: 1, pressed: true, absX: x, absY: y)
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        inputHandler?.handleMouseUp(event)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseButton(button: 1, pressed: false, absX: x, absY: y)
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseButton(button: 2, pressed: true, absX: x, absY: y)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseButton(button: 2, pressed: false, absX: x, absY: y)
     }
 
     override func mouseMoved(with event: NSEvent) {
-        inputHandler?.handleMouseMoved(event, viewSize: bounds.size)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseMoved(absX: x, absY: y)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        inputHandler?.handleMouseMoved(event, viewSize: bounds.size)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseMoved(absX: x, absY: y)
     }
 
     override func rightMouseDragged(with event: NSEvent) {
-        inputHandler?.handleMouseMoved(event, viewSize: bounds.size)
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseMoved(absX: x, absY: y)
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        guard let (x, y) = localMousePosition(for: event) else { return }
+        inputHandler?.handleMouseMoved(absX: x, absY: y)
     }
 
     override func scrollWheel(with event: NSEvent) {
-        inputHandler?.handleScrollWheel(event)
+        let delta = Int32(event.scrollingDeltaY)
+        if delta != 0 {
+            inputHandler?.onWheelEvent?(delta)
+        }
     }
 
     override func updateTrackingAreas() {

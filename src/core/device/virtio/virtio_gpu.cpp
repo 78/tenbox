@@ -73,15 +73,7 @@ void VirtioGpuDevice::OnQueueNotify(uint32_t queue_idx, VirtQueue& vq) {
 }
 
 uint8_t* VirtioGpuDevice::GpaToHva(uint64_t gpa) const {
-    if (!mem_.base) return nullptr;
-    if (gpa < mem_.low_size) {
-        return mem_.base + gpa;
-    }
-    if (mem_.high_size && gpa >= mem_.high_base &&
-        gpa < mem_.high_base + mem_.high_size) {
-        return mem_.base + mem_.low_size + (gpa - mem_.high_base);
-    }
-    return nullptr;
+    return mem_.GpaToHva(gpa);
 }
 
 void VirtioGpuDevice::CopyFromBacking(

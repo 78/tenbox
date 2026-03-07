@@ -30,7 +30,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)sendClipboardRelease;
 
 // Start receive loop on background thread; calls blocks on main queue.
-- (void)startReceiveLoopWithFrameHandler:(void (^)(NSData *pixels, uint32_t w, uint32_t h, uint32_t stride))frameHandler
+// Frame handler: dirtyX/dirtyY = position within the full resource (resW x resH).
+//   w/h/stride describe the dirty rectangle payload only.
+- (void)startReceiveLoopWithFrameHandler:(void (^)(NSData *pixels, uint32_t w, uint32_t h, uint32_t stride, uint32_t resW, uint32_t resH, uint32_t dirtyX, uint32_t dirtyY))frameHandler
                             audioHandler:(void (^)(NSData *pcm, uint32_t rate, uint16_t channels))audioHandler
                          consoleHandler:(void (^)(NSString *text))consoleHandler
                     clipboardGrabHandler:(void (^)(NSArray<NSNumber *> *types))clipboardGrabHandler
