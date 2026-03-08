@@ -24,8 +24,9 @@ struct ImageEntry {
     std::string display_name;
     std::string description;
     std::string min_app_version;
-    std::string os;    // "linux", "windows", "macos"
-    std::string arch;  // "microvm", "i440fx", "q35"
+    std::string os;       // "linux", "windows", "macos"
+    std::string arch;     // "microvm", "i440fx", "q35"
+    std::string platform; // "arm64", "x86_64" (CPU architecture)
     std::vector<ImageFile> files;
 
     std::string CacheId() const { return id + "-" + version; }
@@ -41,7 +42,7 @@ struct ImageEntry {
 std::vector<ImageSource> ParseSources(const std::string& json);
 std::vector<ImageEntry> ParseImages(const std::string& json);
 
-// Filter: remove entries where arch != "microvm" or min_app_version > current
+// Filter: remove entries where arch != "microvm", platform != current CPU, or min_app_version > current
 std::vector<ImageEntry> FilterImages(const std::vector<ImageEntry>& images,
                                      const std::string& current_app_version);
 

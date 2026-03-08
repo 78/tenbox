@@ -8,6 +8,7 @@
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
+      "platform": "x86_64",
       "updated_at": "2026-03-09",
       "files": [
         {
@@ -38,6 +39,7 @@
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
+      "platform": "x86_64",
       "updated_at": "2026-03-09",
       "files": [
         {
@@ -68,6 +70,7 @@
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
+      "platform": "x86_64",
       "updated_at": "2026-03-09",
       "files": [
         {

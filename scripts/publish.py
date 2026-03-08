@@ -299,14 +299,16 @@ class ImagePublisher(ttk.Frame):
 
         ttk.Label(left, text="镜像列表", font=("", 10, "bold")).pack(anchor=tk.W, pady=(0, 4))
 
-        cols = ("id", "version", "name")
+        cols = ("id", "version", "name", "platform")
         self.tree = ttk.Treeview(left, columns=cols, show="headings", height=16)
         self.tree.heading("id", text="ID")
         self.tree.heading("version", text="版本")
         self.tree.heading("name", text="名称")
+        self.tree.heading("platform", text="CPU 平台")
         self.tree.column("id", width=90, minwidth=60)
         self.tree.column("version", width=90, minwidth=60)
         self.tree.column("name", width=180, minwidth=100)
+        self.tree.column("platform", width=80, minwidth=60)
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
@@ -344,6 +346,7 @@ class ImagePublisher(ttk.Frame):
         self.var_min_ver = tk.StringVar(value="0.1.0")
         self.var_os = tk.StringVar(value="linux")
         self.var_arch = tk.StringVar(value="microvm")
+        self.var_platform = tk.StringVar(value="x86_64")
         self.var_updated_at = tk.StringVar()
 
         fields = [
@@ -368,6 +371,10 @@ class ImagePublisher(ttk.Frame):
 
         ttk.Label(f, text="架构:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
         ttk.Combobox(f, textvariable=self.var_arch, values=["microvm", "i440fx", "q35"], state="readonly", width=15).grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+
+        ttk.Label(f, text="CPU 平台:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Combobox(f, textvariable=self.var_platform, values=["arm64", "x86_64"], state="readonly", width=15).grid(row=row, column=1, sticky=tk.W, pady=2)
         row += 1
 
         ttk.Label(f, text="更新时间:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
@@ -435,7 +442,7 @@ class ImagePublisher(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         for i, img in enumerate(self.images_data):
             self.tree.insert("", tk.END, iid=str(i),
-                             values=(img.get("id", ""), img.get("version", ""), img.get("name", "")))
+                             values=(img.get("id", ""), img.get("version", ""), img.get("name", ""), img.get("platform", "x86_64")))
 
     def _on_select(self, _event=None):
         sel = self.tree.selection()
@@ -451,6 +458,7 @@ class ImagePublisher(ttk.Frame):
         self.var_min_ver.set(img.get("min_app_version", "0.1.0"))
         self.var_os.set(img.get("os", "linux"))
         self.var_arch.set(img.get("arch", "microvm"))
+        self.var_platform.set(img.get("platform", "x86_64"))
         self.var_updated_at.set(img.get("updated_at", ""))
 
         files = img.get("files", [])
@@ -481,6 +489,7 @@ class ImagePublisher(ttk.Frame):
             "min_app_version": self.var_min_ver.get().strip(),
             "os": self.var_os.get(),
             "arch": self.var_arch.get(),
+            "platform": self.var_platform.get(),
             "updated_at": self.var_updated_at.get().strip(),
             "files": files,
         }
@@ -494,6 +503,7 @@ class ImagePublisher(ttk.Frame):
         self.var_min_ver.set("0.1.0")
         self.var_os.set("linux")
         self.var_arch.set("microvm")
+        self.var_platform.set("x86_64")
         self.var_updated_at.set(date.today().isoformat())
         for fv in self.file_vars:
             fv["url"].set("")

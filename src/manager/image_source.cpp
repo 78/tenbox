@@ -47,6 +47,7 @@ std::vector<ImageEntry> ParseImages(const std::string& json_str) {
             e.min_app_version = img.value("min_app_version", "0.0.0");
             e.os = img.value("os", "linux");
             e.arch = img.value("arch", "microvm");
+            e.platform = img.value("platform", "x86_64");
 
             if (img.contains("files") && img["files"].is_array()) {
                 for (const auto& f : img["files"]) {
@@ -96,11 +97,25 @@ int CompareVersions(const std::string& a, const std::string& b) {
     return 0;
 }
 
+// Current CPU architecture for filtering images (arm64 vs x86_64).
+static std::string GetCurrentPlatform() {
+#if defined(__aarch64__)
+    return "arm64";
+#else
+    return "x86_64";
+#endif
+}
+
 std::vector<ImageEntry> FilterImages(const std::vector<ImageEntry>& images,
                                      const std::string& current_app_version) {
+    std::string current_platform = GetCurrentPlatform();
     std::vector<ImageEntry> result;
     for (const auto& img : images) {
         if (img.arch != "microvm") {
+            continue;
+        }
+        std::string img_platform = img.platform.empty() ? "x86_64" : img.platform;
+        if (img_platform != current_platform) {
             continue;
         }
         if (CompareVersions(img.min_app_version, current_app_version) > 0) {
@@ -166,6 +181,7 @@ void SaveImageMeta(const std::string& cache_dir, const ImageEntry& entry) {
     j["min_app_version"] = entry.min_app_version;
     j["os"] = entry.os;
     j["arch"] = entry.arch;
+    j["platform"] = entry.platform.empty() ? "x86_64" : entry.platform;
 
     json files = json::array();
     for (const auto& f : entry.files) {
