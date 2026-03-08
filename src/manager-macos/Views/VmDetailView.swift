@@ -187,15 +187,15 @@ struct VmDetailView: View {
     var body: some View {
         TabView(selection: $session.activeTab) {
             InfoView(vm: vm)
-                .tabItem { Label("Info", systemImage: "info.circle") }
+                .tabItem { Image(systemName: "info.circle") }
                 .tag(0)
 
             ConsoleView(session: session)
-                .tabItem { Label("Console", systemImage: "terminal") }
+                .tabItem { Image(systemName: "terminal") }
                 .tag(1)
 
             DisplayView(session: session)
-                .tabItem { Label("Display", systemImage: "display") }
+                .tabItem { Image(systemName: "display") }
                 .tag(2)
         }
         .padding()

@@ -449,6 +449,9 @@ void Vm::VCpuThreadFunc(uint32_t vcpu_index) {
             hvf_vcpu->SetPsciShutdownCallback([this]() {
                 RequestStop();
             });
+            hvf_vcpu->SetPsciRebootCallback([this]() {
+                RequestReboot();
+            });
         }
     }
 

@@ -155,6 +155,41 @@ static std::string HexDecode(const std::string& hex) {
     return _connection->Send(ipc::Encode(msg));
 }
 
+#pragma mark - Send: VM Configuration Updates
+
+- (BOOL)sendSharedFoldersUpdate:(NSArray<NSString *> *)entries {
+    if (!_connection || !_connection->IsValid()) return NO;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kControl;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "runtime.update_shared_folders";
+    msg.fields["folder_count"] = std::to_string(entries.count);
+    for (NSUInteger i = 0; i < entries.count; ++i) {
+        msg.fields["folder_" + std::to_string(i)] = entries[i].UTF8String;
+    }
+
+    std::lock_guard<std::mutex> lock(_sendLock);
+    return _connection->Send(ipc::Encode(msg));
+}
+
+- (BOOL)sendPortForwardsUpdate:(NSArray<NSString *> *)entries netEnabled:(BOOL)netEnabled {
+    if (!_connection || !_connection->IsValid()) return NO;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kControl;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "runtime.update_network";
+    msg.fields["link_up"] = netEnabled ? "true" : "false";
+    msg.fields["forward_count"] = std::to_string(entries.count);
+    for (NSUInteger i = 0; i < entries.count; ++i) {
+        msg.fields["forward_" + std::to_string(i)] = entries[i].UTF8String;
+    }
+
+    std::lock_guard<std::mutex> lock(_sendLock);
+    return _connection->Send(ipc::Encode(msg));
+}
+
 #pragma mark - Send: Display
 
 - (BOOL)sendDisplaySetSizeWidth:(uint32_t)width height:(uint32_t)height {

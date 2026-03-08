@@ -100,6 +100,14 @@ class IpcClientWrapper: ObservableObject {
         client.sendClipboardRelease()
     }
 
+    func sendSharedFoldersUpdate(entries: [String]) {
+        client.sendSharedFoldersUpdate(entries)
+    }
+
+    func sendPortForwardsUpdate(entries: [String], netEnabled: Bool) {
+        client.sendPortForwardsUpdate(entries, netEnabled: netEnabled)
+    }
+
     // MARK: - Receive
 
     private func startReceiveLoop() {

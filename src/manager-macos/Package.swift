@@ -34,6 +34,9 @@ let package = Package(
                 "Bridge/Models.swift",
                 "Bridge/TenBoxBridgeWrapper.swift",
                 "Bridge/IpcClientWrapper.swift",
+            ],
+            resources: [
+                .copy("Resources/icon.png"),
             ]
         ),
         .target(

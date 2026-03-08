@@ -23,6 +23,14 @@ NS_ASSUME_NONNULL_BEGIN
 // Display size hint
 - (BOOL)sendDisplaySetSizeWidth:(uint32_t)width height:(uint32_t)height;
 
+// Hot-update shared folders on a running VM.
+// Each entry: "tag|host_path|readonly(0/1)"
+- (BOOL)sendSharedFoldersUpdate:(NSArray<NSString *> *)entries;
+
+// Hot-update port forwards on a running VM.
+// Each entry: "host_port:guest_port" (e.g. "8080:80")
+- (BOOL)sendPortForwardsUpdate:(NSArray<NSString *> *)entries netEnabled:(BOOL)netEnabled;
+
 // Clipboard (data_type: 1=UTF8_TEXT, 2=IMAGE_PNG, 3=IMAGE_BMP)
 - (BOOL)sendClipboardGrab:(NSArray<NSNumber *> *)types;
 - (BOOL)sendClipboardData:(uint32_t)dataType payload:(NSData *)payload;

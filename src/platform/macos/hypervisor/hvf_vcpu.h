@@ -26,6 +26,7 @@ struct PsciCpuOnRequest {
 
 using PsciCpuOnCallback = std::function<int(const PsciCpuOnRequest&)>;
 using PsciShutdownCallback = std::function<void()>;
+using PsciRebootCallback = std::function<void()>;
 
 class HvfVCpu final : public HypervisorVCpu {
 public:
@@ -43,6 +44,7 @@ public:
 
     void SetPsciCpuOnCallback(PsciCpuOnCallback cb) { psci_cpu_on_cb_ = std::move(cb); }
     void SetPsciShutdownCallback(PsciShutdownCallback cb) { psci_shutdown_cb_ = std::move(cb); }
+    void SetPsciRebootCallback(PsciRebootCallback cb) { psci_reboot_cb_ = std::move(cb); }
 
 private:
     HvfVCpu() = default;
@@ -63,6 +65,7 @@ private:
 
     PsciCpuOnCallback psci_cpu_on_cb_;
     PsciShutdownCallback psci_shutdown_cb_;
+    PsciRebootCallback psci_reboot_cb_;
 };
 
 } // namespace hvf

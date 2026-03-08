@@ -1800,9 +1800,15 @@ int32_t VirtioFsDevice::FillAttr(const std::string& path, FuseAttr* attr, uint64
     attr->ctime = static_cast<uint64_t>(st.st_ctimespec.tv_sec);
     attr->ctimensec = static_cast<uint32_t>(st.st_ctimespec.tv_nsec);
 
-    attr->mode = st.st_mode;
+    if (S_ISDIR(st.st_mode)) {
+        attr->mode = FUSE_S_IFDIR | 0777;
+    } else if (S_ISLNK(st.st_mode)) {
+        attr->mode = FUSE_S_IFLNK | 0777;
+    } else {
+        attr->mode = FUSE_S_IFREG | 0666;
+    }
 
-    if (share_readonly) {
+    if (share_readonly || !(st.st_mode & S_IWUSR)) {
         attr->mode &= ~0222;
     }
 #endif

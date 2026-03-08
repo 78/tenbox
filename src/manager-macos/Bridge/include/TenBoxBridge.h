@@ -5,6 +5,18 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@interface TBPortForward : NSObject
+@property (nonatomic, assign) uint16_t hostPort;
+@property (nonatomic, assign) uint16_t guestPort;
+@end
+
+@interface TBSharedFolder : NSObject
+@property (nonatomic, copy) NSString *tag;
+@property (nonatomic, copy) NSString *hostPath;
+@property (nonatomic, assign) BOOL readonly_;
+@property (nonatomic, copy, nullable) NSData *bookmark;
+@end
+
 @interface TBVmInfo : NSObject
 @property (nonatomic, copy) NSString *vmId;
 @property (nonatomic, copy) NSString *name;
@@ -16,6 +28,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *state;
 @property (nonatomic, assign) BOOL netEnabled;
 @property (nonatomic, copy) NSString *cmdline;
+@property (nonatomic, copy) NSArray<TBSharedFolder *> *sharedFolders;
+@property (nonatomic, copy) NSArray<TBPortForward *> *portForwards;
 @end
 
 @interface TBVmCreateConfig : NSObject
@@ -38,6 +52,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)stopVmWithId:(NSString *)vmId;
 - (void)rebootVmWithId:(NSString *)vmId;
 - (void)shutdownVmWithId:(NSString *)vmId;
+
+// Shared folder management
+- (BOOL)addSharedFolder:(TBSharedFolder *)folder toVm:(NSString *)vmId;
+- (BOOL)removeSharedFolderWithTag:(NSString *)tag fromVm:(NSString *)vmId;
+- (BOOL)setSharedFolders:(NSArray<TBSharedFolder *> *)folders forVm:(NSString *)vmId;
+
+// Port forward management
+- (BOOL)addPortForward:(TBPortForward *)pf toVm:(NSString *)vmId;
+- (BOOL)removePortForwardWithHostPort:(uint16_t)hostPort fromVm:(NSString *)vmId;
+- (NSArray<TBPortForward *> *)getPortForwards:(NSString *)vmId;
 
 // Terminate all running VM processes. Call on app exit.
 - (void)stopAllVms;

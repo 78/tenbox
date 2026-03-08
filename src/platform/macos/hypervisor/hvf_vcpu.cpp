@@ -266,7 +266,8 @@ VCpuExitAction HvfVCpu::HandleHvc() {
 
     case kPsciSystemReset:
         LOG_INFO("hvf: PSCI SYSTEM_RESET from vCPU %u", index_);
-        if (psci_shutdown_cb_) psci_shutdown_cb_();
+        if (psci_reboot_cb_) psci_reboot_cb_();
+        else if (psci_shutdown_cb_) psci_shutdown_cb_();
         return VCpuExitAction::kShutdown;
 
     default:

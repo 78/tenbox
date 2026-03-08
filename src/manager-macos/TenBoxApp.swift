@@ -1,6 +1,9 @@
 import SwiftUI
 import AppKit
 
+let kTenBoxVersion = "0.2.6"
+let kTenBoxCopyright = "Copyright \u{00A9} 2026 terrence@tenclass.com"
+
 @main
 struct TenBoxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -11,41 +14,34 @@ struct TenBoxApp: App {
         NSApplication.shared.applicationIconImage = Self.makeAppIcon()
     }
 
-    private static func makeAppIcon() -> NSImage {
-        let size = NSSize(width: 256, height: 256)
-        let image = NSImage(size: size, flipped: false) { rect in
-            let ctx = NSGraphicsContext.current!.cgContext
-
-            let cornerRadius: CGFloat = 48
-            let bgPath = CGPath(roundedRect: rect.insetBy(dx: 8, dy: 8),
-                                cornerWidth: cornerRadius, cornerHeight: cornerRadius,
-                                transform: nil)
-            ctx.addPath(bgPath)
-            ctx.clip()
-            let colors = [
-                CGColor(red: 0.18, green: 0.45, blue: 0.95, alpha: 1),
-                CGColor(red: 0.10, green: 0.28, blue: 0.72, alpha: 1)
-            ] as CFArray
-            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                         colors: colors, locations: [0, 1]) {
-                ctx.drawLinearGradient(gradient,
-                                       start: CGPoint(x: rect.midX, y: rect.maxY),
-                                       end: CGPoint(x: rect.midX, y: rect.minY),
-                                       options: [])
-            }
-
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 110, weight: .bold),
-                .foregroundColor: NSColor.white,
-            ]
-            let text = NSAttributedString(string: "TB", attributes: attrs)
-            let textSize = text.size()
-            let textOrigin = CGPoint(x: (rect.width - textSize.width) / 2,
-                                     y: (rect.height - textSize.height) / 2)
-            text.draw(at: textOrigin)
-            return true
+    private static func makeAppIcon() -> NSImage? {
+        guard let url = Bundle.module.url(forResource: "icon", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
         }
+        image.size = NSSize(width: 256, height: 256)
         return image
+    }
+
+    private static func showAboutPanel() {
+        let options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: "TenBox",
+            .applicationVersion: kTenBoxVersion,
+            .version: "",
+            .credits: NSAttributedString(
+                string: "A lightweight virtual machine manager for macOS.\n\n\(kTenBoxCopyright)",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                    .paragraphStyle: {
+                        let ps = NSMutableParagraphStyle()
+                        ps.alignment = .center
+                        return ps
+                    }()
+                ]
+            ),
+        ]
+        NSApplication.shared.orderFrontStandardAboutPanel(options: options)
     }
 
     var body: some Scene {
@@ -55,12 +51,19 @@ struct TenBoxApp: App {
                 .frame(minWidth: 640, minHeight: 320)
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About TenBox") {
+                    Self.showAboutPanel()
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New VM...") {
                     appDelegate.appState.showCreateVmDialog = true
                 }
                 .keyboardShortcut("n")
             }
+            CommandGroup(replacing: .toolbar) { }
+            CommandGroup(replacing: .sidebar) { }
         }
     }
 }
@@ -85,8 +88,11 @@ class AppState: ObservableObject {
             self.refreshVmList()
             if let vmId = note.object as? String {
                 let newState = self.vms.first(where: { $0.id == vmId })?.state ?? .stopped
-                if newState == .stopped || newState == .crashed {
+                if newState == .stopped || newState == .crashed || newState == .rebooting {
                     self.removeSession(for: vmId)
+                } else if newState == .running {
+                    let session = self.getOrCreateSession(for: vmId)
+                    session.connectIfNeeded()
                 }
             }
         }
@@ -168,11 +174,57 @@ class AppState: ObservableObject {
             bridge.shutdownVm(id: id)
         }
     }
+
+    func addSharedFolder(_ folder: SharedFolder, toVm vmId: String) {
+        _ = bridge.addSharedFolder(folder, toVm: vmId)
+        refreshVmList()
+        sendSharedFoldersUpdateIfRunning(vmId: vmId)
+    }
+
+    func removeSharedFolder(tag: String, fromVm vmId: String) {
+        _ = bridge.removeSharedFolder(tag: tag, fromVm: vmId)
+        refreshVmList()
+        sendSharedFoldersUpdateIfRunning(vmId: vmId)
+    }
+
+    func addPortForward(_ pf: PortForward, toVm vmId: String) {
+        _ = bridge.addPortForward(pf, toVm: vmId)
+        refreshVmList()
+        sendPortForwardsUpdateIfRunning(vmId: vmId)
+    }
+
+    func removePortForward(hostPort: UInt16, fromVm vmId: String) {
+        _ = bridge.removePortForward(hostPort: hostPort, fromVm: vmId)
+        refreshVmList()
+        sendPortForwardsUpdateIfRunning(vmId: vmId)
+    }
+
+    private func sendSharedFoldersUpdateIfRunning(vmId: String) {
+        guard let session = activeSessions[vmId], session.ipcClient.isConnected,
+              let vm = vms.first(where: { $0.id == vmId }) else { return }
+        let entries = vm.sharedFolders.map { f in
+            "\(f.tag)|\(f.hostPath)|\(f.readonly ? "1" : "0")"
+        }
+        session.ipcClient.sendSharedFoldersUpdate(entries: entries)
+    }
+
+    private func sendPortForwardsUpdateIfRunning(vmId: String) {
+        guard let session = activeSessions[vmId], session.ipcClient.isConnected,
+              let vm = vms.first(where: { $0.id == vmId }) else { return }
+        let entries = vm.portForwards.map { pf in
+            "\(pf.hostPort):\(pf.guestPort)"
+        }
+        session.ipcClient.sendPortForwardsUpdate(entries: entries, netEnabled: vm.netEnabled)
+    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private let bridge = TenBoxBridgeWrapper()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false

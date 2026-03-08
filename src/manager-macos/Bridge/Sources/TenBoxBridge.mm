@@ -13,6 +13,7 @@ static std::unordered_map<std::string, std::unique_ptr<ipc::UnixSocketServer>> g
 static std::unordered_map<std::string, std::unique_ptr<ipc::UnixSocketConnection>> g_accepted;
 static std::unordered_map<std::string, std::thread> g_accept_threads;
 static std::unordered_map<std::string, NSTask*> g_tasks;
+static std::unordered_map<std::string, NSMutableArray<NSURL *> *> g_scoped_urls;
 
 // Last-resort cleanup: terminate any remaining child processes and detach
 // accept threads before global destructors run.
@@ -76,6 +77,16 @@ static NSString* GetVmsDir() {
     return dir;
 }
 
+// ── TBPortForward ──────────────────────────────────────────────────
+
+@implementation TBPortForward
+@end
+
+// ── TBSharedFolder ──────────────────────────────────────────────────
+
+@implementation TBSharedFolder
+@end
+
 // ── TBVmInfo ────────────────────────────────────────────────────────
 
 @implementation TBVmInfo
@@ -138,6 +149,43 @@ static NSString* GetVmsDir() {
         info.state = state;
         info.netEnabled = [dict[@"net_enabled"] boolValue];
         info.cmdline = dict[@"cmdline"] ?: @"";
+
+        NSMutableArray<TBSharedFolder *>* folders = [NSMutableArray array];
+        NSArray* sfArray = dict[@"shared_folders"];
+        if ([sfArray isKindOfClass:[NSArray class]]) {
+            for (NSDictionary* sfDict in sfArray) {
+                NSString* tag = sfDict[@"tag"];
+                NSString* hostPath = sfDict[@"host_path"];
+                if (tag && hostPath) {
+                    TBSharedFolder* sf = [[TBSharedFolder alloc] init];
+                    sf.tag = tag;
+                    sf.hostPath = hostPath;
+                    sf.readonly_ = [sfDict[@"readonly"] boolValue];
+                    NSString* bmBase64 = sfDict[@"bookmark_base64"];
+                    if ([bmBase64 isKindOfClass:[NSString class]] && bmBase64.length > 0) {
+                        sf.bookmark = [[NSData alloc] initWithBase64EncodedString:bmBase64 options:0];
+                    }
+                    [folders addObject:sf];
+                }
+            }
+        }
+        info.sharedFolders = folders;
+
+        NSMutableArray<TBPortForward *>* pfs = [NSMutableArray array];
+        NSArray* pfArray = dict[@"port_forwards"];
+        if ([pfArray isKindOfClass:[NSArray class]]) {
+            for (NSDictionary* pfDict in pfArray) {
+                NSNumber* hp = pfDict[@"host_port"];
+                NSNumber* gp = pfDict[@"guest_port"];
+                if (hp && gp) {
+                    TBPortForward* pf = [[TBPortForward alloc] init];
+                    pf.hostPort = [hp unsignedShortValue];
+                    pf.guestPort = [gp unsignedShortValue];
+                    [pfs addObject:pf];
+                }
+            }
+        }
+        info.portForwards = pfs;
         [result addObject:info];
     }
 
@@ -165,6 +213,8 @@ static NSString* GetVmsDir() {
         @"cpu_count": @(config.cpuCount),
         @"net_enabled": @(config.netEnabled),
         @"state": @"stopped",
+        @"shared_folders": @[],
+        @"port_forwards": @[],
     };
 
     NSData* data = [NSJSONSerialization dataWithJSONObject:dict
@@ -258,6 +308,56 @@ static NSString* GetVmsDir() {
         [args addObject:@"--net"];
     }
 
+    NSArray* portForwards = config[@"port_forwards"];
+    if ([portForwards isKindOfClass:[NSArray class]]) {
+        for (NSDictionary* pf in portForwards) {
+            NSNumber* hp = pf[@"host_port"];
+            NSNumber* gp = pf[@"guest_port"];
+            if (hp && gp) {
+                [args addObject:@"--forward"];
+                [args addObject:[NSString stringWithFormat:@"%u:%u",
+                    [hp unsignedShortValue], [gp unsignedShortValue]]];
+            }
+        }
+    }
+
+    NSMutableArray<NSURL *>* scopedUrls = [NSMutableArray array];
+    NSArray* sharedFolders = config[@"shared_folders"];
+    if ([sharedFolders isKindOfClass:[NSArray class]]) {
+        for (NSDictionary* sf in sharedFolders) {
+            NSString* tag = sf[@"tag"];
+            NSString* hostPath = sf[@"host_path"];
+            if (tag.length == 0 || hostPath.length == 0) continue;
+
+            // Resolve security-scoped bookmark to get access to protected dirs
+            NSString* bmBase64 = sf[@"bookmark_base64"];
+            if ([bmBase64 isKindOfClass:[NSString class]] && bmBase64.length > 0) {
+                NSData* bmData = [[NSData alloc] initWithBase64EncodedString:bmBase64 options:0];
+                if (bmData) {
+                    BOOL stale = NO;
+                    NSError* err = nil;
+                    NSURL* url = [NSURL URLByResolvingBookmarkData:bmData
+                                                           options:NSURLBookmarkResolutionWithSecurityScope
+                                                     relativeToURL:nil
+                                               bookmarkDataIsStale:&stale
+                                                             error:&err];
+                    if (url && !err) {
+                        if ([url startAccessingSecurityScopedResource]) {
+                            [scopedUrls addObject:url];
+                            hostPath = url.path;
+                        }
+                    }
+                }
+            }
+
+            NSString* arg = [sf[@"readonly"] boolValue]
+                ? [NSString stringWithFormat:@"%@:%@:ro", tag, hostPath]
+                : [NSString stringWithFormat:@"%@:%@", tag, hostPath];
+            [args addObject:@"--share"];
+            [args addObject:arg];
+        }
+    }
+
     std::string sockPath = ipc::GetSocketPath(vmId.UTF8String);
     NSString* socketPath = [NSString stringWithUTF8String:sockPath.c_str()];
     [args addObject:@"--control-endpoint"];
@@ -310,9 +410,14 @@ static NSString* GetVmsDir() {
     task.arguments = args;
     task.currentDirectoryURL = [NSURL fileURLWithPath:vmDir];
 
+    NSLog(@"Launch runtime with arguments: %@", args);
+
     NSError* error = nil;
     if (![task launchAndReturnError:&error]) {
         NSLog(@"Failed to launch runtime: %@", error);
+        for (NSURL* url in scopedUrls) {
+            [url stopAccessingSecurityScopedResource];
+        }
         std::lock_guard<std::mutex> lock(g_server_mutex);
         g_servers.erase(vmId.UTF8String);
         return NO;
@@ -321,6 +426,9 @@ static NSString* GetVmsDir() {
     {
         std::lock_guard<std::mutex> lock(g_server_mutex);
         g_tasks[vmId.UTF8String] = task;
+        if (scopedUrls.count > 0) {
+            g_scoped_urls[vmId.UTF8String] = scopedUrls;
+        }
     }
 
     // Update state
@@ -333,19 +441,63 @@ static NSString* GetVmsDir() {
 
     NSString* capturedVmId = [vmId copy];
     NSString* capturedConfigPath = [configPath copy];
+    __weak TBBridge* weakSelf = self;
     task.terminationHandler = ^(NSTask* t) {
+        BOOL wantsReboot = (t.terminationStatus == 128);
         std::string vmIdStr = capturedVmId.UTF8String;
+        NSMutableArray<NSURL *>* urlsToRelease = nil;
         {
             std::lock_guard<std::mutex> lock(g_server_mutex);
             g_tasks.erase(vmIdStr);
             g_accepted.erase(vmIdStr);
             g_servers.erase(vmIdStr);
+            auto sit = g_scoped_urls.find(vmIdStr);
+            if (sit != g_scoped_urls.end()) {
+                urlsToRelease = sit->second;
+                g_scoped_urls.erase(sit);
+            }
             auto it = g_accept_threads.find(vmIdStr);
             if (it != g_accept_threads.end()) {
                 if (it->second.joinable()) it->second.detach();
                 g_accept_threads.erase(it);
             }
         }
+        for (NSURL* url in urlsToRelease) {
+            [url stopAccessingSecurityScopedResource];
+        }
+
+        if (wantsReboot) {
+            NSLog(@"VM %@ exited with code 128 (reboot), restarting...", capturedVmId);
+            NSData* data = [NSData dataWithContentsOfFile:capturedConfigPath];
+            if (data) {
+                NSMutableDictionary* cfg = [[NSJSONSerialization JSONObjectWithData:data
+                                                                           options:NSJSONReadingMutableContainers
+                                                                             error:nil] mutableCopy];
+                if (cfg) {
+                    cfg[@"state"] = @"rebooting";
+                    NSData* out = [NSJSONSerialization dataWithJSONObject:cfg
+                                                                 options:NSJSONWritingPrettyPrinted
+                                                                   error:nil];
+                    [out writeToFile:capturedConfigPath atomically:YES];
+                }
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:@"TenBoxVmStateChanged"
+                                  object:capturedVmId];
+            });
+            dispatch_async(dispatch_get_main_queue(), ^{
+                TBBridge* strongSelf = weakSelf;
+                if (strongSelf) {
+                    [strongSelf startVmWithId:capturedVmId];
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:@"TenBoxVmStateChanged"
+                                      object:capturedVmId];
+                }
+            });
+            return;
+        }
+
         NSData* data = [NSData dataWithContentsOfFile:capturedConfigPath];
         if (data) {
             NSMutableDictionary* cfg = [[NSJSONSerialization JSONObjectWithData:data
@@ -370,6 +522,7 @@ static NSString* GetVmsDir() {
 }
 
 - (BOOL)stopVmWithId:(NSString *)vmId {
+    NSMutableArray<NSURL *>* urlsToRelease = nil;
     {
         std::string vmIdStr = vmId.UTF8String;
         SendControlCommand(vmIdStr, "stop");
@@ -377,6 +530,11 @@ static NSString* GetVmsDir() {
         std::lock_guard<std::mutex> lock(g_server_mutex);
         g_accepted.erase(vmIdStr);
         g_servers.erase(vmIdStr);
+        auto sit = g_scoped_urls.find(vmIdStr);
+        if (sit != g_scoped_urls.end()) {
+            urlsToRelease = sit->second;
+            g_scoped_urls.erase(sit);
+        }
         auto taskIt = g_tasks.find(vmIdStr);
         if (taskIt != g_tasks.end()) {
             NSTask* task = taskIt->second;
@@ -390,6 +548,9 @@ static NSString* GetVmsDir() {
             if (it->second.joinable()) it->second.detach();
             g_accept_threads.erase(it);
         }
+    }
+    for (NSURL* url in urlsToRelease) {
+        [url stopAccessingSecurityScopedResource];
     }
     NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
     NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
@@ -448,6 +609,258 @@ static NSString* GetVmsDir() {
     SendControlCommand(vmId.UTF8String, "shutdown");
 }
 
+// ── Shared folder helpers ─────────────────────────────────────────
+
+static NSDictionary* SharedFolderToJson(TBSharedFolder* sf) {
+    NSMutableDictionary* d = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"tag": sf.tag ?: @"",
+        @"host_path": sf.hostPath ?: @"",
+        @"readonly": @(sf.readonly_),
+    }];
+    if (sf.bookmark) {
+        d[@"bookmark_base64"] = [sf.bookmark base64EncodedStringWithOptions:0];
+    }
+    return d;
+}
+
+static NSArray* SharedFoldersToJson(NSArray<TBSharedFolder *>* folders) {
+    NSMutableArray* arr = [NSMutableArray arrayWithCapacity:folders.count];
+    for (TBSharedFolder* sf in folders) {
+        [arr addObject:SharedFolderToJson(sf)];
+    }
+    return arr;
+}
+
+static void SendSharedFoldersUpdate(const std::string& vmIdStr,
+                                    NSArray<TBSharedFolder *>* folders) {
+    std::lock_guard<std::mutex> lock(g_server_mutex);
+    auto it = g_accepted.find(vmIdStr);
+    if (it == g_accepted.end() || !it->second || !it->second->IsValid()) return;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kControl;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "runtime.update_shared_folders";
+    msg.fields["folder_count"] = std::to_string(folders.count);
+    for (NSUInteger i = 0; i < folders.count; ++i) {
+        TBSharedFolder* f = folders[i];
+        std::string val = std::string(f.tag.UTF8String) + "|" +
+                          std::string(f.hostPath.UTF8String) + "|" +
+                          (f.readonly_ ? "1" : "0");
+        msg.fields["folder_" + std::to_string(i)] = val;
+    }
+    it->second->Send(ipc::Encode(msg));
+}
+
+- (BOOL)addSharedFolder:(TBSharedFolder *)folder toVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    NSMutableArray* sfArray = [NSMutableArray arrayWithArray:config[@"shared_folders"] ?: @[]];
+    for (NSDictionary* existing in sfArray) {
+        if ([existing[@"tag"] isEqualToString:folder.tag]) return NO;
+    }
+    [sfArray addObject:SharedFolderToJson(folder)];
+    config[@"shared_folders"] = sfArray;
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+
+    // Hot-update if running
+    NSMutableArray<TBSharedFolder *>* allFolders = [NSMutableArray array];
+    for (NSDictionary* d in sfArray) {
+        TBSharedFolder* sf = [[TBSharedFolder alloc] init];
+        sf.tag = d[@"tag"];
+        sf.hostPath = d[@"host_path"];
+        sf.readonly_ = [d[@"readonly"] boolValue];
+        [allFolders addObject:sf];
+    }
+    SendSharedFoldersUpdate(vmId.UTF8String, allFolders);
+    return YES;
+}
+
+- (BOOL)removeSharedFolderWithTag:(NSString *)tag fromVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    NSMutableArray* sfArray = [NSMutableArray arrayWithArray:config[@"shared_folders"] ?: @[]];
+    NSUInteger idx = NSNotFound;
+    for (NSUInteger i = 0; i < sfArray.count; ++i) {
+        if ([sfArray[i][@"tag"] isEqualToString:tag]) { idx = i; break; }
+    }
+    if (idx == NSNotFound) return NO;
+    [sfArray removeObjectAtIndex:idx];
+    config[@"shared_folders"] = sfArray;
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+
+    NSMutableArray<TBSharedFolder *>* allFolders = [NSMutableArray array];
+    for (NSDictionary* d in sfArray) {
+        TBSharedFolder* sf = [[TBSharedFolder alloc] init];
+        sf.tag = d[@"tag"];
+        sf.hostPath = d[@"host_path"];
+        sf.readonly_ = [d[@"readonly"] boolValue];
+        [allFolders addObject:sf];
+    }
+    SendSharedFoldersUpdate(vmId.UTF8String, allFolders);
+    return YES;
+}
+
+- (BOOL)setSharedFolders:(NSArray<TBSharedFolder *> *)folders forVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    config[@"shared_folders"] = SharedFoldersToJson(folders);
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+
+    SendSharedFoldersUpdate(vmId.UTF8String, folders);
+    return YES;
+}
+
+// ── Port forward helpers ─────────────────────────────────────────
+
+static NSDictionary* PortForwardToJson(TBPortForward* pf) {
+    return @{
+        @"host_port": @(pf.hostPort),
+        @"guest_port": @(pf.guestPort),
+    };
+}
+
+static void SendPortForwardsUpdate(const std::string& vmIdStr,
+                                   NSArray* pfJsonArray,
+                                   BOOL netEnabled) {
+    std::lock_guard<std::mutex> lock(g_server_mutex);
+    auto it = g_accepted.find(vmIdStr);
+    if (it == g_accepted.end() || !it->second || !it->second->IsValid()) return;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kControl;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "runtime.update_network";
+    msg.fields["link_up"] = netEnabled ? "true" : "false";
+    msg.fields["forward_count"] = std::to_string(pfJsonArray.count);
+    for (NSUInteger i = 0; i < pfJsonArray.count; ++i) {
+        NSDictionary* pf = pfJsonArray[i];
+        uint16_t hp = [pf[@"host_port"] unsignedShortValue];
+        uint16_t gp = [pf[@"guest_port"] unsignedShortValue];
+        msg.fields["forward_" + std::to_string(i)] =
+            std::to_string(hp) + ":" + std::to_string(gp);
+    }
+    it->second->Send(ipc::Encode(msg));
+}
+
+- (BOOL)addPortForward:(TBPortForward *)pf toVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    NSMutableArray* pfArray = [NSMutableArray arrayWithArray:config[@"port_forwards"] ?: @[]];
+    for (NSDictionary* existing in pfArray) {
+        if ([existing[@"host_port"] unsignedShortValue] == pf.hostPort) return NO;
+    }
+    [pfArray addObject:PortForwardToJson(pf)];
+    config[@"port_forwards"] = pfArray;
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+
+    BOOL netEnabled = [config[@"net_enabled"] boolValue];
+    SendPortForwardsUpdate(vmId.UTF8String, pfArray, netEnabled);
+    return YES;
+}
+
+- (BOOL)removePortForwardWithHostPort:(uint16_t)hostPort fromVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    NSMutableArray* pfArray = [NSMutableArray arrayWithArray:config[@"port_forwards"] ?: @[]];
+    NSUInteger idx = NSNotFound;
+    for (NSUInteger i = 0; i < pfArray.count; ++i) {
+        if ([pfArray[i][@"host_port"] unsignedShortValue] == hostPort) { idx = i; break; }
+    }
+    if (idx == NSNotFound) return NO;
+    [pfArray removeObjectAtIndex:idx];
+    config[@"port_forwards"] = pfArray;
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+
+    BOOL netEnabled = [config[@"net_enabled"] boolValue];
+    SendPortForwardsUpdate(vmId.UTF8String, pfArray, netEnabled);
+    return YES;
+}
+
+- (NSArray<TBPortForward *> *)getPortForwards:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return @[];
+
+    NSDictionary* config = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSMutableArray<TBPortForward *>* result = [NSMutableArray array];
+    NSArray* pfArray = config[@"port_forwards"];
+    if ([pfArray isKindOfClass:[NSArray class]]) {
+        for (NSDictionary* d in pfArray) {
+            NSNumber* hp = d[@"host_port"];
+            NSNumber* gp = d[@"guest_port"];
+            if (hp && gp) {
+                TBPortForward* pf = [[TBPortForward alloc] init];
+                pf.hostPort = [hp unsignedShortValue];
+                pf.guestPort = [gp unsignedShortValue];
+                [result addObject:pf];
+            }
+        }
+    }
+    return result;
+}
+
 - (void)stopAllVms {
     // Collect running VM IDs, then send stop commands without holding the lock
     // (SendControlCommand acquires g_server_mutex internally).
@@ -473,6 +886,12 @@ static NSString* GetVmsDir() {
     g_tasks.clear();
     g_accepted.clear();
     g_servers.clear();
+    for (auto& [_, urls] : g_scoped_urls) {
+        for (NSURL* url in urls) {
+            [url stopAccessingSecurityScopedResource];
+        }
+    }
+    g_scoped_urls.clear();
     for (auto& [_, t] : g_accept_threads) {
         if (t.joinable()) t.detach();
     }
