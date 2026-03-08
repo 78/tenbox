@@ -10,6 +10,7 @@ out/
 *.ilk
 *.log
 *.msi
+*.pyc
 .env
 images/
 CMakePresets.json

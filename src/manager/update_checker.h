@@ -9,6 +9,7 @@ struct UpdateInfo {
     std::string download_url;
     std::string release_notes;
     std::string sha256;
+    int64_t size = 0;
     bool update_available = false;
     std::string error;
 };

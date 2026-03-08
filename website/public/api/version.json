@@ -1,23 +1,28 @@
 {
   "latest_version": "0.3.0",
   "min_supported_version": "0.1.0",
-  "release_notes": "版本号统一管理\n更灵活的CPU和内存配置\n更详细的虚拟化启动提示\n修复切换VM后仍然停留在控制台\n修复启动VM可能失败的问题",
-  "release_date": "2026-03-08",
-
+  "release_notes": "支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+  "release_date": "2026-03-09",
   "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.msi",
-  "sha256": "",
-
+  "sha256": "791dec3fc58282c94fcea5fff65ed45e3c86d5143570af02bedc02d2074b66f7",
   "platforms": {
     "windows": {
+      "latest_version": "0.3.0",
+      "release_notes": "支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+      "release_date": "2026-03-09",
       "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.msi",
-      "sha256": "",
+      "sha256": "791dec3fc58282c94fcea5fff65ed45e3c86d5143570af02bedc02d2074b66f7",
+      "size": 1413120,
       "min_os": "Windows 10"
     },
     "macos": {
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.dmg",
+      "latest_version": "0.3.0",
+      "release_notes": "支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+      "release_date": "2026-03-09",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.zip",
       "sha256": "",
-      "min_os": "macOS 14.0",
-      "arch": "arm64"
+      "size": 0,
+      "min_os": "macOS 14.0"
     }
   }
 }

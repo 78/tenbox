@@ -8,6 +8,8 @@ namespace update {
 
 static constexpr const char* kVersionUrl = "https://tenbox.ai/api/version.json";
 
+static constexpr const char* kPlatformKey = "windows";
+
 UpdateInfo CheckForUpdate(const std::string& current_version) {
     UpdateInfo info;
 
@@ -19,10 +21,20 @@ UpdateInfo CheckForUpdate(const std::string& current_version) {
 
     try {
         auto j = nlohmann::json::parse(result.data);
-        info.latest_version = j.value("latest_version", "");
-        info.download_url = j.value("download_url", "");
-        info.release_notes = j.value("release_notes", "");
-        info.sha256 = j.value("sha256", "");
+
+        if (j.contains("platforms") && j["platforms"].contains(kPlatformKey)) {
+            auto& p = j["platforms"][kPlatformKey];
+            info.latest_version = p.value("latest_version", "");
+            info.release_notes = p.value("release_notes", "");
+            info.download_url = p.value("download_url", "");
+            info.sha256 = p.value("sha256", "");
+            info.size = p.value("size", int64_t{0});
+        } else {
+            info.latest_version = j.value("latest_version", "");
+            info.release_notes = j.value("release_notes", "");
+            info.download_url = j.value("download_url", "");
+            info.sha256 = j.value("sha256", "");
+        }
 
         if (!info.latest_version.empty() &&
             image_source::CompareVersions(info.latest_version, current_version) > 0) {

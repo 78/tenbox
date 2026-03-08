@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@ struct ImageFile {
     std::string name;
     std::string url;
     std::string sha256;  // empty = skip verification
+    uint64_t size = 0;
 };
 
 struct ImageEntry {
@@ -27,6 +29,12 @@ struct ImageEntry {
     std::vector<ImageFile> files;
 
     std::string CacheId() const { return id + "-" + version; }
+
+    uint64_t TotalSize() const {
+        uint64_t total = 0;
+        for (const auto& f : files) total += f.size;
+        return total;
+    }
 };
 
 // Parse JSON strings into structs

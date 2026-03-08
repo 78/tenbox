@@ -296,7 +296,12 @@ static void RefreshImageList(DialogData* data) {
     int index = 0;
 
     for (const auto& img : data->cached_images) {
-        std::string text = img.display_name + " " + i18n::tr(i18n::S::kImgCached);
+        std::string text = img.display_name;
+        uint64_t total = img.TotalSize();
+        if (total > 0)
+            text += " (" + FormatSize(total) + ")";
+        text += " ";
+        text += i18n::tr(i18n::S::kImgCached);
         SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(text).c_str()));
         SendMessage(list, LB_SETITEMDATA, index++, 0);
     }
@@ -311,7 +316,11 @@ static void RefreshImageList(DialogData* data) {
                 }
             }
             if (!is_cached) {
-                SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(img.display_name).c_str()));
+                std::string text = img.display_name;
+                uint64_t total = img.TotalSize();
+                if (total > 0)
+                    text += " (" + FormatSize(total) + ")";
+                SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(text).c_str()));
                 SendMessage(list, LB_SETITEMDATA, index++, 1);
             }
         }

@@ -54,6 +54,7 @@ std::vector<ImageEntry> ParseImages(const std::string& json_str) {
                     file.name = f.value("name", "");
                     file.url = f.value("url", "");
                     file.sha256 = f.value("sha256", "");
+                    file.size = f.value("size", uint64_t(0));
                     if (!file.name.empty() && !file.url.empty()) {
                         e.files.push_back(std::move(file));
                     }
@@ -172,6 +173,7 @@ void SaveImageMeta(const std::string& cache_dir, const ImageEntry& entry) {
         file_j["name"] = f.name;
         file_j["url"] = f.url;
         file_j["sha256"] = f.sha256;
+        file_j["size"] = f.size;
         files.push_back(file_j);
     }
     j["files"] = files;
