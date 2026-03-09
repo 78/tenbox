@@ -600,6 +600,7 @@ if [ -f "\$DESKTOP_DIR/使用说明.txt" ]; then
 fi
 
 mkdir -p "\$DESKTOP_DIR"
+chown $USER_NAME:$USER_NAME "\$DESKTOP_DIR"
 cp /tmp/rootfs-configs/openclaw-readme.txt "\$DESKTOP_DIR/使用说明.txt"
 chown $USER_NAME:$USER_NAME "\$DESKTOP_DIR/使用说明.txt"
 EOF
