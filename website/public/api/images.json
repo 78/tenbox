@@ -157,8 +157,8 @@
     },
     {
       "id": "openclaw-arm64",
-      "version": "2026.3.7",
-      "name": "OpenClaw 2026.3.7 (ARM64)",
+      "version": "2026.3.8",
+      "name": "OpenClaw 2026.3.8 (ARM64)",
       "description": "一个基于 Debian 12 的环境，预装了 OpenClaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
@@ -180,9 +180,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-arm64-2026.3.7.qcow2",
-          "sha256": "565c222992cc45c3164fda3cf8eac921e82b99bb94df34478dd84f8cfec7454e",
-          "size": 1481501696
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-arm64-2026.3.8-fixdesktop.qcow2",
+          "sha256": "72723cb1978f5e1a968b0635bdae3f0fb7b6764a663d04f79ae5a7b69997fdd4",
+          "size": 1451491328
         }
       ]
     }
