@@ -18,7 +18,6 @@
     "cta_mac": "macOS",
     "version": "v0.1.0",
     "requirements": "Windows 10+ · macOS 13+ (Apple Silicon)",
-    "notice": "⚠️ Code signing certificate pending — installer may show an unknown publisher warning",
     "qq_group": "QQ Help Group",
     "qq_group_number": "295838092"
   },
