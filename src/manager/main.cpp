@@ -18,6 +18,11 @@ using UiShell = Win32UiShell;
 #include <ctime>
 #include <io.h>
 
+extern "C" {
+extern int __argc;
+extern char** __argv;
+}
+
 static FILE* g_log_file = nullptr;
 
 static void InitLogFile() {
@@ -31,14 +36,16 @@ static void InitLogFile() {
     std::filesystem::create_directories(log_dir, ec);
     
     std::filesystem::path log_path = log_dir / L"manager.log";
-    g_log_file = _wfopen(log_path.c_str(), L"a");
+    _wfopen_s(&g_log_file, log_path.c_str(), L"a");
     if (g_log_file) {
         setvbuf(g_log_file, nullptr, _IOLBF, BUFSIZ);
         
         // Write startup marker
         time_t now = time(nullptr);
+        struct tm local_tm;
+        localtime_s(&local_tm, &now);
         char time_buf[64];
-        strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &local_tm);
         fprintf(g_log_file, "\n=== TenBox Manager started at %s ===\n", time_buf);
         
         // Redirect stderr to log file
@@ -239,7 +246,7 @@ static bool CheckHypervisorAndPrompt() {
     return true;
 }
 
-int main(int argc, char* argv[]) {
+static int RunManagerApp(int argc, char* argv[]) {
     InitLogFile();
     
     HANDLE hMutex = CreateMutexW(nullptr, FALSE, kMutexName);
@@ -358,4 +365,14 @@ int main(int argc, char* argv[]) {
     if (hMutex) CloseHandle(hMutex);
     CloseLogFile();
     return 0;
+}
+
+int main(int argc, char* argv[]) {
+    return RunManagerApp(argc, argv);
+}
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    // Use the standard GUI entry point so the binary layout matches
+    // a typical Windows desktop application more closely.
+    return RunManagerApp(__argc, __argv);
 }

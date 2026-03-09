@@ -18,6 +18,14 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY
         "$<$<CONFIG:Debug>:MultiThreadedDebugDLL>$<$<NOT:$<CONFIG:Debug>>:MultiThreaded>")
     add_compile_options(/utf-8)
+
+    # Use /O1 (minimize size) instead of /O2 (maximize speed) for Release builds.
+    # /O2 can produce unusual code patterns that trigger heuristic AV false positives
+    # (e.g. Microsoft Defender Wacatac.H!ml).
+    string(REPLACE "/O2" "/O1" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+    string(REPLACE "/O2" "/O1" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+    string(REPLACE "/O2" "/O1" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+    string(REPLACE "/O2" "/O1" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 endif()
 
 include(FetchContent)

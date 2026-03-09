@@ -22,16 +22,16 @@ if not exist "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" (
 )
 call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
 
-:: Step 1: CMake configure + build (Release)
+:: Step 1: CMake configure + build (RelWithDebInfo)
 echo.
-echo [1/4] CMake Release build...
-cmake -S "%PROJECT_DIR%" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release
+echo [1/4] CMake RelWithDebInfo build...
+cmake -S "%PROJECT_DIR%" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 if errorlevel 1 (
     echo ERROR: CMake configure failed.
     exit /b 1
 )
 
-cmake --build "%BUILD_DIR%" --config Release
+cmake --build "%BUILD_DIR%" --config RelWithDebInfo
 if errorlevel 1 (
     echo ERROR: CMake build failed.
     exit /b 1

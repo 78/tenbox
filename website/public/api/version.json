@@ -1,18 +1,18 @@
 {
-  "latest_version": "0.3.1",
+  "latest_version": "0.3.3",
   "min_supported_version": "0.1.0",
-  "release_notes": "应用程序增加数字证书\n支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+  "release_notes": "版本号更改为 0.3.3\n更新内容详见 GitHub",
   "release_date": "2026-03-09",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.1.msi",
-  "sha256": "c2865804400b8515ef22b8e2ab1194053ccee316414015c3f8d97e987ecc7d75",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.3.msi",
+  "sha256": "31dbac0707770cefe87be063875c96493f0d36b664f509f138168d1d7d7abf35",
   "platforms": {
     "windows": {
-      "latest_version": "0.3.1",
-      "release_notes": "应用程序增加数字证书\n支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+      "latest_version": "0.3.3",
+      "release_notes": "版本号更改为 0.3.3\n更新内容详见 GitHub",
       "release_date": "2026-03-09",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.1.msi",
-      "sha256": "c2865804400b8515ef22b8e2ab1194053ccee316414015c3f8d97e987ecc7d75",
-      "size": 1449984,
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.3.msi",
+      "sha256": "31dbac0707770cefe87be063875c96493f0d36b664f509f138168d1d7d7abf35",
+      "size": 1994752,
       "min_os": "Windows 10"
     },
     "macos": {

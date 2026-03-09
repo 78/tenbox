@@ -44,5 +44,14 @@ target_link_libraries(tenbox-manager
 )
 
 if(MSVC)
-    target_link_options(tenbox-manager PRIVATE /ENTRY:mainCRTStartup)
+    # Mitigate Defender heuristic false positives (Wacatac.H!ml):
+    # - /GL whole-program optimization produces cleaner code layout
+    # - /Gy function-level linking for standard binary structure
+    # - /guard:cf Control Flow Guard adds MS-recognized security metadata
+    target_compile_options(tenbox-manager PRIVATE
+        $<$<NOT:$<CONFIG:Debug>>:/GL /Gy /guard:cf /sdl>
+    )
+    target_link_options(tenbox-manager PRIVATE
+        $<$<NOT:$<CONFIG:Debug>>:/LTCG /GUARD:CF /DYNAMICBASE /NXCOMPAT /CETCOMPAT>
+    )
 endif()
