@@ -25,9 +25,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.8.qcow2",
-          "sha256": "99d118225a604d987b98fcadfcb2b78201b0170198c42bacaf8f05a4e6402dad",
-          "size": 1544033792
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.8-fixdesktop.qcow2",
+          "sha256": "4211d404299dd047629fb8ddc0d1a80fffbd4bb26d5c17bea07064c9adbdc563",
+          "size": 1542914048
         }
       ]
     },
