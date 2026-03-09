@@ -190,18 +190,17 @@ class ImageSourceService: ObservableObject {
         progress: @escaping (UInt64, UInt64) -> Void,
         isCancelled: @escaping () -> Bool
     ) async throws {
-        let delegate = DownloadProgressDelegate(progress: progress, isCancelled: isCancelled)
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-
-        let (tempUrl, response) = try await session.download(from: url)
-
-        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-            throw ImageSourceError.httpError(httpResponse.statusCode)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let delegate = DownloadCompletionDelegate(
+                destPath: destPath,
+                progress: progress,
+                isCancelled: isCancelled,
+                continuation: continuation
+            )
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            delegate.session = session
+            session.downloadTask(with: url).resume()
         }
-
-        try? fm.removeItem(atPath: destPath)
-        try fm.moveItem(at: tempUrl, to: URL(fileURLWithPath: destPath))
     }
 
     private func fileSHA256(_ path: String) -> String? {
@@ -250,15 +249,24 @@ class ImageSourceService: ObservableObject {
     }
 }
 
-// MARK: - Download delegate for progress tracking
+// MARK: - Download delegate for progress tracking + completion
 
-private class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate {
+private class DownloadCompletionDelegate: NSObject, URLSessionDownloadDelegate {
+    let destPath: String
     let progressCallback: (UInt64, UInt64) -> Void
     let isCancelled: () -> Bool
+    let continuation: CheckedContinuation<Void, Error>
+    var session: URLSession?
+    private var resumed = false
 
-    init(progress: @escaping (UInt64, UInt64) -> Void, isCancelled: @escaping () -> Bool) {
+    init(destPath: String,
+         progress: @escaping (UInt64, UInt64) -> Void,
+         isCancelled: @escaping () -> Bool,
+         continuation: CheckedContinuation<Void, Error>) {
+        self.destPath = destPath
         self.progressCallback = progress
         self.isCancelled = isCancelled
+        self.continuation = continuation
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
@@ -275,7 +283,28 @@ private class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        // handled by the async download(from:) call
+        guard !resumed else { return }
+        resumed = true
+
+        do {
+            if let http = downloadTask.response as? HTTPURLResponse, http.statusCode != 200 {
+                throw ImageSourceError.httpError(http.statusCode)
+            }
+            let dest = URL(fileURLWithPath: destPath)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.moveItem(at: location, to: dest)
+            continuation.resume()
+        } catch {
+            continuation.resume(throwing: error)
+        }
+        self.session?.invalidateAndCancel()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard !resumed else { return }
+        resumed = true
+        continuation.resume(throwing: error ?? ImageSourceError.downloadFailed("Unknown error"))
+        self.session?.invalidateAndCancel()
     }
 }
 

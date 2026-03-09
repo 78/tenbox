@@ -24,11 +24,16 @@
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            {{ $t('hero.cta') }}
+            {{ $t('hero.cta_win') }}
+          </a>
+          <a v-if="downloadUrlMac" :href="downloadUrlMac" class="btn btn-large btn-hero btn-hero-mac">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+            </svg>
+            {{ $t('hero.cta_mac') }}
           </a>
         </div>
-        <p class="hero-meta">v{{ latestVersion }} · {{ $t('hero.requirements') }} · {{ $t('hero.macos') }}</p>
-        <p class="hero-notice">{{ $t('hero.notice') }}</p>
+        <p class="hero-meta">v{{ latestVersion }} · {{ $t('hero.requirements') }}</p>
         <p class="hero-qq">{{ $t('hero.qq_group') }}：{{ $t('hero.qq_group_number') }}</p>
       </div>
     </div>
@@ -38,12 +43,13 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 
-/* global __APP_VERSION__, __APP_DOWNLOAD_URL__ */
+/* global __APP_VERSION__, __APP_DOWNLOAD_URL__, __APP_DOWNLOAD_URL_MAC__ */
 import { useI18n } from 'vue-i18n'
 
 const { tm, locale } = useI18n()
 
 const downloadUrl = __APP_DOWNLOAD_URL__
+const downloadUrlMac = __APP_DOWNLOAD_URL_MAC__
 const latestVersion = __APP_VERSION__
 
 const displayText = ref('')
@@ -160,7 +166,7 @@ watch(locale, () => {
 .hero-content {
   position: relative;
   display: grid;
-  grid-template-columns: 1.3fr 0.7fr;
+  grid-template-columns: 1.1fr 0.9fr;
   gap: 80px;
   align-items: center;
   padding-top: calc(var(--nav-height) + 40px);
@@ -210,6 +216,16 @@ watch(locale, () => {
 .hero-actions {
   display: flex;
   gap: 16px;
+  flex-wrap: wrap;
+}
+
+.btn-hero-mac {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-hero-mac:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .hero-qq {
@@ -222,12 +238,6 @@ watch(locale, () => {
   margin-top: 16px;
   font-size: 0.85rem;
   color: rgba(241, 245, 249, 0.45);
-}
-
-.hero-notice {
-  margin-top: 10px;
-  font-size: 0.8rem;
-  color: rgba(251, 191, 36, 0.85);
 }
 
 .hero-image {

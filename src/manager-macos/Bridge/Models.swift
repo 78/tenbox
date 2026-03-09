@@ -16,6 +16,17 @@ enum VmState: String, Codable {
         case .crashed: return "Crashed"
         }
     }
+
+    /// Lower value = higher in the list.
+    var sortPriority: Int {
+        switch self {
+        case .running:  return 0
+        case .starting: return 1
+        case .rebooting: return 2
+        case .crashed:  return 3
+        case .stopped:  return 4
+        }
+    }
 }
 
 struct SharedFolder: Identifiable, Codable, Equatable {

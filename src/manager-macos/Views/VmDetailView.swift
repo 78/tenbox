@@ -223,18 +223,18 @@ struct VmDetailView: View {
                 Self.resizeWindowToFitDisplay(session.displaySize, session: session)
             }
         }
-        .onChange(of: vm.state) { oldState, newState in
+        .onChange(of: vm.state, perform: { [oldState = vm.state] newState in
             if newState == .running && oldState != .running {
                 session.connectIfNeeded()
             } else if newState == .stopped || newState == .crashed {
                 session.activeTab = 0
             }
-        }
-        .onChange(of: session.displaySize) { _, newSize in
+        })
+        .onChange(of: session.displaySize, perform: { newSize in
             if newSize.width > 0 && newSize.height > 0 {
                 Self.resizeWindowToFitDisplay(newSize, session: session)
             }
-        }
+        })
     }
 
     private static func resizeWindowToFitDisplay(_ guestSize: CGSize, session: VmSession) {

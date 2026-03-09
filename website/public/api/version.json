@@ -1,28 +1,28 @@
 {
-  "latest_version": "0.3.0",
+  "latest_version": "0.3.1",
   "min_supported_version": "0.1.0",
-  "release_notes": "支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+  "release_notes": "应用程序增加数字证书\n支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
   "release_date": "2026-03-09",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.msi",
-  "sha256": "2ff4a44886bb11984cca615d910aced3c5ded36296e5806ee8dcbb9a95989d87",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.1.msi",
+  "sha256": "c2865804400b8515ef22b8e2ab1194053ccee316414015c3f8d97e987ecc7d75",
   "platforms": {
     "windows": {
-      "latest_version": "0.3.0",
-      "release_notes": "支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+      "latest_version": "0.3.1",
+      "release_notes": "应用程序增加数字证书\n支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
       "release_date": "2026-03-09",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.msi",
-      "sha256": "2ff4a44886bb11984cca615d910aced3c5ded36296e5806ee8dcbb9a95989d87",
-      "size": 1413120,
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.1.msi",
+      "sha256": "c2865804400b8515ef22b8e2ab1194053ccee316414015c3f8d97e987ecc7d75",
+      "size": 1449984,
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.3.0",
-      "release_notes": "支持使用本地镜像创建虚拟机\n优化屏幕显示（使用共享内存）\n优化端口转发列表显示\n使对话框父窗体居中\n修复Ctrl，Alt未释放导致的输入问题",
+      "latest_version": "0.3.1",
+      "release_notes": "新版本发布",
       "release_date": "2026-03-09",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.3.0.zip",
-      "sha256": "",
-      "size": 0,
-      "min_os": "macOS 14.0"
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_arm64.dmg",
+      "sha256": "eaf094b4cbab4b83588730a20037dc1c6b2bdcfec062ec91903f753b4a3e6ca7",
+      "size": 2720147,
+      "min_os": "macOS 13.0"
     }
   }
 }

@@ -58,7 +58,7 @@ struct TenBoxApp: App {
 
     private static func showAboutPanel() {
         let options: [NSApplication.AboutPanelOptionKey: Any] = [
-            .applicationName: "TenBox",
+            .applicationName: "TenBox 本地龙虾",
             .applicationVersion: kTenBoxVersion,
             .version: "",
             .credits: NSAttributedString(

@@ -1,5 +1,6 @@
 build/
 out/
+/scripts/1/
 .deps/
 .wix/
 .vs/
@@ -13,6 +14,7 @@ out/
 *.pyc
 .env
 images/
+scripts/.signing_sha1
 CMakePresets.json
 
 # Website

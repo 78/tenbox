@@ -45,7 +45,7 @@ struct DisplayView: View {
                 session.displayViewSize = geo.size
                 Self.updateChromeExtra(viewSize: geo.size)
             }
-            .onChange(of: geo.size) { _, newSize in
+            .onChange(of: geo.size, perform: { newSize in
                 session.displayViewSize = newSize
                 Self.updateChromeExtra(viewSize: newSize)
                 if session.displayInitialized {
@@ -54,7 +54,7 @@ struct DisplayView: View {
                         viewModel.notifyDisplaySizeIfNeeded(newSize, session: session)
                     }
                 }
-            }
+            })
         }
     }
 }
