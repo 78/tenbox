@@ -1,5 +1,6 @@
 build/
-out/
+/out/
+/tmp/
 /scripts/1/
 .deps/
 .wix/
@@ -15,7 +16,6 @@ out/
 *.pyc
 .env
 .signing_sha1
-images/
 scripts/.signing_sha1
 CMakePresets.json
 
