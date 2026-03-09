@@ -53,7 +53,7 @@ def generate_appcast_xml(mac_info: dict) -> str:
     download_url = mac_info.get("download_url", "")
     ed_signature = mac_info.get("ed_signature", "")
     size = mac_info.get("size", 0)
-    min_os = mac_info.get("min_os", "14.0").replace("macOS ", "")
+    min_os = mac_info.get("min_os", "13.0").replace("macOS ", "")
 
     notes_html_lines = "".join(
         f"          <li>{line}</li>\n"
@@ -772,11 +772,15 @@ class ReleasePublisher(ttk.Frame):
 
         self.var_mac_version = tk.StringVar()
         self.var_mac_date = tk.StringVar()
-        self.var_mac_url = tk.StringVar()
-        self.var_mac_sha = tk.StringVar()
-        self.var_mac_size = tk.StringVar()
-        self.var_mac_minos = tk.StringVar(value="macOS 14.0")
-        self.var_mac_ed_signature = tk.StringVar()
+        self.var_mac_minos = tk.StringVar(value="macOS 13.0")
+
+        self.var_mac_dmg_url = tk.StringVar()
+        self.var_mac_dmg_sha = tk.StringVar()
+        self.var_mac_dmg_size = tk.StringVar()
+
+        self.var_mac_zip_url = tk.StringVar()
+        self.var_mac_zip_sha = tk.StringVar()
+        self.var_mac_zip_size = tk.StringVar()
 
         ttk.Label(f, text="latest_version:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
         ttk.Entry(f, textvariable=self.var_mac_version, width=30).grid(row=row, column=1, sticky=tk.W, pady=2)
@@ -794,25 +798,47 @@ class ReleasePublisher(ttk.Frame):
         self.text_mac_notes.grid(row=row, column=1, columnspan=2, sticky=tk.W + tk.E, pady=2)
         row += 1
 
-        ttk.Label(f, text="download_url:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
-        ttk.Entry(f, textvariable=self.var_mac_url, width=55).grid(row=row, column=1, sticky=tk.W + tk.E, pady=2)
-        ttk.Button(f, text="选择文件上传", command=lambda: self._upload_installer("macos")).grid(row=row, column=2, padx=(4, 0), pady=2)
-        row += 1
-
-        ttk.Label(f, text="SHA256:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
-        ttk.Entry(f, textvariable=self.var_mac_sha, width=55).grid(row=row, column=1, columnspan=2, sticky=tk.W + tk.E, pady=2)
-        row += 1
-
-        ttk.Label(f, text="size (bytes):").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
-        ttk.Entry(f, textvariable=self.var_mac_size, width=20).grid(row=row, column=1, sticky=tk.W, pady=2)
-        row += 1
-
         ttk.Label(f, text="min_os:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
         ttk.Entry(f, textvariable=self.var_mac_minos, width=30).grid(row=row, column=1, sticky=tk.W, pady=2)
         row += 1
 
-        ttk.Label(f, text="Sparkle edSignature:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
-        ttk.Entry(f, textvariable=self.var_mac_ed_signature, width=55).grid(row=row, column=1, columnspan=2, sticky=tk.W + tk.E, pady=2)
+        # DMG section (for website download / version.json)
+        ttk.Label(f, text="── DMG (网站下载) ──", font=("", 9, "bold")).grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(8, 2))
+        row += 1
+
+        ttk.Label(f, text="DMG URL:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Entry(f, textvariable=self.var_mac_dmg_url, width=55).grid(row=row, column=1, sticky=tk.W + tk.E, pady=2)
+        ttk.Button(f, text="选择文件上传", command=lambda: self._upload_installer("macos_dmg")).grid(row=row, column=2, padx=(4, 0), pady=2)
+        row += 1
+
+        ttk.Label(f, text="DMG SHA256:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Entry(f, textvariable=self.var_mac_dmg_sha, width=55).grid(row=row, column=1, columnspan=2, sticky=tk.W + tk.E, pady=2)
+        row += 1
+
+        ttk.Label(f, text="DMG size (bytes):").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Entry(f, textvariable=self.var_mac_dmg_size, width=20).grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+
+        # ZIP section (for Sparkle update / appcast.xml)
+        ttk.Label(f, text="── ZIP (Sparkle 升级) ──", font=("", 9, "bold")).grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(8, 2))
+        row += 1
+
+        ttk.Label(f, text="ZIP URL:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Entry(f, textvariable=self.var_mac_zip_url, width=55).grid(row=row, column=1, sticky=tk.W + tk.E, pady=2)
+        ttk.Button(f, text="选择文件上传", command=lambda: self._upload_installer("macos_zip")).grid(row=row, column=2, padx=(4, 0), pady=2)
+        row += 1
+
+        ttk.Label(f, text="ZIP SHA256:").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Entry(f, textvariable=self.var_mac_zip_sha, width=55).grid(row=row, column=1, columnspan=2, sticky=tk.W + tk.E, pady=2)
+        row += 1
+
+        ttk.Label(f, text="ZIP size (bytes):").grid(row=row, column=0, sticky=tk.E, padx=(0, 4), pady=2)
+        ttk.Entry(f, textvariable=self.var_mac_zip_size, width=20).grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+
+        ttk.Label(f, text="Sparkle edSignature:").grid(row=row, column=0, sticky=tk.NE, padx=(0, 4), pady=2)
+        self.text_mac_ed_signature = tk.Text(f, width=55, height=2, wrap=tk.WORD)
+        self.text_mac_ed_signature.grid(row=row, column=1, columnspan=2, sticky=tk.W + tk.E, pady=2)
         row += 1
 
         f.columnconfigure(1, weight=1)
@@ -856,25 +882,30 @@ class ReleasePublisher(ttk.Frame):
         self.var_mac_date.set(mac.get("release_date", ""))
         self.text_mac_notes.delete("1.0", tk.END)
         self.text_mac_notes.insert("1.0", mac.get("release_notes", ""))
-        self.var_mac_url.set(mac.get("download_url", ""))
-        self.var_mac_sha.set(mac.get("sha256", ""))
-        self.var_mac_size.set(str(mac.get("size", "")))
-        self.var_mac_minos.set(mac.get("min_os", "macOS 14.0"))
+        self.var_mac_minos.set(mac.get("min_os", "macOS 13.0"))
 
-        self._load_ed_signature_from_appcast()
+        self.var_mac_dmg_url.set(mac.get("download_url", ""))
+        self.var_mac_dmg_sha.set(mac.get("sha256", ""))
+        self.var_mac_dmg_size.set(str(mac.get("size", "")))
 
-    def _load_ed_signature_from_appcast(self):
-        """Try to read the current edSignature from appcast.xml."""
-        self.var_mac_ed_signature.set("")
+        self._load_zip_info_from_appcast()
+
+    def _load_zip_info_from_appcast(self):
+        """Load ZIP url, size, and edSignature from appcast.xml."""
+        self.var_mac_zip_url.set("")
+        self.var_mac_zip_sha.set("")
+        self.var_mac_zip_size.set("")
+        self.text_mac_ed_signature.delete("1.0", tk.END)
         if not APPCAST_XML_PATH.exists():
             return
         try:
             tree = ET.parse(APPCAST_XML_PATH)
-            ns = {"sparkle": SPARKLE_NS}
             enc = tree.find(".//item/enclosure")
             if enc is not None:
-                sig = enc.get(f"{{{SPARKLE_NS}}}edSignature", "")
-                self.var_mac_ed_signature.set(sig)
+                self.var_mac_zip_url.set(enc.get("url", ""))
+                self.var_mac_zip_size.set(enc.get("length", ""))
+                self.text_mac_ed_signature.insert(
+                    "1.0", enc.get(f"{{{SPARKLE_NS}}}edSignature", ""))
         except Exception:
             pass
 
@@ -897,9 +928,9 @@ class ReleasePublisher(ttk.Frame):
             "latest_version": self.var_mac_version.get().strip(),
             "release_notes": self.text_mac_notes.get("1.0", tk.END).strip(),
             "release_date": self.var_mac_date.get().strip(),
-            "download_url": self.var_mac_url.get().strip(),
-            "sha256": self.var_mac_sha.get().strip(),
-            "size": self._parse_size(self.var_mac_size.get()),
+            "download_url": self.var_mac_dmg_url.get().strip(),
+            "sha256": self.var_mac_dmg_sha.get().strip(),
+            "size": self._parse_size(self.var_mac_dmg_size.get()),
             "min_os": self.var_mac_minos.get().strip(),
         }
         # Top-level fallback fields mirror Windows for old clients (<=0.3.0)
@@ -937,11 +968,18 @@ class ReleasePublisher(ttk.Frame):
 
         mac = platforms.get("macos", {})
         if mac.get("latest_version"):
-            mac_info = dict(mac)
-            mac_info["ed_signature"] = self.var_mac_ed_signature.get().strip()
+            appcast_info = {
+                "latest_version": mac["latest_version"],
+                "release_notes": mac.get("release_notes", ""),
+                "release_date": mac.get("release_date", ""),
+                "min_os": mac.get("min_os", "13.0"),
+                "download_url": self.var_mac_zip_url.get().strip(),
+                "size": self._parse_size(self.var_mac_zip_size.get()),
+                "ed_signature": self.text_mac_ed_signature.get("1.0", tk.END).strip(),
+            }
             try:
                 APPCAST_XML_PATH.write_text(
-                    generate_appcast_xml(mac_info), encoding="utf-8",
+                    generate_appcast_xml(appcast_info), encoding="utf-8",
                 )
                 saved_files.append(str(APPCAST_XML_PATH))
             except Exception as e:
@@ -950,12 +988,12 @@ class ReleasePublisher(ttk.Frame):
         messagebox.showinfo("成功", f"已保存到:\n" + "\n".join(saved_files), parent=self)
 
     def _upload_installer(self, target: str):
-        if target == "macos":
-            filetypes = [("ZIP files", "*.zip"), ("DMG files", "*.dmg"), ("All files", "*.*")]
-        elif target == "windows":
-            filetypes = [("MSI files", "*.msi"), ("All files", "*.*")]
-        else:
-            filetypes = [("Installer files", "*.msi *.zip *.dmg"), ("All files", "*.*")]
+        filetypes_map = {
+            "windows": [("MSI files", "*.msi"), ("All files", "*.*")],
+            "macos_dmg": [("DMG files", "*.dmg"), ("All files", "*.*")],
+            "macos_zip": [("ZIP files", "*.zip"), ("All files", "*.*")],
+        }
+        filetypes = filetypes_map.get(target, [("All files", "*.*")])
 
         local_path = filedialog.askopenfilename(title="选择安装包文件", filetypes=filetypes, parent=self)
         if not local_path:
@@ -972,10 +1010,14 @@ class ReleasePublisher(ttk.Frame):
             self.var_win_url.set(url)
             self.var_win_sha.set(sha)
             self.var_win_size.set(str(size))
-        elif target == "macos":
-            self.var_mac_url.set(url)
-            self.var_mac_sha.set(sha)
-            self.var_mac_size.set(str(size))
+        elif target == "macos_dmg":
+            self.var_mac_dmg_url.set(url)
+            self.var_mac_dmg_sha.set(sha)
+            self.var_mac_dmg_size.set(str(size))
+        elif target == "macos_zip":
+            self.var_mac_zip_url.set(url)
+            self.var_mac_zip_sha.set(sha)
+            self.var_mac_zip_size.set(str(size))
 
 
 # ---------------------------------------------------------------------------

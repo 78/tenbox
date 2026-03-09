@@ -56,9 +56,9 @@ private struct SelectImagePage: View {
                 }
                 .labelsHidden()
                 .disabled(vm.sources.isEmpty)
-                .onChange(of: vm.selectedSourceIndex) {
+                .onChange(of: vm.selectedSourceIndex, perform: { _ in
                     vm.onSourceChanged()
-                }
+                })
                 Button {
                     vm.refreshOnlineImages()
                 } label: {
@@ -69,42 +69,57 @@ private struct SelectImagePage: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
-            List(selection: $vm.selectedImageId) {
-                if !vm.cachedImages.isEmpty {
-                    Section("Cached") {
-                        ForEach(vm.cachedImages) { img in
-                            ImageRow(image: img, isCached: true)
-                                .tag(img.id + "||cached")
-                        }
-                    }
-                }
-                Section("Online") {
-                    if vm.isLoadingSources || vm.isLoadingOnline {
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                            Text("Loading...")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
+                    if !vm.cachedImages.isEmpty {
+                        Section {
+                            ForEach(vm.cachedImages) { img in
+                                let tag = img.id + "||cached"
+                                SelectableImageRow(image: img, isCached: true, isSelected: vm.selectedImageId == tag) {
+                                    vm.selectedImageId = tag
+                                }
+                            }
+                        } header: {
+                            Text("Cached")
+                                .font(.headline)
                                 .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
                         }
                     }
-                    ForEach(vm.filteredOnlineImages) { img in
-                        ImageRow(image: img, isCached: false)
-                            .tag(img.id + "||online")
+                    Section {
+                        if vm.isLoadingSources || vm.isLoadingOnline {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Loading...")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                        }
+                        ForEach(vm.filteredOnlineImages) { img in
+                            let tag = img.id + "||online"
+                            SelectableImageRow(image: img, isCached: false, isSelected: vm.selectedImageId == tag) {
+                                vm.selectedImageId = tag
+                            }
+                        }
+                    } header: {
+                        Text("Online")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
                     }
                 }
             }
-            .listStyle(.bordered)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            )
             .padding(.horizontal, 16)
-
-            if let img = vm.resolvedSelectedImage {
-                Text(img.description.isEmpty ? "No description" : img.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 6)
-            }
 
             if !vm.errorMessage.isEmpty {
                 Text(vm.errorMessage)
@@ -268,6 +283,25 @@ private struct ImageRow: View {
     }
 }
 
+private struct SelectableImageRow: View {
+    let image: ImageEntry
+    let isCached: Bool
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        ImageRow(image: image, isCached: isCached)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect()
+            }
+    }
+}
+
 // MARK: - ViewModel
 
 enum CreateVmPage {
@@ -293,6 +327,9 @@ class CreateVmViewModel: ObservableObject {
     @Published var downloadStatusText = ""
     private var downloadCancelled = false
     private var downloadTask: Task<Void, Never>?
+    private var speedLastBytes: UInt64 = 0
+    private var speedLastTime: CFAbsoluteTime = 0
+    private var speedBytesPerSec: Double = 0
 
     // Confirm state
     @Published var selectedImage: ImageEntry?
@@ -379,7 +416,7 @@ class CreateVmViewModel: ObservableObject {
         Task {
             do {
                 let images = try await service.fetchImages(from: url)
-                let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+                let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "99.99.99"
                 onlineImages = service.filterImages(images, appVersion: appVersion)
             } catch {
                 errorMessage = "Failed to load images: \(error.localizedDescription)"
@@ -476,6 +513,10 @@ class CreateVmViewModel: ObservableObject {
         downloadStatusText = "Preparing..."
         errorMessage = ""
 
+        speedLastBytes = 0
+        speedLastTime = CFAbsoluteTimeGetCurrent()
+        speedBytesPerSec = 0
+
         downloadTask = Task {
             do {
                 try await service.downloadImage(entry, progress: { [weak self] fileIdx, totalFiles, fileName, downloaded, total in
@@ -484,10 +525,26 @@ class CreateVmViewModel: ObservableObject {
                         let fileProgress = total > 0 ? Double(downloaded) / Double(total) : 0
                         self.downloadProgress = fileProgress
 
+                        let now = CFAbsoluteTimeGetCurrent()
+                        let dt = now - self.speedLastTime
+                        if dt >= 0.5 {
+                            let db = Double(downloaded) - Double(self.speedLastBytes)
+                            if db > 0 {
+                                let instantSpeed = db / dt
+                                self.speedBytesPerSec = self.speedBytesPerSec > 0
+                                    ? self.speedBytesPerSec * 0.3 + instantSpeed * 0.7
+                                    : instantSpeed
+                            }
+                            self.speedLastBytes = downloaded
+                            self.speedLastTime = now
+                        }
+
                         var text = "File \(fileIdx + 1)/\(totalFiles): \(fileName)"
-                        text += "\n\(Int(fileProgress * 100))%"
-                        if total > 0 {
-                            text += "  \(formatSize(downloaded)) / \(formatSize(total))"
+                        text += "\n\(formatSize(downloaded)) / \(formatSize(total))"
+                        if self.speedBytesPerSec > 0 {
+                            text += "  ·  \(formatSize(UInt64(self.speedBytesPerSec)))/s"
+                            let remaining = total > downloaded ? Double(total - downloaded) / self.speedBytesPerSec : 0
+                            text += "  ·  \(formatDuration(remaining))"
                         }
                         self.downloadStatusText = text
                     }
@@ -579,6 +636,13 @@ private func formatSize(_ bytes: UInt64) -> String {
         return "\(bytes) \(units[0])"
     }
     return String(format: "%.1f %@", value, units[unit])
+}
+
+private func formatDuration(_ seconds: Double) -> String {
+    let s = Int(seconds)
+    if s < 60 { return "\(s)s" }
+    if s < 3600 { return "\(s / 60)m \(s % 60)s" }
+    return "\(s / 3600)h \((s % 3600) / 60)m"
 }
 
 // MARK: - Edit VM Dialog (unchanged)

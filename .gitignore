@@ -1,5 +1,6 @@
 build/
 out/
+/scripts/1/
 .deps/
 .wix/
 .vs/

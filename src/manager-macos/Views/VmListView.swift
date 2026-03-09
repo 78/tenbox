@@ -3,13 +3,24 @@ import SwiftUI
 struct VmListView: View {
     @EnvironmentObject var appState: AppState
 
+    private var sortedVms: [VmInfo] {
+        appState.vms.sorted { a, b in
+            let aPriority = a.state.sortPriority
+            let bPriority = b.state.sortPriority
+            if aPriority != bPriority {
+                return aPriority < bPriority
+            }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+    }
+
     var body: some View {
-        List(appState.vms, selection: $appState.selectedVmId) { vm in
+        List(sortedVms, selection: $appState.selectedVmId) { vm in
             VmRowView(vm: vm)
                 .tag(vm.id)
         }
         .listStyle(.sidebar)
-        .navigationTitle("TenBox")
+        .navigationTitle("TenBox 本地龙虾")
     }
 }
 

@@ -6,6 +6,10 @@ struct InfoView: View {
     @State private var showAddSheet = false
     @State private var showAddPortForwardSheet = false
 
+    private var vmDirectory: String {
+        (vm.diskPath as NSString).deletingLastPathComponent
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -27,23 +31,23 @@ struct InfoView: View {
                             Text("Memory").foregroundStyle(.secondary)
                             Text("\(vm.memoryMb) MB")
                         }
-                    }
-                    .padding(8)
-                }
-
-                GroupBox("Disk") {
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                         GridRow {
-                            Text("Image").foregroundStyle(.secondary)
-                            Text(vm.diskPath)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        GridRow {
-                            Text("Kernel").foregroundStyle(.secondary)
-                            Text(vm.kernelPath)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                            Text("Directory").foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Text(vmDirectory)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: 360, alignment: .leading)
+                                    .help(vmDirectory)
+                                Button {
+                                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: vmDirectory)
+                                } label: {
+                                    Image(systemName: "folder")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Open in Finder")
+                            }
                         }
                     }
                     .padding(8)

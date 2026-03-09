@@ -9,11 +9,11 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             VmListView()
-                .toolbar(removing: .sidebarToggle)
         } detail: {
             if let vmId = appState.selectedVmId,
                let vm = appState.vms.first(where: { $0.id == vmId }) {
                 VmDetailView(vm: vm, appState: appState)
+                    .id(vmId)
             } else {
                 Text("Select a VM")
                     .font(.title2)
@@ -21,12 +21,11 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationSplitViewStyle(.balanced)
-        .onChange(of: columnVisibility) { _, newValue in
+        .onChange(of: columnVisibility, perform: { newValue in
             if newValue != .all {
                 columnVisibility = .all
             }
-        }
+        })
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(action: { appState.showCreateVmDialog = true }) {

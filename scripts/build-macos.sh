@@ -38,6 +38,8 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+ARCH=$(uname -m)  # arm64 or x86_64
+
 BUILD_DIR="$ROOT_DIR/build"
 MANAGER_SRC="$ROOT_DIR/src/manager-macos"
 APP_DIR="$BUILD_DIR/TenBox.app"
@@ -110,9 +112,24 @@ if [ -n "$BUNDLE_PATH" ] && [ -d "$BUNDLE_PATH" ]; then
     echo "  -> Copied resource bundle"
 fi
 
-# Copy icon
+# Convert icon.png to AppIcon.icns (macOS requires .icns format)
 if [ -f "$MANAGER_SRC/Resources/icon.png" ]; then
-    cp "$MANAGER_SRC/Resources/icon.png" "$APP_DIR/Contents/Resources/"
+    ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
+    rm -rf "$ICONSET_DIR"
+    mkdir -p "$ICONSET_DIR"
+    sips -z 16 16     "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_16x16.png"      >/dev/null
+    sips -z 32 32     "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_16x16@2x.png"   >/dev/null
+    sips -z 32 32     "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_32x32.png"      >/dev/null
+    sips -z 64 64     "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_32x32@2x.png"   >/dev/null
+    sips -z 128 128   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_128x128.png"    >/dev/null
+    sips -z 256 256   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_128x128@2x.png" >/dev/null
+    sips -z 256 256   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_256x256.png"    >/dev/null
+    sips -z 512 512   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
+    sips -z 512 512   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_512x512.png"    >/dev/null
+    cp "$MANAGER_SRC/Resources/icon.png"                       "$ICONSET_DIR/icon_512x512@2x.png"
+    iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
+    rm -rf "$ICONSET_DIR"
+    echo "  -> Generated AppIcon.icns from icon.png"
 fi
 
 # Compile Metal shaders if present
@@ -138,6 +155,10 @@ if [ -n "$SPARKLE_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
     echo "  -> Copied Sparkle.framework"
 fi
 
+# Add rpath so the binary can find Sparkle.framework at runtime
+install_name_tool -add_rpath "@loader_path/../Frameworks" \
+    "$APP_DIR/Contents/MacOS/TenBoxManager" 2>/dev/null || true
+
 # Sign the app bundle
 echo "  -> Signing TenBox.app..."
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID"; then
@@ -158,7 +179,7 @@ echo "  -> $APP_DIR"
 
 # ── Step 4: Create ZIP for Sparkle updates + EdDSA signature ────────────────
 echo ""
-ZIP_PATH="$BUILD_DIR/TenBox_$VERSION.zip"
+ZIP_PATH="$BUILD_DIR/TenBox_${VERSION}_${ARCH}.zip"
 echo "Creating Sparkle update ZIP..."
 ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
 echo "  -> $ZIP_PATH"
