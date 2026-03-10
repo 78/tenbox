@@ -12,7 +12,7 @@
       "No Ocean Needed, Just a Box",
       "Farm Local, Keep Your Data Home"
     ],
-    "description": "Create Agent VM instances with one click. Supports OpenClaw, CoPaw and other popular AI Agent projects. Simple GUI, no complex setup required.",
+    "description": "AI Agents run in an isolated computer — they can only see files you explicitly allow, so your privacy and data stay protected. Supports OpenClaw, CoPaw and more. One click to create, as easy as installing an app.",
     "cta": "Download Now",
     "cta_win": "Windows",
     "cta_mac": "macOS",
@@ -24,43 +24,43 @@
   "features": {
     "title": "Features",
     "oneclick": {
-      "title": "One-Click Agent VM",
-      "desc": "Supports OpenClaw, CoPaw and other popular AI Agent projects. Pick an image and create a VM instance instantly."
+      "title": "One-Click Setup",
+      "desc": "Supports OpenClaw, CoPaw and other popular AI Agent projects. Just click and create — no technical skills required."
     },
     "gui": {
-      "title": "Graphical Interface",
-      "desc": "Intuitive GUI — no command line needed, no complex installation process to learn."
+      "title": "Visual Interface",
+      "desc": "Fully graphical, what you see is what you get. No command line, no complex config — anyone can get started."
     },
     "security": {
-      "title": "Secure Isolation",
-      "desc": "VM isolation ensures Agent exclusivity. Grant access only to authorized files, keeping your data safe."
+      "title": "Privacy & Security",
+      "desc": "Agents run in an isolated sandbox, completely separated from your system. Only the files you explicitly authorize are visible — your private data never leaks."
     },
     "native": {
-      "title": "Native Virtualization",
-      "desc": "Built on Windows Hypervisor Platform (WHVP) with hardware-accelerated virtualization for excellent performance."
+      "title": "Native Performance",
+      "desc": "Leverages built-in virtualization on Windows and macOS — no third-party software needed. Fast and lightweight."
     },
     "virtio": {
-      "title": "High-Performance VirtIO",
-      "desc": "Display output, audio playback, shared folders, and bidirectional clipboard — a seamless experience."
+      "title": "Seamless Experience",
+      "desc": "See the screen, hear the audio, share files, copy and paste both ways — feels just like using a local app."
     },
     "network": {
-      "title": "Networking",
-      "desc": "Built-in NAT networking, DHCP server, and port forwarding — works out of the box."
+      "title": "Instant Connectivity",
+      "desc": "Networking is set up automatically. Your Agent is online the moment it starts — zero manual configuration."
     }
   },
   "howitworks": {
     "title": "Get Started in 3 Steps",
     "step1": {
       "title": "Download & Install",
-      "desc": "Download the TenBox installer and install it on your Windows system."
+      "desc": "Download TenBox and install it like any other app. Works on Windows and macOS."
     },
     "step2": {
-      "title": "Create an Agent VM",
-      "desc": "Pick an Agent image (OpenClaw / CoPaw), create a VM with one click."
+      "title": "Pick an Agent",
+      "desc": "Choose the AI Agent you need (OpenClaw / CoPaw and more), then create it with one click."
     },
     "step3": {
       "title": "Start Using",
-      "desc": "The VM starts automatically — use your Agent right from the graphical interface."
+      "desc": "It launches automatically — open it up and start working with your Agent right away."
     }
   },
   "footer": {

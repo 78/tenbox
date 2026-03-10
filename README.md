@@ -1,6 +1,8 @@
 # TenBox
 
-A cross-platform Virtual Machine Monitor (VMM) with a shared C++ runtime and native managers for Windows and macOS. TenBox runs full Linux desktop environments with hardware-accelerated virtualization, GPU display output, audio, shared folders, and clipboard integration. Windows hosts use WHVP with a Win32 manager; macOS Apple Silicon hosts use Hypervisor Framework with a SwiftUI/AppKit manager.
+TenBox lets you run AI agents safely on your personal computer. Each agent runs inside a secure, isolated virtual machine — it can only access the files you explicitly authorize, keeping your privacy and data protected.
+
+Under the hood, TenBox is a cross-platform Virtual Machine Monitor (VMM) with a shared C++ runtime and native managers for Windows and macOS. It runs full Linux desktop environments with hardware-accelerated virtualization, GPU display output, audio, shared folders, and clipboard integration. Windows hosts use WHVP with a Win32 manager; macOS Apple Silicon hosts use Hypervisor Framework with a SwiftUI/AppKit manager.
 
 ## Screenshots
 

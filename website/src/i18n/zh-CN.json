@@ -12,7 +12,7 @@
       "养虾不用海，只要一个 Box",
       "本地养虾，数据不出门"
     ],
-    "description": "一键创建 Agent VM 实例，支持 OpenClaw、CoPaw 等主流 AI Agent 项目。图形界面操作，无需繁琐的安装过程。",
+    "description": "让你的\"龙虾\"在安全隔离的虚拟机中运行，保护你的隐私和数据。支持 OpenClaw、CoPaw 等主流项目，像装 App 一样简单。",
     "cta": "立即下载",
     "cta_win": "Windows 下载",
     "cta_mac": "macOS 下载",
@@ -24,43 +24,43 @@
   "features": {
     "title": "核心特性",
     "oneclick": {
-      "title": "一键创建 Agent VM",
-      "desc": "支持 OpenClaw、CoPaw 等主流 AI Agent 项目，选择镜像即可一键创建虚拟机实例。"
+      "title": "一键创建",
+      "desc": "支持 OpenClaw、CoPaw 等主流 AI Agent 项目，点一下就能创建，不需要任何技术背景。"
     },
     "gui": {
-      "title": "图形界面",
-      "desc": "直观的图形界面操作，无需命令行，无需学习繁琐的安装过程。"
+      "title": "可视化操作",
+      "desc": "全程图形界面，所见即所得。告别命令行和复杂配置，小白也能轻松上手。"
     },
     "security": {
-      "title": "安全隔离",
-      "desc": "虚拟机保证 Agent 对系统的独占性，授权指定文件对 Agent 可见，保护用户数据安全。"
+      "title": "隐私安全",
+      "desc": "Agent 在独立沙箱中运行，与你的系统完全隔离。只有你主动授权的文件才对 Agent 可见，隐私数据绝不泄露。"
     },
     "native": {
-      "title": "原生虚拟化",
-      "desc": "基于 Windows Hypervisor Platform (WHVP)，原生硬件加速虚拟化，性能出色。"
+      "title": "原生性能",
+      "desc": "直接调用 Windows 和 macOS 系统内置的虚拟化能力，不依赖第三方软件，运行快、占用少。"
     },
     "virtio": {
-      "title": "高性能 VirtIO 设备",
-      "desc": "显示输出、音频播放、共享文件夹、剪贴板双向同步，体验流畅。"
+      "title": "体验流畅",
+      "desc": "看得到画面、听得到声音、文件随时共享、复制粘贴双向互通，和用本地软件一样顺畅。"
     },
     "network": {
-      "title": "网络支持",
-      "desc": "内置 NAT 网络、DHCP 服务器和端口转发，开箱即用。"
+      "title": "联网即用",
+      "desc": "自动配置网络环境，Agent 开箱就能上网，无需手动设置。"
     }
   },
   "howitworks": {
     "title": "三步开始",
     "step1": {
       "title": "下载安装",
-      "desc": "下载 TenBox 安装包，一键安装到 Windows 系统。"
+      "desc": "下载 TenBox，像普通软件一样安装，支持 Windows 和 macOS。"
     },
     "step2": {
-      "title": "创建 Agent VM",
-      "desc": "选择 Agent 镜像（OpenClaw / CoPaw 等），一键创建虚拟机。"
+      "title": "选择 Agent",
+      "desc": "挑选你需要的 AI Agent（OpenClaw / CoPaw 等），点一下即可创建。"
     },
     "step3": {
       "title": "开始使用",
-      "desc": "VM 自动启动，直接在图形界面中使用 Agent。"
+      "desc": "自动启动，打开就能用，在图形界面中直接操作你的 Agent。"
     }
   },
   "footer": {
