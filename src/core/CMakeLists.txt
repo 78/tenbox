@@ -17,6 +17,10 @@ set(TENBOX_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/vdagent/vdagent_handler.cpp
     ${CMAKE_SOURCE_DIR}/src/core/guest_agent/guest_agent_handler.cpp
     ${CMAKE_SOURCE_DIR}/src/core/net/net_backend.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/net/net_dhcp.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/net/net_nat.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/net/net_icmp.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/net/net_port_forward.cpp
 )
 
 # Architecture-specific sources

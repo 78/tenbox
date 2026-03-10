@@ -99,7 +99,6 @@ class CoreAudioPlayer {
 
     // Spin the RunLoop while AudioQueue is active
     private func runAudioLoop() {
-        guard let rl = audioRunLoop else { return }
         while self.isRunning && !self.queueStopped {
             dataLock.lock()
             let recfg = needsReconfigure

@@ -1,87 +1,26 @@
-// ============================================================
-// Socket compatibility layer
-// ============================================================
+// NetBackend: lifecycle, lwIP init, libuv event loop, frame dispatch.
 
-#ifdef _WIN32
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#define FD_SETSIZE 1024
-#endif
-
+#include "core/net/net_compat.h"
 #include "core/net/net_backend.h"
+#include "core/net/net_packet.h"
 #include "core/device/virtio/virtio_net.h"
 #include "core/vmm/types.h"
-
-#ifdef _WIN32
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #include <iphlpapi.h>
-  using SocketHandle = SOCKET;
-  using socklen_t = int;
-  #define SOCK_CLOSE(s)   closesocket(s)
-  #define SOCK_INVALID    INVALID_SOCKET
-  #define SOCK_ERR        SOCKET_ERROR
-  #define SOCK_ERRNO      WSAGetLastError()
-  #define SOCK_WOULDBLOCK WSAEWOULDBLOCK
-  #define SOCK_INPROGRESS WSAEWOULDBLOCK
-  #define SOCK_SETNONBLOCK(s) do { u_long nb_ = 1; ioctlsocket((s), FIONBIO, &nb_); } while(0)
-  #define SOCK_SELECT_NFDS 0
-  #define SOCK_SLEEP_MS(ms) Sleep(ms)
-  #define SOCK_CAST(p) reinterpret_cast<char*>(p)
-  #define SOCK_CCAST(p) reinterpret_cast<const char*>(p)
-#else
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  #include <fcntl.h>
-  #include <unistd.h>
-  #include <poll.h>
-  #include <errno.h>
-  #include <time.h>
-  using SocketHandle = int;
-  #define SOCK_CLOSE(s)   close(s)
-  #define SOCK_INVALID    (-1)
-  #define SOCK_ERR        (-1)
-  #define SOCK_ERRNO      errno
-  #define SOCK_WOULDBLOCK EWOULDBLOCK
-  #define SOCK_INPROGRESS EINPROGRESS
-  #define SOCK_SETNONBLOCK(s) do { int fl_ = fcntl((s), F_GETFL, 0); fcntl((s), F_SETFL, fl_ | O_NONBLOCK); } while(0)
-  #define SOCK_SELECT_NFDS(fds) ((int)(fds) + 1)
-  #define SOCK_SLEEP_MS(ms) usleep((ms) * 1000)
-  #define SOCK_CAST(p) reinterpret_cast<char*>(p)
-  #define SOCK_CCAST(p) reinterpret_cast<const char*>(p)
-#endif
-
-// Windows SDK <iprtrmib.h> (via <iphlpapi.h>) defines IP_STATS, ICMP_STATS,
-// TCP_STATS, UDP_STATS, IP6_STATS as enum values.  lwIP opt.h redefines them
-// as preprocessor macros.  Undefine the Windows versions to avoid C4005.
-#undef IP_STATS
-#undef ICMP_STATS
-#undef TCP_STATS
-#undef UDP_STATS
-#undef IP6_STATS
 
 extern "C" {
 #include "lwip/init.h"
 #include "lwip/tcp.h"
-#include "lwip/udp.h"
 #include "lwip/timeouts.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
-#include "lwip/ip4.h"
 #include "lwip/pbuf.h"
 #include "netif/ethernet.h"
 }
 
 #include <uv.h>
-
 #include <cstring>
 #include <memory>
 #include <algorithm>
 
-#ifdef _WIN32
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "iphlpapi.lib")
-#endif
 
 // ============================================================
 // Monotonic time (milliseconds)
@@ -97,161 +36,6 @@ static uint64_t GetMonotonicMs() {
            static_cast<uint64_t>(ts.tv_nsec) / 1000000;
 #endif
 }
-
-// ============================================================
-// Host DNS resolver lookup
-// ============================================================
-
-static uint32_t GetHostDnsServer() {
-#ifdef _WIN32
-    ULONG buf_len = sizeof(FIXED_INFO);
-    auto buf = std::make_unique<uint8_t[]>(buf_len);
-    DWORD ret = GetNetworkParams(reinterpret_cast<FIXED_INFO*>(buf.get()), &buf_len);
-    if (ret == ERROR_BUFFER_OVERFLOW) {
-        buf = std::make_unique<uint8_t[]>(buf_len);
-        ret = GetNetworkParams(reinterpret_cast<FIXED_INFO*>(buf.get()), &buf_len);
-    }
-    if (ret == NO_ERROR) {
-        auto* info = reinterpret_cast<FIXED_INFO*>(buf.get());
-        for (auto* entry = &info->DnsServerList; entry; entry = entry->Next) {
-            unsigned long addr = inet_addr(entry->IpAddress.String);
-            if (addr == INADDR_NONE || addr == 0)
-                continue;
-            if ((ntohl(addr) >> 24) == 127)
-                continue;
-            return ntohl(addr);
-        }
-    }
-#else
-    // Parse /etc/resolv.conf for nameserver entries
-    FILE* fp = fopen("/etc/resolv.conf", "r");
-    if (fp) {
-        char line[256];
-        while (fgets(line, sizeof(line), fp)) {
-            char ns_str[64];
-            if (sscanf(line, "nameserver %63s", ns_str) == 1) {
-                struct in_addr addr;
-                if (inet_pton(AF_INET, ns_str, &addr) == 1) {
-                    uint32_t ip = ntohl(addr.s_addr);
-                    if ((ip >> 24) != 127 && ip != 0) {
-                        fclose(fp);
-                        return ip;
-                    }
-                }
-            }
-        }
-        fclose(fp);
-    }
-#endif
-    return 0x08080808; // fallback: 8.8.8.8
-}
-
-// ============================================================
-// Packet header structures (host byte order helpers)
-// ============================================================
-
-#pragma pack(push, 1)
-struct EthHdr {
-    uint8_t  dst[6];
-    uint8_t  src[6];
-    uint16_t type; // network byte order
-};
-
-struct IpHdr {
-    uint8_t  ver_ihl;
-    uint8_t  tos;
-    uint16_t total_len;
-    uint16_t id;
-    uint16_t frag_off;
-    uint8_t  ttl;
-    uint8_t  proto;
-    uint16_t checksum;
-    uint32_t src_ip;
-    uint32_t dst_ip;
-};
-
-struct TcpHdr {
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint32_t seq;
-    uint32_t ack;
-    uint8_t  data_off;
-    uint8_t  flags;
-    uint16_t window;
-    uint16_t checksum;
-    uint16_t urgent;
-};
-
-struct UdpHdr {
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t length;
-    uint16_t checksum;
-};
-
-struct DhcpMsg {
-    uint8_t  op;
-    uint8_t  htype;
-    uint8_t  hlen;
-    uint8_t  hops;
-    uint32_t xid;
-    uint16_t secs;
-    uint16_t flags;
-    uint32_t ciaddr;
-    uint32_t yiaddr;
-    uint32_t siaddr;
-    uint32_t giaddr;
-    uint8_t  chaddr[16];
-    uint8_t  sname[64];
-    uint8_t  file[128];
-    uint32_t magic; // 0x63825363
-};
-#pragma pack(pop)
-
-// ============================================================
-// Checksum utilities
-// ============================================================
-
-static uint16_t ChecksumFold(uint32_t sum) {
-    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
-    return static_cast<uint16_t>(~sum);
-}
-
-static uint32_t ChecksumPartial(const void* data, int len) {
-    const uint8_t* p = static_cast<const uint8_t*>(data);
-    uint32_t sum = 0;
-    for (int i = 0; i + 1 < len; i += 2)
-        sum += (p[i] << 8) | p[i + 1];
-    if (len & 1)
-        sum += p[len - 1] << 8;
-    return sum;
-}
-
-static void RecalcIpChecksum(IpHdr* ip) {
-    ip->checksum = 0;
-    int hdr_len = (ip->ver_ihl & 0xF) * 4;
-    uint32_t sum = ChecksumPartial(ip, hdr_len);
-    ip->checksum = htons(ChecksumFold(sum));
-}
-
-// Incremental checksum update for changing a 32-bit value and a 16-bit value
-static void IncrementalCksumUpdate(uint16_t* cksum,
-                                   uint32_t old_ip, uint32_t new_ip,
-                                   uint16_t old_port, uint16_t new_port) {
-    uint32_t sum = static_cast<uint16_t>(~ntohs(*cksum));
-    // Subtract old values, add new values (in network byte order, processed as 16-bit words)
-    sum += static_cast<uint16_t>(~(ntohl(old_ip) >> 16) & 0xFFFF);
-    sum += (ntohl(new_ip) >> 16) & 0xFFFF;
-    sum += static_cast<uint16_t>(~(ntohl(old_ip) & 0xFFFF));
-    sum += ntohl(new_ip) & 0xFFFF;
-    sum += static_cast<uint16_t>(~ntohs(old_port) & 0xFFFF);
-    sum += ntohs(new_port);
-    *cksum = htons(ChecksumFold(sum));
-}
-
-// ============================================================
-// lwIP sys_now (required for NO_SYS=1 timeout management)
-// ============================================================
 
 extern "C" u32_t sys_now(void) {
     return static_cast<u32_t>(GetMonotonicMs());
@@ -275,18 +59,15 @@ static err_t LwipNetifInit(struct netif* nif) {
 
 static err_t LwipLinkOutput(struct netif* nif, struct pbuf* p) {
     auto* backend = static_cast<NetBackend*>(nif->state);
-    // Linearize pbuf chain
     std::vector<uint8_t> buf(p->tot_len);
     pbuf_copy_partial(p, buf.data(), p->tot_len, 0);
-
-    // Reverse-rewrite NAT responses before injecting to guest
     backend->ReverseRewrite(buf.data(), static_cast<uint32_t>(buf.size()));
     backend->InjectFrame(buf.data(), static_cast<uint32_t>(buf.size()));
     return ERR_OK;
 }
 
 // ============================================================
-// NetBackend lifecycle
+// Lifecycle
 // ============================================================
 
 NetBackend::NetBackend() {
@@ -309,7 +90,7 @@ bool NetBackend::Start(VirtioNetDevice* dev,
     virtio_net_ = dev;
     irq_callback_ = std::move(irq_cb);
     for (auto& f : forwards)
-        port_forwards_.push_back({f.host_port, f.guest_port});
+        port_forwards_.emplace_back(PfEntry{this, f.host_port, f.guest_port});
 
     running_ = true;
     net_thread_ = std::thread(&NetBackend::NetworkThread, this);
@@ -344,9 +125,7 @@ std::vector<uint16_t> NetBackend::UpdatePortForwardsSync(const std::vector<PortF
     lock.unlock();
     if (running_) uv_async_send(&pf_update_wakeup_);
     lock.lock();
-    pf_update_cv_.wait(lock, [this] {
-        return !pf_update_sync_;
-    });
+    pf_update_cv_.wait(lock, [this] { return !pf_update_sync_; });
     return std::move(pf_update_failed_ports_);
 }
 
@@ -359,8 +138,56 @@ void NetBackend::EnqueueTx(const uint8_t* frame, uint32_t len) {
     if (running_) uv_async_send(&tx_wakeup_);
 }
 
-// Forward declaration (defined in TCP NAT callbacks section)
-extern NetBackend* g_net_backend;
+void NetBackend::InjectFrame(const uint8_t* frame, uint32_t len) {
+    if (!link_up_) return;
+    virtio_net_->InjectRx(frame, len);
+}
+
+// ============================================================
+// Consolidated teardown helpers
+// ============================================================
+
+void NetBackend::CloseHostSocket(NatEntry* e) {
+    if (e->host_socket != static_cast<uintptr_t>(SOCK_INVALID)) {
+        SOCK_CLOSE(static_cast<SocketHandle>(e->host_socket));
+        e->host_socket = static_cast<uintptr_t>(SOCK_INVALID);
+    }
+}
+
+void NetBackend::DetachAndCloseLwipPcb(NatEntry* e) {
+    if (e->conn_pcb) {
+        auto* pcb = static_cast<struct tcp_pcb*>(e->conn_pcb);
+        tcp_arg(pcb, nullptr);
+        tcp_recv(pcb, nullptr);
+        tcp_err(pcb, nullptr);
+        tcp_close(pcb);
+        e->conn_pcb = nullptr;
+    }
+}
+
+void NetBackend::TeardownNatEntry(NatEntry* e) {
+    e->poll.Stop();
+    CloseHostSocket(e);
+    DetachAndCloseLwipPcb(e);
+    e->pending_to_host.clear();
+    e->state = NatState::Closed;
+}
+
+void NetBackend::TeardownPfConn(PfEntry::Conn& c) {
+    c.poll.Stop();
+    if (c.host_sock != ~(uintptr_t)0) {
+        SOCK_CLOSE(static_cast<SocketHandle>(c.host_sock));
+        c.host_sock = ~(uintptr_t)0;
+    }
+    if (c.guest_pcb) {
+        auto* pcb = static_cast<struct tcp_pcb*>(c.guest_pcb);
+        tcp_arg(pcb, nullptr);
+        tcp_recv(pcb, nullptr);
+        tcp_err(pcb, nullptr);
+        tcp_close(pcb);
+        c.guest_pcb = nullptr;
+    }
+}
 
 // ============================================================
 // libuv callbacks
@@ -385,7 +212,7 @@ void NetBackend::OnCleanupTimer(uv_timer_t* handle) {
     for (auto& pf : self->port_forwards_) {
         pf.conns.remove_if([](const PfEntry::Conn& c) {
             return c.host_sock == ~(uintptr_t)0 && c.guest_pcb == nullptr
-                && !c.poll_active && !c.poll_closing;
+                && !c.poll.active() && !c.poll.closing();
         });
     }
 }
@@ -412,11 +239,8 @@ void NetBackend::OnStopSignal(uv_async_t* handle) {
     auto* self = static_cast<NetBackend*>(handle->data);
 
     for (auto& e : self->nat_entries_) {
-        self->CloseNatPoll(e.get());
-        if (e->host_socket != static_cast<uintptr_t>(SOCK_INVALID)) {
-            SOCK_CLOSE(static_cast<SocketHandle>(e->host_socket));
-            e->host_socket = static_cast<uintptr_t>(SOCK_INVALID);
-        }
+        e->poll.Close();
+        self->CloseHostSocket(e.get());
         if (e->listen_pcb) { tcp_close(static_cast<struct tcp_pcb*>(e->listen_pcb)); e->listen_pcb = nullptr; }
         if (e->conn_pcb) { tcp_abort(static_cast<struct tcp_pcb*>(e->conn_pcb)); e->conn_pcb = nullptr; }
     }
@@ -431,20 +255,13 @@ void NetBackend::OnStopSignal(uv_async_t* handle) {
     }
 
     for (auto& pf : self->port_forwards_) {
-        if (pf.listener_poll_active) {
-            uv_poll_stop(&pf.listener_poll);
-            pf.listener_poll_active = false;
-        }
-        if (!pf.listener_poll_closing && pf.listener_poll_inited) {
-            pf.listener_poll_closing = true;
-            uv_close(reinterpret_cast<uv_handle_t*>(&pf.listener_poll), nullptr);
-        }
+        pf.listener_poll.Close();
         if (pf.listener != ~(uintptr_t)0) {
             SOCK_CLOSE(static_cast<SocketHandle>(pf.listener));
             pf.listener = ~(uintptr_t)0;
         }
         for (auto& c : pf.conns) {
-            self->ClosePfConnPoll(c);
+            c.poll.Close();
             if (c.host_sock != ~(uintptr_t)0) {
                 SOCK_CLOSE(static_cast<SocketHandle>(c.host_sock));
                 c.host_sock = ~(uintptr_t)0;
@@ -461,51 +278,39 @@ void NetBackend::OnStopSignal(uv_async_t* handle) {
     uv_walk(&self->loop_, CloseWalkCb, nullptr);
 }
 
+// ============================================================
+// NAT poll management
+// ============================================================
+
 void NetBackend::UpdateNatPoll(NatEntry* entry) {
-    if (entry->poll_closing) return;
+    if (entry->poll.closing()) return;
     SocketHandle s = static_cast<SocketHandle>(entry->host_socket);
     if (s == SOCK_INVALID) {
-        StopNatPoll(entry);
+        entry->poll.Stop();
         return;
     }
     int events = UV_READABLE;
-    if (entry->connecting || !entry->pending_to_host.empty())
+    if (entry->state == NatState::Connecting || !entry->pending_to_host.empty())
         events |= UV_WRITABLE;
 
-    if (!entry->poll_active) {
-        uv_poll_init_socket(&loop_, &entry->poll_handle, s);
-        entry->poll_handle.data = entry;
-        entry->poll_inited = true;
-        entry->poll_active = true;
+    if (!entry->poll.active()) {
+        entry->poll.Init(&loop_, s);
     }
-    uv_poll_start(&entry->poll_handle, events, [](uv_poll_t* h, int status, int events) {
+    entry->poll.Start(events, [](uv_poll_t* h, int status, int events) {
         auto* e = static_cast<NatEntry*>(h->data);
-        g_net_backend->OnNatPollEvent(e, status, events);
-    });
+        e->backend->OnNatPollEvent(e, status, events);
+    }, entry);
 }
 
-void NetBackend::StopNatPoll(NatEntry* entry) {
-    if (entry->poll_active) {
-        uv_poll_stop(&entry->poll_handle);
-        entry->poll_active = false;
-    }
-}
-
-void NetBackend::CloseNatPoll(NatEntry* entry) {
-    if (entry->poll_closing || !entry->poll_inited) return;
-    if (entry->poll_active) {
-        uv_poll_stop(&entry->poll_handle);
-        entry->poll_active = false;
-    }
-    entry->poll_closing = true;
-    uv_close(reinterpret_cast<uv_handle_t*>(&entry->poll_handle), nullptr);
-}
+// ============================================================
+// PfConn poll management
+// ============================================================
 
 void NetBackend::UpdatePfConnPoll(PfEntry::Conn& conn) {
-    if (conn.poll_closing) return;
+    if (conn.poll.closing()) return;
     SocketHandle s = static_cast<SocketHandle>(conn.host_sock);
     if (s == SOCK_INVALID || static_cast<uintptr_t>(s) == ~(uintptr_t)0) {
-        StopPfConnPoll(conn);
+        conn.poll.Stop();
         return;
     }
     int events = UV_READABLE;
@@ -514,33 +319,13 @@ void NetBackend::UpdatePfConnPoll(PfEntry::Conn& conn) {
     if (!conn.pending_to_guest.empty())
         events &= ~UV_READABLE;  // back-pressure
 
-    if (!conn.poll_active) {
-        uv_poll_init_socket(&loop_, &conn.poll_handle, s);
-        conn.poll_handle.data = &conn;
-        conn.poll_inited = true;
-        conn.poll_active = true;
+    if (!conn.poll.active()) {
+        conn.poll.Init(&loop_, s);
     }
-    uv_poll_start(&conn.poll_handle, events, [](uv_poll_t* h, int status, int events) {
+    conn.poll.Start(events, [](uv_poll_t* h, int status, int events) {
         auto* c = static_cast<PfEntry::Conn*>(h->data);
-        g_net_backend->OnPfConnPollEvent(c, status, events);
-    });
-}
-
-void NetBackend::StopPfConnPoll(PfEntry::Conn& conn) {
-    if (conn.poll_active) {
-        uv_poll_stop(&conn.poll_handle);
-        conn.poll_active = false;
-    }
-}
-
-void NetBackend::ClosePfConnPoll(PfEntry::Conn& conn) {
-    if (conn.poll_closing || !conn.poll_inited) return;
-    if (conn.poll_active) {
-        uv_poll_stop(&conn.poll_handle);
-        conn.poll_active = false;
-    }
-    conn.poll_closing = true;
-    uv_close(reinterpret_cast<uv_handle_t*>(&conn.poll_handle), nullptr);
+        c->backend->OnPfConnPollEvent(c, status, events);
+    }, &conn);
 }
 
 // ============================================================
@@ -592,13 +377,16 @@ void NetBackend::NetworkThread() {
 
     uv_run(&loop_, UV_RUN_DEFAULT);
 
-    // All handles are closed now; safe to free objects with embedded handles.
     nat_entries_.clear();
     for (auto& pf : port_forwards_)
         pf.conns.clear();
 
     uv_loop_close(&loop_);
 }
+
+// ============================================================
+// TX frame dispatch
+// ============================================================
 
 void NetBackend::ProcessPendingTx() {
     std::vector<std::vector<uint8_t>> frames;
@@ -610,14 +398,13 @@ void NetBackend::ProcessPendingTx() {
     for (auto& frame : frames) {
         if (frame.size() < sizeof(EthHdr)) continue;
 
-        // Handle ARP and DHCP before lwIP
         if (HandleArpOrDhcp(frame.data(), static_cast<uint32_t>(frame.size())))
             continue;
 
         auto* eth = reinterpret_cast<EthHdr*>(frame.data());
         uint16_t ethertype = ntohs(eth->type);
 
-        // Feed ARP frames to lwIP so it can reply with gateway MAC
+        // Feed ARP frames to lwIP
         if (ethertype == 0x0806) {
             struct pbuf* p = pbuf_alloc(PBUF_RAW, static_cast<u16_t>(frame.size()), PBUF_RAM);
             if (p) {
@@ -628,13 +415,13 @@ void NetBackend::ProcessPendingTx() {
             continue;
         }
 
-        if (ethertype != 0x0800) continue; // Only IPv4 beyond this point
+        if (ethertype != 0x0800) continue;
         if (frame.size() < sizeof(EthHdr) + sizeof(IpHdr)) continue;
 
         auto* ip = reinterpret_cast<IpHdr*>(frame.data() + sizeof(EthHdr));
         uint32_t dst = ntohl(ip->dst_ip);
 
-        // Packets to the gateway itself: feed directly to lwIP (ping, etc.)
+        // Packets to gateway: feed directly to lwIP
         if (dst == kGatewayIp) {
             struct pbuf* p = pbuf_alloc(PBUF_RAW, static_cast<u16_t>(frame.size()), PBUF_RAM);
             if (p) {
@@ -645,7 +432,7 @@ void NetBackend::ProcessPendingTx() {
             continue;
         }
 
-        // External destination: NAT relay via host socket
+        // External destination: NAT relay
         uint32_t ip_hdr_len = (ip->ver_ihl & 0xF) * 4;
 
         if (ip->proto == IPPROTO_TCP) {
@@ -672,7 +459,6 @@ void NetBackend::ProcessPendingTx() {
             uint16_t g_dport = ntohs(udp->dst_port);
             uint32_t g_dip   = ntohl(ip->dst_ip);
 
-            // Direct relay: extract UDP payload and send via Winsock
             uint32_t udp_off = sizeof(EthHdr) + ip_hdr_len + sizeof(UdpHdr);
             uint32_t payload_len = static_cast<uint32_t>(frame.size()) - udp_off;
 
@@ -683,7 +469,7 @@ void NetBackend::ProcessPendingTx() {
                 if (!entry) continue;
             }
 
-            if (entry->host_socket != SOCK_INVALID && payload_len > 0) {
+            if (entry->host_socket != static_cast<uintptr_t>(SOCK_INVALID) && payload_len > 0) {
                 struct sockaddr_in dest{};
                 dest.sin_family = AF_INET;
                 dest.sin_addr.s_addr = htonl(entry->real_dst_ip);
@@ -696,7 +482,6 @@ void NetBackend::ProcessPendingTx() {
             }
 
         } else if (ip->proto == IPPROTO_ICMP) {
-            // ICMP relay via raw socket
             uint32_t icmp_off = sizeof(EthHdr) + ip_hdr_len;
             uint32_t icmp_len = static_cast<uint32_t>(frame.size()) - icmp_off;
             if (icmp_len < 8) continue;
@@ -705,1146 +490,4 @@ void NetBackend::ProcessPendingTx() {
                           frame.data() + icmp_off, icmp_len);
         }
     }
-}
-
-// ============================================================
-// ARP proxy + DHCP server (handled before lwIP)
-// ============================================================
-
-bool NetBackend::HandleArpOrDhcp(const uint8_t* frame, uint32_t len) {
-    auto* eth = reinterpret_cast<const EthHdr*>(frame);
-
-    // ARP handling: respond to any ARP request with gateway MAC
-    // (lwIP handles ARP for its own IP, but we also need proxy ARP
-    //  for the case where guest ARPs for the gateway before lwIP is ready)
-    // Actually, let lwIP handle all ARP by passing through.
-    // We only intercept DHCP here.
-
-    if (ntohs(eth->type) != 0x0800) return false; // Let non-IP through
-    if (len < sizeof(EthHdr) + sizeof(IpHdr) + sizeof(UdpHdr)) return false;
-
-    auto* ip = reinterpret_cast<const IpHdr*>(frame + sizeof(EthHdr));
-    if (ip->proto != IPPROTO_UDP) return false;
-
-    auto* udp = reinterpret_cast<const UdpHdr*>(
-        frame + sizeof(EthHdr) + (ip->ver_ihl & 0xF) * 4);
-    if (ntohs(udp->dst_port) != 67) return false; // Not DHCP
-
-    // Parse DHCP message
-    uint32_t udp_off = sizeof(EthHdr) + (ip->ver_ihl & 0xF) * 4 + sizeof(UdpHdr);
-    if (len < udp_off + sizeof(DhcpMsg)) return false;
-    auto* dhcp = reinterpret_cast<const DhcpMsg*>(frame + udp_off);
-
-    if (ntohl(dhcp->magic) != 0x63825363) return false;
-
-    // Find DHCP message type option
-    uint8_t msg_type = 0;
-    uint32_t req_ip = 0;
-    const uint8_t* opts = frame + udp_off + sizeof(DhcpMsg);
-    uint32_t opts_len = len - udp_off - sizeof(DhcpMsg);
-
-    for (uint32_t i = 0; i < opts_len; ) {
-        uint8_t opt = opts[i++];
-        if (opt == 255) break; // End
-        if (opt == 0) continue; // Pad
-        if (i >= opts_len) break;
-        uint8_t olen = opts[i++];
-        if (i + olen > opts_len) break;
-        if (opt == 53 && olen >= 1) msg_type = opts[i];
-        if (opt == 50 && olen >= 4) memcpy(&req_ip, &opts[i], 4);
-        i += olen;
-    }
-
-    if (msg_type == 1 || msg_type == 3) { // DISCOVER or REQUEST
-        uint8_t reply_type = (msg_type == 1) ? 2 : 5; // OFFER or ACK
-        SendDhcpReply(reply_type, dhcp->xid, dhcp->chaddr, req_ip);
-        return true;
-    }
-    return false;
-}
-
-void NetBackend::SendDhcpReply(uint8_t type, uint32_t xid,
-                                const uint8_t* chaddr, uint32_t req_ip) {
-    // Build: Ethernet + IP + UDP + DHCP reply
-    uint8_t pkt[600]{};
-    uint32_t off = 0;
-
-    // Ethernet header — use broadcast since client has no IP yet
-    auto* eth = reinterpret_cast<EthHdr*>(pkt);
-    memset(eth->dst, 0xFF, 6);
-    memcpy(eth->src, kGatewayMac, 6);
-    eth->type = htons(0x0800);
-    off += sizeof(EthHdr);
-
-    // IP header
-    auto* ip = reinterpret_cast<IpHdr*>(pkt + off);
-    ip->ver_ihl = 0x45;
-    ip->ttl = 64;
-    ip->proto = IPPROTO_UDP;
-    ip->src_ip = htonl(kGatewayIp);
-    ip->dst_ip = htonl(0xFFFFFFFF); // broadcast
-    uint32_t ip_off = off;
-    off += 20;
-
-    // UDP header
-    auto* udp = reinterpret_cast<UdpHdr*>(pkt + off);
-    udp->src_port = htons(67);
-    udp->dst_port = htons(68);
-    off += sizeof(UdpHdr);
-
-    // DHCP message
-    auto* dhcp = reinterpret_cast<DhcpMsg*>(pkt + off);
-    dhcp->op = 2; // reply
-    dhcp->htype = 1;
-    dhcp->hlen = 6;
-    dhcp->xid = xid;
-    dhcp->yiaddr = htonl(kGuestIp);
-    dhcp->siaddr = htonl(kGatewayIp);
-    memcpy(dhcp->chaddr, chaddr, 6);
-    dhcp->magic = htonl(0x63825363);
-    off += sizeof(DhcpMsg);
-
-    // DHCP options
-    uint8_t* opt = pkt + off;
-    // Message type
-    *opt++ = 53; *opt++ = 1; *opt++ = type;
-    // Server identifier
-    *opt++ = 54; *opt++ = 4;
-    uint32_t gw_net = htonl(kGatewayIp);
-    memcpy(opt, &gw_net, 4); opt += 4;
-    // Lease time (1 day)
-    *opt++ = 51; *opt++ = 4;
-    uint32_t lease = htonl(86400);
-    memcpy(opt, &lease, 4); opt += 4;
-    // Subnet mask
-    *opt++ = 1; *opt++ = 4;
-    uint32_t mask_net = htonl(kNetmask);
-    memcpy(opt, &mask_net, 4); opt += 4;
-    // Router (gateway)
-    *opt++ = 3; *opt++ = 4;
-    memcpy(opt, &gw_net, 4); opt += 4;
-    // DNS — prefer host system's DNS, fallback to 8.8.8.8
-    *opt++ = 6; *opt++ = 4;
-    uint32_t dns = htonl(GetHostDnsServer());
-    memcpy(opt, &dns, 4); opt += 4;
-    // End
-    *opt++ = 255;
-    off = static_cast<uint32_t>(opt - pkt);
-
-    // Fill in lengths
-    uint32_t udp_len = off - ip_off - 20;
-    udp->length = htons(static_cast<uint16_t>(udp_len));
-    ip->total_len = htons(static_cast<uint16_t>(off - sizeof(EthHdr)));
-    RecalcIpChecksum(ip);
-    // UDP checksum optional for IPv4, leave as 0
-
-    InjectFrame(pkt, off);
-}
-
-// ============================================================
-// Frame injection to guest RX queue
-// ============================================================
-
-void NetBackend::InjectFrame(const uint8_t* frame, uint32_t len) {
-    if (!link_up_) return;
-    // InjectRx() already calls mmio_->NotifyUsedBuffer() which fires the
-    // MMIO-level IRQ callback, so no additional irq_callback_() here.
-    virtio_net_->InjectRx(frame, len);
-}
-
-// ============================================================
-// NAT table management
-// ============================================================
-
-NetBackend::NatEntry* NetBackend::FindNatEntry(
-    uint32_t guest_port, uint32_t dst_ip, uint16_t dst_port, uint8_t proto) {
-    uint64_t now = GetMonotonicMs();
-    for (auto& e : nat_entries_) {
-        if (e->closed) continue;
-        // TCP entry with all resources released: still findable during
-        // TIME_WAIT (2*TCP_MSL = 10s) so the close handshake completes,
-        // then treated as dead so new connections can be created.
-        if (e->proto == IPPROTO_TCP &&
-            e->host_socket == SOCK_INVALID &&
-            !e->conn_pcb && !e->listen_pcb &&
-            (now - e->last_active_ms) > 15000) {
-            continue;
-        }
-        if (e->proto == proto &&
-            e->guest_port == guest_port &&
-            e->real_dst_ip == dst_ip &&
-            e->real_dst_port == dst_port)
-            return e.get();
-    }
-    return nullptr;
-}
-
-NetBackend::NatEntry* NetBackend::CreateNatEntry(
-    uint32_t guest_ip, uint16_t guest_port,
-    uint32_t dst_ip, uint16_t dst_port, uint8_t proto) {
-
-    auto entry = std::make_unique<NatEntry>();
-    entry->proto = proto;
-    entry->guest_ip = guest_ip;
-    entry->guest_port = guest_port;
-    entry->real_dst_ip = dst_ip;
-    entry->real_dst_port = dst_port;
-    entry->proxy_port = AllocProxyPort();
-    entry->last_active_ms = GetMonotonicMs();
-
-    if (proto == IPPROTO_TCP) {
-        // Create lwIP listener on proxy port for this connection
-        struct tcp_pcb* pcb = tcp_new();
-        ip_addr_t bind_ip;
-        IP4_ADDR(ip_2_ip4(&bind_ip), 10, 0, 2, 2);
-        tcp_bind(pcb, &bind_ip, entry->proxy_port);
-
-        struct tcp_pcb* listen_pcb = tcp_listen(pcb);
-        if (!listen_pcb) {
-            tcp_close(pcb);
-            return nullptr;
-        }
-        entry->listen_pcb = listen_pcb;
-        tcp_arg(listen_pcb, entry.get());
-        tcp_accept(listen_pcb, [](void* arg, struct tcp_pcb* new_pcb, err_t err) -> err_t {
-            if (err != ERR_OK || !new_pcb) return ERR_VAL;
-            auto* self_entry = static_cast<NatEntry*>(arg);
-            // Find the NetBackend from the netif state
-            // We use a thread-local approach since all lwIP runs on net thread
-            extern NetBackend* g_net_backend;
-            g_net_backend->OnTcpAccepted(self_entry, new_pcb);
-            return ERR_OK;
-        });
-    } else {
-        // UDP: host socket only — no lwIP PCB needed
-        SocketHandle s = socket(AF_INET, SOCK_DGRAM, 0);
-        if (s == SOCK_INVALID) return nullptr;
-        SOCK_SETNONBLOCK(s);
-        entry->host_socket = static_cast<uintptr_t>(s);
-    }
-
-    nat_entries_.push_back(std::move(entry));
-    auto* ptr = nat_entries_.back().get();
-    UpdateNatPoll(ptr);
-    return ptr;
-}
-
-uint16_t NetBackend::AllocProxyPort() {
-    const uint16_t kMinPort = 10000;
-    const uint16_t kMaxPort = 60000;
-    uint16_t attempts = 0;
-    while (attempts < (kMaxPort - kMinPort)) {
-        uint16_t port = next_proxy_port_++;
-        if (next_proxy_port_ > kMaxPort) next_proxy_port_ = kMinPort;
-        if (!IsProxyPortInUse(port))
-            return port;
-        attempts++;
-    }
-    return next_proxy_port_++;
-}
-
-bool NetBackend::IsProxyPortInUse(uint16_t port) const {
-    for (auto& e : nat_entries_) {
-        if (e->proxy_port == port && !e->closed)
-            return true;
-    }
-    return false;
-}
-
-void NetBackend::RemoveNatEntry(NatEntry* entry) {
-    if (entry->host_socket != SOCK_INVALID) {
-        SOCK_CLOSE(static_cast<SocketHandle>(entry->host_socket));
-        entry->host_socket = static_cast<uintptr_t>(SOCK_INVALID);
-    }
-    if (entry->listen_pcb) {
-        tcp_close(static_cast<struct tcp_pcb*>(entry->listen_pcb));
-        entry->listen_pcb = nullptr;
-    }
-    if (entry->conn_pcb) {
-        if (entry->proto == IPPROTO_TCP)
-            tcp_abort(static_cast<struct tcp_pcb*>(entry->conn_pcb));
-        else
-            udp_remove(static_cast<struct udp_pcb*>(entry->conn_pcb));
-        entry->conn_pcb = nullptr;
-    }
-
-    entry->closed = true;
-    if (entry->poll_inited && !entry->poll_closing) {
-        CloseNatPoll(entry);
-    } else if (!entry->poll_inited) {
-        nat_entries_.erase(
-            std::remove_if(nat_entries_.begin(), nat_entries_.end(),
-                            [entry](auto& e) { return e.get() == entry; }),
-            nat_entries_.end());
-    }
-}
-
-void NetBackend::CleanupStaleEntries() {
-    uint64_t now = GetMonotonicMs();
-    constexpr uint64_t kClosedEntryTimeoutMs  = 5000;    // 5s after err/abort
-    constexpr uint64_t kUdpIdleTimeoutMs      = 120000;  // 2min idle for UDP
-    constexpr uint64_t kTcpDeadTimeoutMs      = 30000;   // 30s for fully dead TCP
-    constexpr uint64_t kTcpIdleTimeoutMs      = 300000;  // 5min catch-all for TCP
-
-    auto it = nat_entries_.begin();
-    while (it != nat_entries_.end()) {
-        auto& e = *it;
-        bool remove = false;
-        uint64_t age = now - e->last_active_ms;
-
-        if (e->closed) {
-            // Already marked closed by OnTcpErr or connect failure
-            remove = age > kClosedEntryTimeoutMs;
-        } else if (e->proto == IPPROTO_UDP) {
-            remove = age > kUdpIdleTimeoutMs;
-        } else if (e->proto == IPPROTO_TCP) {
-            bool all_released = (e->host_socket == SOCK_INVALID &&
-                                 !e->conn_pcb && !e->listen_pcb);
-            if (all_released) {
-                // Both sides closed, lwIP PCB freed — wait long enough
-                // for TIME_WAIT to expire (2*TCP_MSL=10s), then remove.
-                remove = age > kTcpDeadTimeoutMs;
-            } else {
-                remove = age > kTcpIdleTimeoutMs;
-            }
-        }
-
-        if (remove) {
-            if (e->host_socket != SOCK_INVALID) {
-                SOCK_CLOSE(static_cast<SocketHandle>(e->host_socket));
-                e->host_socket = static_cast<uintptr_t>(SOCK_INVALID);
-            }
-            if (e->listen_pcb) {
-                tcp_close(static_cast<struct tcp_pcb*>(e->listen_pcb));
-                e->listen_pcb = nullptr;
-            }
-            if (e->conn_pcb) {
-                if (e->proto == IPPROTO_TCP)
-                    tcp_abort(static_cast<struct tcp_pcb*>(e->conn_pcb));
-                e->conn_pcb = nullptr;
-            }
-            if (e->poll_inited && !e->poll_closing) {
-                CloseNatPoll(e.get());
-                e->closed = true;
-                ++it;
-            } else if (e->poll_closing) {
-                e->closed = true;
-                ++it;
-            } else {
-                it = nat_entries_.erase(it);
-            }
-        } else {
-            ++it;
-        }
-    }
-}
-
-// ============================================================
-// NAT IP rewriting
-// ============================================================
-
-void NetBackend::RewriteAndFeed(uint8_t* frame, uint32_t len, NatEntry* entry) {
-    auto* ip = reinterpret_cast<IpHdr*>(frame + sizeof(EthHdr));
-    uint32_t ip_hdr_len = (ip->ver_ihl & 0xF) * 4;
-
-    uint32_t old_dst_ip = ip->dst_ip;
-
-    if (entry->proto == IPPROTO_TCP) {
-        auto* tcp = reinterpret_cast<TcpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len);
-        uint16_t old_port = tcp->dst_port;
-        uint16_t new_port = htons(entry->proxy_port);
-
-        IncrementalCksumUpdate(&tcp->checksum,
-                               old_dst_ip, htonl(kGatewayIp),
-                               old_port, new_port);
-        tcp->dst_port = new_port;
-    } else if (entry->proto == IPPROTO_UDP) {
-        auto* udp = reinterpret_cast<UdpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len);
-        uint16_t old_port = udp->dst_port;
-        uint16_t new_port = htons(entry->proxy_port);
-
-        if (udp->checksum != 0) {
-            IncrementalCksumUpdate(&udp->checksum,
-                                   old_dst_ip, htonl(kGatewayIp),
-                                   old_port, new_port);
-        }
-        udp->dst_port = new_port;
-    }
-
-    ip->dst_ip = htonl(kGatewayIp);
-    RecalcIpChecksum(ip);
-
-    // Feed rewritten frame to lwIP
-    struct pbuf* p = pbuf_alloc(PBUF_RAW, static_cast<u16_t>(len), PBUF_RAM);
-    if (p) {
-        pbuf_take(p, frame, static_cast<u16_t>(len));
-        auto* nif = static_cast<struct netif*>(netif_);
-        if (nif->input(p, nif) != ERR_OK) pbuf_free(p);
-    }
-}
-
-void NetBackend::ReverseRewrite(uint8_t* frame, uint32_t len) {
-    if (len < sizeof(EthHdr) + sizeof(IpHdr)) return;
-    auto* eth = reinterpret_cast<EthHdr*>(frame);
-    if (ntohs(eth->type) != 0x0800) return;
-
-    auto* ip = reinterpret_cast<IpHdr*>(frame + sizeof(EthHdr));
-    uint32_t ip_hdr_len = (ip->ver_ihl & 0xF) * 4;
-    uint32_t src_ip_host = ntohl(ip->src_ip);
-
-    if (src_ip_host != kGatewayIp) return;
-
-    uint16_t src_port = 0;
-    if (ip->proto == IPPROTO_TCP && len >= sizeof(EthHdr) + ip_hdr_len + sizeof(TcpHdr)) {
-        src_port = ntohs(reinterpret_cast<TcpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len)->src_port);
-    } else if (ip->proto == IPPROTO_UDP && len >= sizeof(EthHdr) + ip_hdr_len + sizeof(UdpHdr)) {
-        src_port = ntohs(reinterpret_cast<UdpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len)->src_port);
-    } else {
-        return;
-    }
-
-    // Find NAT entry by proxy port (skip closed entries to avoid
-    // matching stale entries when proxy ports get reused)
-    NatEntry* entry = nullptr;
-    for (auto& e : nat_entries_) {
-        if (e->closed) continue;
-        if (e->proxy_port == src_port && e->proto == ip->proto) {
-            entry = e.get();
-            break;
-        }
-    }
-    if (!entry) return;
-
-    // Rewrite src back to real destination
-    uint32_t new_src_ip = htonl(entry->real_dst_ip);
-    uint16_t new_src_port = htons(entry->real_dst_port);
-
-    if (ip->proto == IPPROTO_TCP) {
-        auto* tcp = reinterpret_cast<TcpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len);
-        IncrementalCksumUpdate(&tcp->checksum,
-                               ip->src_ip, new_src_ip,
-                               tcp->src_port, new_src_port);
-        tcp->src_port = new_src_port;
-    } else if (ip->proto == IPPROTO_UDP) {
-        auto* udp = reinterpret_cast<UdpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len);
-        if (udp->checksum != 0) {
-            IncrementalCksumUpdate(&udp->checksum,
-                                   ip->src_ip, new_src_ip,
-                                   udp->src_port, new_src_port);
-        }
-        udp->src_port = new_src_port;
-    }
-
-    ip->src_ip = new_src_ip;
-    RecalcIpChecksum(ip);
-}
-
-// ============================================================
-// TCP NAT callbacks
-// ============================================================
-
-// g_net_backend is forward-declared at the top; define it here.
-NetBackend* g_net_backend = nullptr;
-
-void NetBackend::OnTcpAccepted(NatEntry* entry, void* new_pcb_v) {
-    auto* new_pcb = static_cast<struct tcp_pcb*>(new_pcb_v);
-    entry->conn_pcb = new_pcb;
-
-    // Defer closing the listener: lwIP accesses pcb->listener AFTER the
-    // accept callback returns (e.g. tcp_backlog_accepted).  Closing it
-    // here would be a use-after-free.  Queue it for close after
-    // tcp_input finishes.
-    if (entry->listen_pcb) {
-        deferred_listen_close_.push_back(entry->listen_pcb);
-        entry->listen_pcb = nullptr;
-    }
-
-    // Set callbacks on connected PCB
-    tcp_arg(new_pcb, entry);
-    tcp_recv(new_pcb, [](void* arg, struct tcp_pcb* pcb, struct pbuf* p, err_t err) -> err_t {
-        auto* e = static_cast<NatEntry*>(arg);
-        g_net_backend->OnTcpRecv(e, pcb, p);
-        return ERR_OK;
-    });
-    tcp_err(new_pcb, [](void* arg, err_t err) {
-        auto* e = static_cast<NatEntry*>(arg);
-        g_net_backend->OnTcpErr(e);
-    });
-
-    // Create host socket and connect to real destination.
-    // IMPORTANT: do NOT call RemoveNatEntry / tcp_abort here — we are
-    // inside the accept callback and lwIP continues using the PCB after
-    // the callback returns.  Gracefully close and let cleanup handle it.
-    SocketHandle s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s == SOCK_INVALID) {
-        tcp_arg(new_pcb, nullptr);
-        tcp_recv(new_pcb, nullptr);
-        tcp_err(new_pcb, nullptr);
-        tcp_close(new_pcb);
-        entry->conn_pcb = nullptr;
-        entry->closed = true;
-        return;
-    }
-    SOCK_SETNONBLOCK(s);
-
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(entry->real_dst_ip);
-    addr.sin_port = htons(entry->real_dst_port);
-
-    int ret = connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    int connect_err = SOCK_ERRNO;
-    if (ret == SOCK_ERR && connect_err != SOCK_WOULDBLOCK && connect_err != SOCK_INPROGRESS) {
-        SOCK_CLOSE(s);
-        tcp_arg(new_pcb, nullptr);
-        tcp_recv(new_pcb, nullptr);
-        tcp_err(new_pcb, nullptr);
-        tcp_close(new_pcb);
-        entry->conn_pcb = nullptr;
-        entry->closed = true;
-        return;
-    }
-
-    entry->host_socket = static_cast<uintptr_t>(s);
-    entry->connecting = (ret == SOCK_ERR);
-    UpdateNatPoll(entry);
-}
-
-void NetBackend::OnTcpRecv(NatEntry* entry, void* pcb_v, void* p_v) {
-    auto* pcb = static_cast<struct tcp_pcb*>(pcb_v);
-    auto* p = static_cast<struct pbuf*>(p_v);
-
-    if (!p) {
-        StopNatPoll(entry);
-        if (entry->host_socket != SOCK_INVALID) {
-            SOCK_CLOSE(static_cast<SocketHandle>(entry->host_socket));
-            entry->host_socket = SOCK_INVALID;
-        }
-        tcp_arg(pcb, nullptr);
-        tcp_recv(pcb, nullptr);
-        tcp_err(pcb, nullptr);
-        tcp_close(pcb);
-        entry->conn_pcb = nullptr;
-        entry->last_active_ms = GetMonotonicMs();
-        return;
-    }
-
-    std::vector<uint8_t> data(p->tot_len);
-    pbuf_copy_partial(p, data.data(), p->tot_len, 0);
-    tcp_recved(pcb, p->tot_len);
-    pbuf_free(p);
-
-    entry->last_active_ms = GetMonotonicMs();
-
-    if (entry->connecting) {
-        entry->pending_data.insert(entry->pending_data.end(),
-                                    data.begin(), data.end());
-        return;
-    }
-
-    entry->pending_to_host.insert(entry->pending_to_host.end(),
-                                   data.begin(), data.end());
-    DrainTcpToHost(entry);
-    UpdateNatPoll(entry);
-}
-
-void NetBackend::OnTcpErr(NatEntry* entry) {
-    entry->conn_pcb = nullptr;
-    StopNatPoll(entry);
-    if (entry->host_socket != SOCK_INVALID) {
-        SOCK_CLOSE(static_cast<SocketHandle>(entry->host_socket));
-        entry->host_socket = SOCK_INVALID;
-    }
-    entry->closed = true;
-}
-
-// ============================================================
-// UDP NAT callback
-// ============================================================
-
-void NetBackend::OnUdpRecv(NatEntry* entry, void* pcb_v, void* p_v) {
-    auto* p = static_cast<struct pbuf*>(p_v);
-    if (!p) return;
-
-    std::vector<uint8_t> data(p->tot_len);
-    pbuf_copy_partial(p, data.data(), p->tot_len, 0);
-    pbuf_free(p);
-
-    if (entry->host_socket != SOCK_INVALID) {
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(entry->real_dst_ip);
-        addr.sin_port = htons(entry->real_dst_port);
-        sendto(static_cast<SocketHandle>(entry->host_socket),
-               SOCK_CCAST(data.data()),
-               static_cast<int>(data.size()), 0,
-               reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    }
-}
-
-// ============================================================
-// Socket I/O event handlers (libuv callbacks)
-// ============================================================
-
-void NetBackend::OnNatPollEvent(NatEntry* entry, int status, int events) {
-    if (status < 0) {
-        StopNatPoll(entry);
-        if (entry->host_socket != static_cast<uintptr_t>(SOCK_INVALID)) {
-            SOCK_CLOSE(static_cast<SocketHandle>(entry->host_socket));
-            entry->host_socket = SOCK_INVALID;
-        }
-        entry->closed = true;
-        return;
-    }
-
-    SocketHandle s = static_cast<SocketHandle>(entry->host_socket);
-    if (s == SOCK_INVALID) return;
-
-    if (entry->connecting && (events & UV_WRITABLE)) {
-        int sock_err = 0;
-        socklen_t optlen = sizeof(sock_err);
-        getsockopt(s, SOL_SOCKET, SO_ERROR,
-                   SOCK_CAST(&sock_err), &optlen);
-        if (sock_err != 0) {
-            SOCK_CLOSE(s);
-            entry->host_socket = SOCK_INVALID;
-            entry->connecting = false;
-            entry->closed = true;
-            StopNatPoll(entry);
-            return;
-        }
-        entry->connecting = false;
-        entry->last_active_ms = GetMonotonicMs();
-        if (!entry->pending_data.empty()) {
-            entry->pending_to_host.insert(entry->pending_to_host.end(),
-                                          entry->pending_data.begin(),
-                                          entry->pending_data.end());
-            entry->pending_data.clear();
-            DrainTcpToHost(entry);
-        }
-        UpdateNatPoll(entry);
-        return;
-    }
-
-    if (!entry->connecting && entry->proto == IPPROTO_TCP &&
-        !entry->pending_to_host.empty() && (events & UV_WRITABLE)) {
-        DrainTcpToHost(entry);
-    }
-
-    if (!entry->connecting && (events & UV_READABLE)) {
-        if (entry->proto == IPPROTO_TCP) {
-            DrainTcpToGuest(entry);
-            if (entry->pending_to_guest.empty())
-                HandleTcpReadable(entry);
-        } else {
-            HandleUdpReadable(entry);
-        }
-    }
-
-    if (entry->host_socket != static_cast<uintptr_t>(SOCK_INVALID))
-        UpdateNatPoll(entry);
-    else
-        StopNatPoll(entry);
-
-    RescheduleLwipTimer();
-}
-
-void NetBackend::DrainTcpToGuest(NatEntry* entry) {
-    if (entry->pending_to_guest.empty() || !entry->conn_pcb) return;
-
-    auto* pcb = static_cast<struct tcp_pcb*>(entry->conn_pcb);
-    uint16_t avail = tcp_sndbuf(pcb);
-    uint16_t to_write = static_cast<uint16_t>(
-        std::min<size_t>(avail, entry->pending_to_guest.size()));
-    if (to_write > 0) {
-        tcp_write(pcb, entry->pending_to_guest.data(), to_write, TCP_WRITE_FLAG_COPY);
-        tcp_output(pcb);
-        entry->pending_to_guest.erase(
-            entry->pending_to_guest.begin(),
-            entry->pending_to_guest.begin() + to_write);
-    }
-}
-
-void NetBackend::DrainTcpToHost(NatEntry* entry) {
-    if (entry->pending_to_host.empty()) return;
-    if (entry->host_socket == SOCK_INVALID) {
-        entry->pending_to_host.clear();
-        return;
-    }
-
-    SocketHandle s = static_cast<SocketHandle>(entry->host_socket);
-    int sent = send(s, SOCK_CCAST(entry->pending_to_host.data()),
-                    static_cast<int>(entry->pending_to_host.size()), 0);
-
-    if (sent > 0) {
-        entry->pending_to_host.erase(
-            entry->pending_to_host.begin(),
-            entry->pending_to_host.begin() + sent);
-    } else if (sent == SOCK_ERR) {
-        int err = SOCK_ERRNO;
-        if (err != SOCK_WOULDBLOCK) {
-            StopNatPoll(entry);
-            SOCK_CLOSE(s);
-            entry->host_socket = SOCK_INVALID;
-            entry->pending_to_host.clear();
-            if (entry->conn_pcb) {
-                auto* pcb = static_cast<struct tcp_pcb*>(entry->conn_pcb);
-                tcp_arg(pcb, nullptr);
-                tcp_recv(pcb, nullptr);
-                tcp_err(pcb, nullptr);
-                tcp_close(pcb);
-                entry->conn_pcb = nullptr;
-            }
-            entry->closed = true;
-        }
-    }
-}
-
-void NetBackend::HandleTcpReadable(NatEntry* entry) {
-    char buf[32768];
-    SocketHandle s = static_cast<SocketHandle>(entry->host_socket);
-    int n = recv(s, buf, sizeof(buf), 0);
-
-    if (n <= 0) {
-        DrainTcpToGuest(entry);
-        if (entry->conn_pcb) {
-            auto* pcb = static_cast<struct tcp_pcb*>(entry->conn_pcb);
-            tcp_arg(pcb, nullptr);
-            tcp_recv(pcb, nullptr);
-            tcp_err(pcb, nullptr);
-            tcp_close(pcb);
-            entry->conn_pcb = nullptr;
-        }
-        StopNatPoll(entry);
-        SOCK_CLOSE(s);
-        entry->host_socket = SOCK_INVALID;
-        entry->last_active_ms = GetMonotonicMs();
-        return;
-    }
-
-    entry->last_active_ms = GetMonotonicMs();
-    entry->pending_to_guest.insert(entry->pending_to_guest.end(), buf, buf + n);
-    DrainTcpToGuest(entry);
-}
-
-void NetBackend::HandleUdpReadable(NatEntry* entry) {
-    char buf[2048];
-    SocketHandle s = static_cast<SocketHandle>(entry->host_socket);
-    struct sockaddr_in from{};
-    socklen_t fromlen = sizeof(from);
-    int n = recvfrom(s, buf, sizeof(buf), 0,
-                     reinterpret_cast<sockaddr*>(&from), &fromlen);
-    if (n <= 0) return;
-
-    entry->last_active_ms = GetMonotonicMs();
-
-    // Build Ethernet + IP + UDP frame directly (bypass lwIP for responses)
-    uint32_t frame_len = sizeof(EthHdr) + 20 + sizeof(UdpHdr) + n;
-    std::vector<uint8_t> frame(frame_len);
-
-    auto* eth = reinterpret_cast<EthHdr*>(frame.data());
-    memcpy(eth->dst, kGuestMac, 6);
-    memcpy(eth->src, kGatewayMac, 6);
-    eth->type = htons(0x0800);
-
-    auto* ip = reinterpret_cast<IpHdr*>(frame.data() + sizeof(EthHdr));
-    ip->ver_ihl = 0x45;
-    ip->ttl = 64;
-    ip->proto = IPPROTO_UDP;
-    ip->src_ip = htonl(entry->real_dst_ip);
-    ip->dst_ip = htonl(entry->guest_ip);
-    ip->total_len = htons(static_cast<uint16_t>(20 + sizeof(UdpHdr) + n));
-    ip->id = htons(static_cast<uint16_t>(rand()));
-    RecalcIpChecksum(ip);
-
-    auto* udp = reinterpret_cast<UdpHdr*>(frame.data() + sizeof(EthHdr) + 20);
-    udp->src_port = htons(entry->real_dst_port);
-    udp->dst_port = htons(entry->guest_port);
-    udp->length = htons(static_cast<uint16_t>(sizeof(UdpHdr) + n));
-    udp->checksum = 0;
-
-    memcpy(frame.data() + sizeof(EthHdr) + 20 + sizeof(UdpHdr), buf, n);
-
-    InjectFrame(frame.data(), frame_len);
-}
-
-void NetBackend::DrainPfToGuest(PfEntry::Conn& conn) {
-    if (conn.pending_to_guest.empty() || !conn.guest_pcb || !conn.guest_connected)
-        return;
-
-    auto* pcb = static_cast<struct tcp_pcb*>(conn.guest_pcb);
-    uint16_t avail = tcp_sndbuf(pcb);
-    uint16_t to_write = static_cast<uint16_t>(
-        std::min<size_t>(avail, conn.pending_to_guest.size()));
-    if (to_write > 0) {
-        tcp_write(pcb, conn.pending_to_guest.data(), to_write, TCP_WRITE_FLAG_COPY);
-        tcp_output(pcb);
-        conn.pending_to_guest.erase(
-            conn.pending_to_guest.begin(),
-            conn.pending_to_guest.begin() + to_write);
-    }
-}
-
-void NetBackend::DrainPfToHost(PfEntry::Conn& conn) {
-    if (conn.pending_to_host.empty()) return;
-    if (conn.host_sock == ~(uintptr_t)0) {
-        conn.pending_to_host.clear();
-        return;
-    }
-
-    SocketHandle s = static_cast<SocketHandle>(conn.host_sock);
-    int sent = send(s, SOCK_CCAST(conn.pending_to_host.data()),
-                    static_cast<int>(conn.pending_to_host.size()), 0);
-
-    if (sent > 0) {
-        conn.pending_to_host.erase(
-            conn.pending_to_host.begin(),
-            conn.pending_to_host.begin() + sent);
-    } else if (sent == SOCK_ERR) {
-        int err = SOCK_ERRNO;
-        if (err != SOCK_WOULDBLOCK) {
-            StopPfConnPoll(conn);
-            SOCK_CLOSE(s);
-            conn.host_sock = ~(uintptr_t)0;
-            conn.pending_to_host.clear();
-            if (conn.guest_pcb) {
-                auto* pcb = static_cast<struct tcp_pcb*>(conn.guest_pcb);
-                tcp_arg(pcb, nullptr);
-                tcp_recv(pcb, nullptr);
-                tcp_err(pcb, nullptr);
-                tcp_close(pcb);
-                conn.guest_pcb = nullptr;
-            }
-        }
-    }
-}
-
-// ============================================================
-// ICMP relay
-// ============================================================
-
-void NetBackend::HandleIcmpOut(uint32_t src_ip, uint32_t dst_ip,
-                                const uint8_t* icmp_data, uint32_t icmp_len) {
-    if (icmp_socket_ == ~(uintptr_t)0) {
-        SocketHandle s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-        if (s == SOCK_INVALID) {
-            LOG_ERROR("Failed to create ICMP socket (need admin?)");
-            return;
-        }
-        SOCK_SETNONBLOCK(s);
-        icmp_socket_ = static_cast<uintptr_t>(s);
-        uv_poll_init_socket(&loop_, &icmp_poll_, s);
-        icmp_poll_.data = this;
-        uv_poll_start(&icmp_poll_, UV_READABLE, [](uv_poll_t* h, int status, int) {
-            if (status < 0) return;
-            static_cast<NetBackend*>(h->data)->HandleIcmpReadable();
-        });
-        icmp_poll_active_ = true;
-    }
-
-    struct sockaddr_in dest{};
-    dest.sin_family = AF_INET;
-    dest.sin_addr.s_addr = htonl(dst_ip);
-    int sent = sendto(static_cast<SocketHandle>(icmp_socket_),
-                      SOCK_CCAST(icmp_data),
-                      static_cast<int>(icmp_len), 0,
-                      reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
-    (void)sent;
-}
-
-void NetBackend::HandleIcmpReadable() {
-    if (icmp_socket_ == ~(uintptr_t)0) return;
-    SocketHandle s = static_cast<SocketHandle>(icmp_socket_);
-
-    for (;;) {
-        char buf[2048];
-        struct sockaddr_in from{};
-        socklen_t fromlen = sizeof(from);
-        int n = recvfrom(s, buf, sizeof(buf), 0,
-                         reinterpret_cast<sockaddr*>(&from), &fromlen);
-        if (n <= 0) break;
-        if (n < 20) continue;
-        auto* recv_ip = reinterpret_cast<IpHdr*>(buf);
-        uint32_t recv_ip_hdr_len = (recv_ip->ver_ihl & 0xF) * 4;
-        if (static_cast<uint32_t>(n) < recv_ip_hdr_len + 8) continue;
-
-        const uint8_t* icmp_payload = reinterpret_cast<const uint8_t*>(buf) + recv_ip_hdr_len;
-        uint32_t icmp_len = n - recv_ip_hdr_len;
-        uint32_t from_ip = ntohl(from.sin_addr.s_addr);
-
-        uint32_t frame_len = sizeof(EthHdr) + 20 + icmp_len;
-        std::vector<uint8_t> frame(frame_len);
-
-        auto* eth = reinterpret_cast<EthHdr*>(frame.data());
-        memcpy(eth->dst, kGuestMac, 6);
-        memcpy(eth->src, kGatewayMac, 6);
-        eth->type = htons(0x0800);
-
-        auto* ip = reinterpret_cast<IpHdr*>(frame.data() + sizeof(EthHdr));
-        ip->ver_ihl = 0x45;
-        ip->ttl = 64;
-        ip->proto = IPPROTO_ICMP;
-        ip->src_ip = htonl(from_ip);
-        ip->dst_ip = htonl(kGuestIp);
-        ip->total_len = htons(static_cast<uint16_t>(20 + icmp_len));
-        ip->id = htons(static_cast<uint16_t>(rand()));
-        RecalcIpChecksum(ip);
-
-        memcpy(frame.data() + sizeof(EthHdr) + 20, icmp_payload, icmp_len);
-        InjectFrame(frame.data(), frame_len);
-    }
-}
-
-// ============================================================
-// Port forwarding
-// ============================================================
-
-void NetBackend::TeardownPortForwards() {
-    for (auto& pf : port_forwards_) {
-        if (pf.listener_poll_active) {
-            uv_poll_stop(&pf.listener_poll);
-            pf.listener_poll_active = false;
-        }
-        if (!pf.listener_poll_closing && pf.listener_poll_inited) {
-            pf.listener_poll_closing = true;
-            uv_close(reinterpret_cast<uv_handle_t*>(&pf.listener_poll), nullptr);
-        }
-        if (pf.listener != ~(uintptr_t)0) {
-            SOCK_CLOSE(static_cast<SocketHandle>(pf.listener));
-            pf.listener = ~(uintptr_t)0;
-        }
-        for (auto& c : pf.conns) {
-            ClosePfConnPoll(c);
-            if (c.host_sock != ~(uintptr_t)0) {
-                SOCK_CLOSE(static_cast<SocketHandle>(c.host_sock));
-                c.host_sock = ~(uintptr_t)0;
-            }
-            if (c.guest_pcb) {
-                auto* pcb = static_cast<struct tcp_pcb*>(c.guest_pcb);
-                tcp_arg(pcb, nullptr);
-                tcp_recv(pcb, nullptr);
-                tcp_err(pcb, nullptr);
-                tcp_abort(pcb);
-                c.guest_pcb = nullptr;
-            }
-        }
-    }
-    // Drain pending close callbacks so handles are fully released before
-    // we destroy PfEntry/Conn objects.
-    uv_run(&loop_, UV_RUN_NOWAIT);
-    for (auto& pf : port_forwards_)
-        pf.conns.clear();
-    port_forwards_.clear();
-}
-
-void NetBackend::CheckPendingUpdates() {
-    std::optional<std::vector<PortForward>> update;
-    bool sync = false;
-    {
-        std::lock_guard<std::mutex> lock(pf_update_mutex_);
-        if (pending_pf_update_) {
-            update = std::move(pending_pf_update_);
-            pending_pf_update_.reset();
-            sync = pf_update_sync_;
-        }
-    }
-    if (update) {
-        TeardownPortForwards();
-        for (auto& f : *update)
-            port_forwards_.push_back({f.host_port, f.guest_port});
-        auto failed = SetupPortForwards();
-        LOG_INFO("Port forwards updated (%zu entries, %zu failed)",
-                 update->size(), failed.size());
-
-        if (sync) {
-            std::lock_guard<std::mutex> lock(pf_update_mutex_);
-            pf_update_failed_ports_ = std::move(failed);
-            pf_update_sync_ = false;
-            pf_update_cv_.notify_one();
-        }
-    }
-}
-
-std::vector<uint16_t> NetBackend::SetupPortForwards() {
-    g_net_backend = this;
-    std::vector<uint16_t> failed_ports;
-
-    for (auto& pf : port_forwards_) {
-        SocketHandle s = socket(AF_INET, SOCK_STREAM, 0);
-        if (s == SOCK_INVALID) {
-            LOG_ERROR("Port forward: failed to create listener for port %u", pf.host_port);
-            failed_ports.push_back(pf.host_port);
-            continue;
-        }
-#ifdef _WIN32
-        int exclusive = 1;
-        setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
-                   SOCK_CCAST(&exclusive), sizeof(exclusive));
-#else
-        int reuse = 1;
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
-                   SOCK_CCAST(&reuse), sizeof(reuse));
-#endif
-
-        SOCK_SETNONBLOCK(s);
-
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port = htons(pf.host_port);
-
-        if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCK_ERR ||
-            listen(s, 5) == SOCK_ERR) {
-            LOG_ERROR("Port forward: failed to bind/listen on port %u", pf.host_port);
-            SOCK_CLOSE(s);
-            failed_ports.push_back(pf.host_port);
-            continue;
-        }
-
-        pf.listener = static_cast<uintptr_t>(s);
-
-        uv_poll_init_socket(&loop_, &pf.listener_poll, s);
-        pf.listener_poll.data = &pf;
-        pf.listener_poll_inited = true;
-        uv_poll_start(&pf.listener_poll, UV_READABLE, [](uv_poll_t* h, int status, int) {
-            if (status < 0) return;
-            auto* pf = static_cast<PfEntry*>(h->data);
-            g_net_backend->OnPfListenerReadable(pf);
-        });
-        pf.listener_poll_active = true;
-
-        LOG_INFO("Port forward: 127.0.0.1:%u -> guest:%u", pf.host_port, pf.guest_port);
-    }
-
-    return failed_ports;
-}
-
-void NetBackend::OnPfConnPollEvent(PfEntry::Conn* c, int status, int events) {
-    if (status < 0 || c->host_sock == ~(uintptr_t)0) {
-        StopPfConnPoll(*c);
-        if (c->host_sock != ~(uintptr_t)0) {
-            SOCK_CLOSE(static_cast<SocketHandle>(c->host_sock));
-            c->host_sock = ~(uintptr_t)0;
-        }
-        if (c->guest_pcb) {
-            auto* pcb = static_cast<struct tcp_pcb*>(c->guest_pcb);
-            tcp_arg(pcb, nullptr);
-            tcp_recv(pcb, nullptr);
-            tcp_err(pcb, nullptr);
-            tcp_close(pcb);
-            c->guest_pcb = nullptr;
-        }
-        return;
-    }
-
-    SocketHandle s = static_cast<SocketHandle>(c->host_sock);
-
-    if (!c->pending_to_host.empty() && (events & UV_WRITABLE)) {
-        DrainPfToHost(*c);
-    }
-
-    if (events & UV_READABLE) {
-        DrainPfToGuest(*c);
-        if (c->pending_to_guest.empty()) {
-            char buf[4096];
-            int n = recv(s, buf, sizeof(buf), 0);
-            if (n <= 0) {
-                StopPfConnPoll(*c);
-                SOCK_CLOSE(s);
-                c->host_sock = ~(uintptr_t)0;
-                if (c->guest_pcb) {
-                    auto* pcb = static_cast<struct tcp_pcb*>(c->guest_pcb);
-                    tcp_arg(pcb, nullptr);
-                    tcp_recv(pcb, nullptr);
-                    tcp_err(pcb, nullptr);
-                    tcp_close(pcb);
-                    c->guest_pcb = nullptr;
-                }
-                return;
-            }
-            c->pending_to_guest.insert(c->pending_to_guest.end(), buf, buf + n);
-            DrainPfToGuest(*c);
-        }
-    }
-
-    if (c->host_sock != ~(uintptr_t)0)
-        UpdatePfConnPoll(*c);
-    else
-        StopPfConnPoll(*c);
-}
-
-void NetBackend::OnPfListenerReadable(PfEntry* pf) {
-    SocketHandle ls = static_cast<SocketHandle>(pf->listener);
-    SocketHandle cs = accept(ls, nullptr, nullptr);
-    if (cs == SOCK_INVALID) return;
-    SOCK_SETNONBLOCK(cs);
-
-    struct tcp_pcb* pcb = tcp_new();
-    ip_addr_t guest_addr;
-    IP4_ADDR(ip_2_ip4(&guest_addr), 10, 0, 2, 15);
-
-    PfEntry::Conn conn;
-    conn.host_sock = static_cast<uintptr_t>(cs);
-    conn.guest_pcb = pcb;
-    pf->conns.push_back(conn);
-
-    auto* conn_ptr = &pf->conns.back();
-    tcp_arg(pcb, conn_ptr);
-    tcp_recv(pcb, [](void* arg, struct tcp_pcb* pcb, struct pbuf* p, err_t err) -> err_t {
-        auto* c = static_cast<PfEntry::Conn*>(arg);
-        if (!c) {
-            if (p) pbuf_free(p);
-            return ERR_OK;
-        }
-        if (!p) {
-            g_net_backend->StopPfConnPoll(*c);
-            if (c->host_sock != ~(uintptr_t)0) {
-                SOCK_CLOSE(static_cast<SocketHandle>(c->host_sock));
-                c->host_sock = ~(uintptr_t)0;
-            }
-            tcp_arg(pcb, nullptr);
-            tcp_recv(pcb, nullptr);
-            tcp_err(pcb, nullptr);
-            tcp_close(pcb);
-            c->guest_pcb = nullptr;
-            return ERR_OK;
-        }
-        std::vector<uint8_t> data(p->tot_len);
-        pbuf_copy_partial(p, data.data(), p->tot_len, 0);
-        tcp_recved(pcb, p->tot_len);
-        pbuf_free(p);
-        c->pending_to_host.insert(c->pending_to_host.end(),
-                                  data.begin(), data.end());
-        g_net_backend->DrainPfToHost(*c);
-        g_net_backend->UpdatePfConnPoll(*c);
-        return ERR_OK;
-    });
-    tcp_err(pcb, [](void* arg, err_t err) {
-        auto* c = static_cast<PfEntry::Conn*>(arg);
-        if (!c) return;
-        c->guest_pcb = nullptr;
-        g_net_backend->StopPfConnPoll(*c);
-        if (c->host_sock != ~(uintptr_t)0) {
-            SOCK_CLOSE(static_cast<SocketHandle>(c->host_sock));
-            c->host_sock = ~(uintptr_t)0;
-        }
-    });
-
-    tcp_connect(pcb, &guest_addr, pf->guest_port,
-        [](void* arg, struct tcp_pcb* pcb, err_t err) -> err_t {
-        auto* c = static_cast<PfEntry::Conn*>(arg);
-        if (!c) return ERR_OK;
-        c->guest_connected = true;
-        if (!c->pending_to_guest.empty()) {
-            tcp_write(pcb, c->pending_to_guest.data(),
-                      static_cast<u16_t>(c->pending_to_guest.size()),
-                      TCP_WRITE_FLAG_COPY);
-            tcp_output(pcb);
-            c->pending_to_guest.clear();
-        }
-        g_net_backend->UpdatePfConnPoll(*c);
-        return ERR_OK;
-    });
-
-    UpdatePfConnPoll(*conn_ptr);
 }
