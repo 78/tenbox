@@ -42,6 +42,26 @@ struct UrlParts {
     bool is_https = true;
 };
 
+static std::string FormatWinError(DWORD code) {
+    wchar_t* buf = nullptr;
+    HMODULE winhttp = GetModuleHandleW(L"winhttp.dll");
+    DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS;
+    if (winhttp)
+        flags |= FORMAT_MESSAGE_FROM_HMODULE;
+    flags |= FORMAT_MESSAGE_FROM_SYSTEM;
+    DWORD len = FormatMessageW(flags, winhttp, code, 0,
+                               reinterpret_cast<LPWSTR>(&buf), 0, nullptr);
+    if (len == 0 || !buf) {
+        if (buf) LocalFree(buf);
+        return "error " + std::to_string(code);
+    }
+    while (len > 0 && (buf[len - 1] == L'\r' || buf[len - 1] == L'\n'))
+        --len;
+    std::string msg = WideToUtf8(std::wstring(buf, len));
+    LocalFree(buf);
+    return msg + " (" + std::to_string(code) + ")";
+}
+
 static bool ParseUrl(const std::string& url, UrlParts& parts) {
     std::wstring wurl = Utf8ToWide(url);
 
@@ -84,7 +104,7 @@ DownloadResult FetchString(const std::string& url) {
         return result;
     }
 
-    DWORD timeout_ms = 15000;
+    DWORD timeout_ms = 30000;
     WinHttpSetOption(session, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(session, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(session, WINHTTP_OPTION_SEND_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
@@ -109,18 +129,20 @@ DownloadResult FetchString(const std::string& url) {
 
     if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         WinHttpCloseHandle(session);
-        result.error = "Failed to send request";
+        result.error = "Failed to send request: " + FormatWinError(err);
         return result;
     }
 
     if (!WinHttpReceiveResponse(request, nullptr)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         WinHttpCloseHandle(session);
-        result.error = "Failed to receive response";
+        result.error = "Failed to receive response: " + FormatWinError(err);
         return result;
     }
 
@@ -216,22 +238,24 @@ DownloadResult DownloadFile(const std::string& url,
 
     if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         WinHttpCloseHandle(session);
         ofs.close();
         fs::remove(tmp_path, ec);
-        result.error = "Failed to send request";
+        result.error = "Failed to send request: " + FormatWinError(err);
         return result;
     }
 
     if (!WinHttpReceiveResponse(request, nullptr)) {
+        DWORD err = GetLastError();
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         WinHttpCloseHandle(session);
         ofs.close();
         fs::remove(tmp_path, ec);
-        result.error = "Failed to receive response";
+        result.error = "Failed to receive response: " + FormatWinError(err);
         return result;
     }
 

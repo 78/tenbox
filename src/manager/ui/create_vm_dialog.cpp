@@ -27,12 +27,8 @@ namespace fs = std::filesystem;
 static int g_host_memory_gb = 0;
 static int g_host_cpus = 0;
 
-static const char* kSourcesUrl = "https://tenbox.ai/api/sources.json";
-
 // Process-lifetime caches
 static std::mutex g_cache_mutex;
-static std::vector<image_source::ImageSource> g_cached_sources;
-static bool g_sources_loaded = false;
 static std::vector<image_source::ImageEntry> g_cached_online_images;
 static bool g_online_images_loaded = false;
 static int g_online_images_source_index = -1;
@@ -42,7 +38,6 @@ enum {
     IDC_SOURCE_COMBO = 101,
     IDC_BTN_LOAD = 102,
     IDC_IMAGE_LIST = 103,
-    IDC_DESC_TEXT = 104,
     IDC_STATUS_TEXT = 105,
     IDC_PROGRESS = 106,
     IDC_PROGRESS_TEXT = 107,
@@ -57,7 +52,6 @@ enum {
     IDC_NAT_CHECK = 114,
     IDC_BTN_BACK = 115,
     IDC_BTN_NEXT = 116,
-    IDC_BTN_RETRY = 117,
     IDC_BTN_DELETE_CACHE = 118,
     IDC_BTN_LOCAL_IMAGE = 121,
 };
@@ -69,7 +63,6 @@ enum class Page {
 };
 
 enum {
-    WM_SOURCES_COMPLETE = WM_USER + 100,
     WM_FETCH_COMPLETE = WM_USER + 101,
     WM_DOWNLOAD_PROGRESS = WM_USER + 102,
     WM_DOWNLOAD_COMPLETE = WM_USER + 103,
@@ -83,9 +76,7 @@ struct DialogData {
     bool closed;
     std::string error;
 
-    bool sources_loaded;
-    bool loading_sources;
-    std::thread sources_thread;
+    std::vector<image_source::ImageSource> sources;
     int selected_source_index;
 
     std::vector<image_source::ImageEntry> cached_images;
@@ -95,6 +86,7 @@ struct DialogData {
     std::thread online_images_thread;
 
     int selected_index;
+    std::vector<std::wstring> list_descriptions;
     image_source::ImageEntry selected_image;
     bool is_local_image;
     std::string local_image_dir;
@@ -118,7 +110,7 @@ struct DialogData {
 
     DialogData() : mgr(nullptr), dlg(nullptr), current_page(Page::kSelectImage),
                    created(false), closed(false),
-                   sources_loaded(false), loading_sources(false), selected_source_index(-1),
+                   selected_source_index(-1),
                    online_loaded(false), loading_online(false),
                    selected_index(-1), is_local_image(false),
                    cancel_download(false), download_running(false),
@@ -205,7 +197,6 @@ static bool TryGetSelectedCachedImage(const DialogData* data, image_source::Imag
 
 static void ShowPage(DialogData* data, Page page);
 static void RefreshImageList(DialogData* data);
-static void UpdateDescriptionText(DialogData* data);
 static void FetchSources(DialogData* data);
 static void FetchOnlineImages(DialogData* data);
 static void StartDownload(DialogData* data);
@@ -222,15 +213,15 @@ static void ShowPage(DialogData* data, Page page) {
     data->current_page = page;
 
     static const int select_ctrls[] = {IDC_SOURCE_LABEL, IDC_SOURCE_COMBO, IDC_BTN_LOAD,
-                                       IDC_IMAGE_LIST, IDC_DESC_TEXT, IDC_STATUS_TEXT,
-                                       IDC_BTN_RETRY, IDC_BTN_DELETE_CACHE};
+                                       IDC_IMAGE_LIST, IDC_STATUS_TEXT,
+                                       IDC_BTN_DELETE_CACHE};
     static const int download_ctrls[] = {IDC_PROGRESS, IDC_PROGRESS_TEXT};
     static const int confirm_ctrls[] = {IDC_NAME_LABEL, IDC_NAME_EDIT, IDC_MEMORY_LABEL,
                                         IDC_MEMORY_SLIDER, IDC_MEMORY_VALUE,
                                         IDC_CPU_LABEL, IDC_CPU_SLIDER, IDC_CPU_VALUE,
                                         IDC_NAT_CHECK};
 
-    SetControlsVisible(dlg, select_ctrls, 8, false);
+    SetControlsVisible(dlg, select_ctrls, 6, false);
     SetControlsVisible(dlg, download_ctrls, 2, false);
     SetControlsVisible(dlg, confirm_ctrls, 9, false);
 
@@ -240,11 +231,7 @@ static void ShowPage(DialogData* data, Page page) {
 
     switch (page) {
     case Page::kSelectImage:
-        SetControlsVisible(dlg, select_ctrls, 6, true);
-        ShowWindow(GetDlgItem(dlg, IDC_BTN_RETRY),
-            (!data->sources_loaded && !data->loading_sources && !data->download_error.empty()) ||
-            (!data->online_loaded && !data->loading_online && data->sources_loaded && !data->download_error.empty())
-            ? SW_SHOW : SW_HIDE);
+        SetControlsVisible(dlg, select_ctrls, 5, true);
         ShowWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), SW_SHOW);
         EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), TryGetSelectedCachedImage(data, nullptr));
         SetWindowTextW(btn_next, i18n::tr_w(i18n::S::kImgBtnNext).c_str());
@@ -253,7 +240,6 @@ static void ShowPage(DialogData* data, Page page) {
         ShowWindow(btn_local, SW_SHOW);
         ShowWindow(btn_back, SW_HIDE);
         RefreshImageList(data);
-        UpdateDescriptionText(data);
         break;
 
     case Page::kDownloading:
@@ -289,9 +275,28 @@ static void ShowPage(DialogData* data, Page page) {
     }
 }
 
+static constexpr int kGroupIdCached = 0;
+static constexpr int kGroupIdOnline = 1;
+
 static void RefreshImageList(DialogData* data) {
     HWND list = GetDlgItem(data->dlg, IDC_IMAGE_LIST);
-    SendMessage(list, LB_RESETCONTENT, 0, 0);
+    ListView_DeleteAllItems(list);
+    ListView_RemoveAllGroups(list);
+    data->list_descriptions.clear();
+
+    LVGROUP grp{};
+    grp.cbSize = sizeof(grp);
+    grp.mask = LVGF_HEADER | LVGF_GROUPID;
+
+    std::wstring cached_header = i18n::tr_w(i18n::S::kImgGroupCached);
+    grp.pszHeader = cached_header.data();
+    grp.iGroupId = kGroupIdCached;
+    ListView_InsertGroup(list, -1, &grp);
+
+    std::wstring online_header = i18n::tr_w(i18n::S::kImgGroupOnline);
+    grp.pszHeader = online_header.data();
+    grp.iGroupId = kGroupIdOnline;
+    ListView_InsertGroup(list, -1, &grp);
 
     int index = 0;
 
@@ -300,10 +305,20 @@ static void RefreshImageList(DialogData* data) {
         uint64_t total = img.TotalSize();
         if (total > 0)
             text += " (" + FormatSize(total) + ")";
-        text += " ";
-        text += i18n::tr(i18n::S::kImgCached);
-        SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(text).c_str()));
-        SendMessage(list, LB_SETITEMDATA, index++, 0);
+        std::wstring wtext = i18n::to_wide(text);
+
+        LVITEMW lvi{};
+        lvi.mask = LVIF_TEXT | LVIF_GROUPID | LVIF_PARAM;
+        lvi.iItem = index;
+        lvi.iSubItem = 0;
+        lvi.pszText = wtext.data();
+        lvi.iGroupId = kGroupIdCached;
+        lvi.lParam = 0;
+        SendMessageW(list, LVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&lvi));
+
+        data->list_descriptions.push_back(i18n::to_wide(
+            img.description.empty() ? i18n::tr(i18n::S::kImgNoDescription) : img.description));
+        ++index;
     }
 
     if (data->online_loaded) {
@@ -320,20 +335,32 @@ static void RefreshImageList(DialogData* data) {
                 uint64_t total = img.TotalSize();
                 if (total > 0)
                     text += " (" + FormatSize(total) + ")";
-                SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(text).c_str()));
-                SendMessage(list, LB_SETITEMDATA, index++, 1);
+                std::wstring wtext = i18n::to_wide(text);
+
+                LVITEMW lvi{};
+                lvi.mask = LVIF_TEXT | LVIF_GROUPID | LVIF_PARAM;
+                lvi.iItem = index;
+                lvi.iSubItem = 0;
+                lvi.pszText = wtext.data();
+                lvi.iGroupId = kGroupIdOnline;
+                lvi.lParam = 1;
+                SendMessageW(list, LVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&lvi));
+
+                data->list_descriptions.push_back(i18n::to_wide(
+                    img.description.empty() ? i18n::tr(i18n::S::kImgNoDescription) : img.description));
+                ++index;
             }
         }
     }
 
     if (data->selected_index >= 0 && data->selected_index < index) {
-        SendMessage(list, LB_SETCURSEL, data->selected_index, 0);
+        ListView_SetItemState(list, data->selected_index,
+            LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_EnsureVisible(list, data->selected_index, FALSE);
     }
 
     HWND status = GetDlgItem(data->dlg, IDC_STATUS_TEXT);
-    if (data->loading_sources) {
-        SetWindowTextW(status, i18n::tr_w(i18n::S::kImgLoadingOnline).c_str());
-    } else if (data->loading_online) {
+    if (data->loading_online) {
         SetWindowTextW(status, i18n::tr_w(i18n::S::kImgLoadingOnline).c_str());
     } else if (!data->download_error.empty()) {
         SetWindowTextW(status, i18n::to_wide(data->download_error).c_str());
@@ -342,123 +369,49 @@ static void RefreshImageList(DialogData* data) {
     }
 }
 
-static void UpdateDescriptionText(DialogData* data) {
-    HWND desc_text = GetDlgItem(data->dlg, IDC_DESC_TEXT);
-    if (data->selected_index < 0) {
-        SetWindowTextW(desc_text, L"");
-        return;
-    }
-
-    int cached_count = static_cast<int>(data->cached_images.size());
-    std::string description;
-
-    if (data->selected_index < cached_count) {
-        const auto& img = data->cached_images[data->selected_index];
-        description = img.description.empty() ? i18n::tr(i18n::S::kImgNoDescription) : img.description;
-    } else if (data->online_loaded) {
-        int online_idx = data->selected_index - cached_count;
-        int actual_idx = 0;
-        for (const auto& img : data->online_images) {
-            bool is_cached = false;
-            for (const auto& cached : data->cached_images) {
-                if (cached.id == img.id && cached.version == img.version) {
-                    is_cached = true;
-                    break;
-                }
-            }
-            if (!is_cached) {
-                if (actual_idx == online_idx) {
-                    description = img.description.empty() ? i18n::tr(i18n::S::kImgNoDescription) : img.description;
-                    break;
-                }
-                ++actual_idx;
-            }
-        }
-    }
-
-    SetWindowTextW(desc_text, i18n::to_wide(description).c_str());
-}
-
 static void PopulateSourceCombo(DialogData* data) {
     HWND combo = GetDlgItem(data->dlg, IDC_SOURCE_COMBO);
     SendMessage(combo, CB_RESETCONTENT, 0, 0);
 
-    std::lock_guard<std::mutex> lock(g_cache_mutex);
-    if (g_sources_loaded) {
-        for (const auto& src : g_cached_sources) {
-            SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(src.name).c_str()));
-        }
-        if (!g_cached_sources.empty()) {
-            SendMessage(combo, CB_SETCURSEL, 0, 0);
-            data->selected_source_index = 0;
-        }
-        data->sources_loaded = true;
+    const auto& last = data->mgr->app_settings().last_selected_source;
+    int default_sel = 0;
+    for (int i = 0; i < static_cast<int>(data->sources.size()); ++i) {
+        SendMessageW(combo, CB_ADDSTRING, 0,
+            reinterpret_cast<LPARAM>(i18n::to_wide(data->sources[i].name).c_str()));
+        if (!last.empty() && data->sources[i].name == last)
+            default_sel = i;
+    }
+    if (!data->sources.empty()) {
+        SendMessage(combo, CB_SETCURSEL, default_sel, 0);
+        data->selected_source_index = default_sel;
+    }
 
-        if (g_online_images_loaded && g_online_images_source_index == data->selected_source_index) {
-            data->online_images = g_cached_online_images;
-            data->online_loaded = true;
-        }
+    std::lock_guard<std::mutex> lock(g_cache_mutex);
+    if (g_online_images_loaded && g_online_images_source_index == data->selected_source_index) {
+        data->online_images = g_cached_online_images;
+        data->online_loaded = true;
     }
 }
 
 static void FetchSources(DialogData* data) {
-    if (data->loading_sources) return;
-
-    {
-        std::lock_guard<std::mutex> lock(g_cache_mutex);
-        if (g_sources_loaded) {
-            data->sources_loaded = true;
-        }
-    }
-    if (data->sources_loaded) {
-        PopulateSourceCombo(data);
-        RefreshImageList(data);
-        return;
-    }
-
-    data->loading_sources = true;
+    data->sources = settings::EffectiveSources(data->mgr->app_settings());
     data->download_error.clear();
-    EnableWindow(GetDlgItem(data->dlg, IDC_BTN_LOAD), FALSE);
+    PopulateSourceCombo(data);
     RefreshImageList(data);
-
-    HWND dlg = data->dlg;
-    if (data->sources_thread.joinable())
-        data->sources_thread.join();
-    data->sources_thread = std::thread([data, dlg]() {
-        auto sources_result = http::FetchString(kSourcesUrl);
-        if (data->closed) return;
-        if (!sources_result.success) {
-            data->download_error = sources_result.error;
-            if (!data->closed) PostMessage(dlg, WM_SOURCES_COMPLETE, 0, 0);
-            return;
-        }
-
-        auto sources = image_source::ParseSources(sources_result.data);
-        if (sources.empty()) {
-            data->download_error = "No sources available";
-            if (!data->closed) PostMessage(dlg, WM_SOURCES_COMPLETE, 0, 0);
-            return;
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(g_cache_mutex);
-            g_cached_sources = sources;
-            g_sources_loaded = true;
-        }
-        if (!data->closed) PostMessage(dlg, WM_SOURCES_COMPLETE, 1, 0);
-    });
+    if (!data->online_loaded) {
+        FetchOnlineImages(data);
+    }
 }
 
 static void FetchOnlineImages(DialogData* data) {
     if (data->loading_online) return;
     if (data->selected_source_index < 0) return;
 
-    std::string url;
+    if (data->selected_source_index >= static_cast<int>(data->sources.size())) return;
+    std::string url = data->sources[data->selected_source_index].url;
+
     {
         std::lock_guard<std::mutex> lock(g_cache_mutex);
-        if (data->selected_source_index >= static_cast<int>(g_cached_sources.size())) return;
-        url = g_cached_sources[data->selected_source_index].url;
-
         if (g_online_images_loaded && g_online_images_source_index == data->selected_source_index) {
             data->online_images = g_cached_online_images;
             data->online_loaded = true;
@@ -581,34 +534,17 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
 
     switch (msg) {
     case WM_SETCURSOR:
-        if (data->loading_sources || data->loading_online) {
+        if (data->loading_online) {
             SetCursor(LoadCursor(nullptr, IDC_APPSTARTING));
             return TRUE;
         }
         break;
-
-    case WM_SOURCES_COMPLETE: {
-        data->loading_sources = false;
-        data->sources_loaded = (wp == 1);
-        if (data->sources_loaded) {
-            PopulateSourceCombo(data);
-            FetchOnlineImages(data);
-        } else {
-            EnableWindow(GetDlgItem(dlg, IDC_BTN_LOAD), TRUE);
-        }
-        RefreshImageList(data);
-        ShowWindow(GetDlgItem(dlg, IDC_BTN_RETRY),
-            (!data->sources_loaded && !data->download_error.empty()) ? SW_SHOW : SW_HIDE);
-        return 0;
-    }
 
     case WM_FETCH_COMPLETE:
         data->loading_online = false;
         data->online_loaded = (wp == 1);
         RefreshImageList(data);
         EnableWindow(GetDlgItem(dlg, IDC_BTN_LOAD), TRUE);
-        ShowWindow(GetDlgItem(dlg, IDC_BTN_RETRY),
-            (!data->online_loaded && !data->download_error.empty()) ? SW_SHOW : SW_HIDE);
         return 0;
 
     case WM_DOWNLOAD_PROGRESS: {
@@ -687,6 +623,154 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
         }
         return 0;
 
+    case WM_NOTIFY: {
+        NMHDR* nmhdr = reinterpret_cast<NMHDR*>(lp);
+        if (nmhdr->idFrom == IDC_IMAGE_LIST) {
+            if (nmhdr->code == LVN_ITEMCHANGED) {
+                NMLISTVIEW* nmlv = reinterpret_cast<NMLISTVIEW*>(lp);
+                if (!(nmlv->uChanged & LVIF_STATE)) return 0;
+
+                HWND list = GetDlgItem(dlg, IDC_IMAGE_LIST);
+                bool now_selected = (nmlv->uNewState & LVIS_SELECTED) != 0;
+                bool was_selected = (nmlv->uOldState & LVIS_SELECTED) != 0;
+
+                if (now_selected && !was_selected) {
+                    int old_sel = data->selected_index;
+                    LPARAM item_data = nmlv->lParam;
+                    if (item_data == 0 || item_data == 1) {
+                        data->selected_index = nmlv->iItem;
+                    } else {
+                        data->selected_index = -1;
+                    }
+                    if (old_sel >= 0 && old_sel != nmlv->iItem) {
+                        RECT old_rc{};
+                        ListView_GetItemRect(list, old_sel, &old_rc, LVIR_BOUNDS);
+                        InvalidateRect(list, &old_rc, TRUE);
+                    }
+                    EnableWindow(GetDlgItem(dlg, IDC_BTN_NEXT), data->selected_index >= 0);
+                    EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), item_data == 0);
+                } else if (!now_selected && was_selected) {
+                    if (nmlv->iItem == data->selected_index) {
+                        data->selected_index = -1;
+                        EnableWindow(GetDlgItem(dlg, IDC_BTN_NEXT), FALSE);
+                        EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), FALSE);
+                    }
+                }
+                return 0;
+            } else if (nmhdr->code == NM_DBLCLK) {
+                NMITEMACTIVATE* nmia = reinterpret_cast<NMITEMACTIVATE*>(lp);
+                if (nmia->iItem >= 0) {
+                    LVITEMW lvi{};
+                    lvi.mask = LVIF_PARAM;
+                    lvi.iItem = nmia->iItem;
+                    ListView_GetItem(GetDlgItem(dlg, IDC_IMAGE_LIST), &lvi);
+                    if (lvi.lParam == 0 || lvi.lParam == 1) {
+                        data->selected_index = nmia->iItem;
+                        SendMessage(dlg, WM_COMMAND, IDC_BTN_NEXT, 0);
+                    }
+                }
+                return 0;
+            } else if (nmhdr->code == NM_CUSTOMDRAW) {
+                NMLVCUSTOMDRAW* cd = reinterpret_cast<NMLVCUSTOMDRAW*>(lp);
+                switch (cd->nmcd.dwDrawStage) {
+                case CDDS_PREPAINT:
+                    return CDRF_NOTIFYITEMDRAW;
+                case CDDS_ITEMPREPAINT: {
+                    int idx = static_cast<int>(cd->nmcd.dwItemSpec);
+                    if (idx < 0 || idx >= static_cast<int>(data->list_descriptions.size()))
+                        return CDRF_DODEFAULT;
+
+                    HDC hdc = cd->nmcd.hdc;
+                    RECT rc = cd->nmcd.rc;
+                    bool selected = (idx == data->selected_index);
+                    bool focused = (GetFocus() == GetDlgItem(dlg, IDC_IMAGE_LIST));
+
+                    COLORREF bg_color, name_color, desc_color;
+                    if (selected && focused) {
+                        bg_color = GetSysColor(COLOR_HIGHLIGHT);
+                        name_color = GetSysColor(COLOR_HIGHLIGHTTEXT);
+                        desc_color = GetSysColor(COLOR_HIGHLIGHTTEXT);
+                    } else {
+                        bg_color = GetSysColor(COLOR_WINDOW);
+                        name_color = GetSysColor(COLOR_WINDOWTEXT);
+                        desc_color = GetSysColor(COLOR_GRAYTEXT);
+                    }
+
+                    HBRUSH bg_brush = CreateSolidBrush(bg_color);
+                    FillRect(hdc, &rc, bg_brush);
+                    DeleteObject(bg_brush);
+
+                    HFONT base_font = reinterpret_cast<HFONT>(
+                        SendMessage(GetDlgItem(dlg, IDC_IMAGE_LIST), WM_GETFONT, 0, 0));
+
+                    wchar_t name_buf[512]{};
+                    LVITEMW lvi_tmp{};
+                    lvi_tmp.mask = LVIF_TEXT;
+                    lvi_tmp.iItem = idx;
+                    lvi_tmp.iSubItem = 0;
+                    lvi_tmp.pszText = name_buf;
+                    lvi_tmp.cchTextMax = static_cast<int>(std::size(name_buf));
+                    SendMessageW(GetDlgItem(dlg, IDC_IMAGE_LIST), LVM_GETITEMTEXTW,
+                                 static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(&lvi_tmp));
+
+                    int item_h = rc.bottom - rc.top;
+                    int pad_x = 8;
+                    int pad_y = 4;
+                    int mid_gap = 2;
+
+                    RECT name_rc = rc;
+                    name_rc.left += pad_x;
+                    name_rc.right -= pad_x;
+                    name_rc.top = rc.top + pad_y;
+                    name_rc.bottom = rc.top + (item_h - mid_gap) / 2;
+
+                    HFONT old_font = reinterpret_cast<HFONT>(SelectObject(hdc, base_font));
+                    int old_bk = SetBkMode(hdc, TRANSPARENT);
+                    COLORREF old_color = SetTextColor(hdc, name_color);
+                    DrawTextW(hdc, name_buf, -1, &name_rc,
+                              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | DT_BOTTOM);
+
+                    LOGFONTW lf{};
+                    GetObjectW(base_font, sizeof(lf), &lf);
+                    lf.lfHeight = MulDiv(lf.lfHeight, 85, 100);
+                    HFONT small_font = CreateFontIndirectW(&lf);
+                    SelectObject(hdc, small_font);
+
+                    RECT desc_rc = rc;
+                    desc_rc.left += pad_x;
+                    desc_rc.right -= pad_x;
+                    desc_rc.top = rc.top + (item_h + mid_gap) / 2;
+
+                    SetTextColor(hdc, desc_color);
+                    DrawTextW(hdc, data->list_descriptions[idx].c_str(), -1, &desc_rc,
+                              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                    SetTextColor(hdc, old_color);
+                    SetBkMode(hdc, old_bk);
+                    SelectObject(hdc, old_font);
+                    DeleteObject(small_font);
+
+                    if (selected && focused) {
+                        DrawFocusRect(hdc, &rc);
+                    }
+
+                    return CDRF_SKIPDEFAULT;
+                }
+                }
+                return CDRF_DODEFAULT;
+            } else if (nmhdr->code == NM_SETFOCUS || nmhdr->code == NM_KILLFOCUS) {
+                if (data->selected_index >= 0) {
+                    HWND list = GetDlgItem(dlg, IDC_IMAGE_LIST);
+                    RECT item_rc{};
+                    ListView_GetItemRect(list, data->selected_index, &item_rc, LVIR_BOUNDS);
+                    InvalidateRect(list, &item_rc, TRUE);
+                }
+                return 0;
+            }
+        }
+        break;
+    }
+
     case WM_HSCROLL:
         if (HandleSliderScroll(dlg, lp,
                 IDC_MEMORY_SLIDER, IDC_MEMORY_VALUE,
@@ -701,6 +785,10 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
                 int sel = static_cast<int>(SendMessage(GetDlgItem(dlg, IDC_SOURCE_COMBO), CB_GETCURSEL, 0, 0));
                 if (sel != CB_ERR && sel != data->selected_source_index) {
                     data->selected_source_index = sel;
+                    if (sel >= 0 && sel < static_cast<int>(data->sources.size())) {
+                        data->mgr->app_settings().last_selected_source = data->sources[sel].name;
+                        data->mgr->SaveAppSettings();
+                    }
                     data->online_loaded = false;
                     data->online_images.clear();
                     data->selected_index = -1;
@@ -712,17 +800,15 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
                         }
                     }
                     RefreshImageList(data);
-                    UpdateDescriptionText(data);
                     EnableWindow(GetDlgItem(dlg, IDC_BTN_NEXT), FALSE);
                     EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), FALSE);
+                    FetchOnlineImages(data);
                 }
             }
             return 0;
 
         case IDC_BTN_LOAD:
-            if (!data->sources_loaded) {
-                FetchSources(data);
-            } else if (data->selected_source_index >= 0) {
+            if (data->selected_source_index >= 0) {
                 {
                     std::lock_guard<std::mutex> lock(g_cache_mutex);
                     g_online_images_loaded = false;
@@ -735,34 +821,6 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
                 EnableWindow(GetDlgItem(dlg, IDC_BTN_NEXT), FALSE);
                 EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), FALSE);
                 FetchOnlineImages(data);
-            }
-            return 0;
-
-        case IDC_IMAGE_LIST:
-            if (HIWORD(wp) == LBN_SELCHANGE) {
-                HWND list = GetDlgItem(dlg, IDC_IMAGE_LIST);
-                int sel = static_cast<int>(SendMessage(list, LB_GETCURSEL, 0, 0));
-                if (sel != LB_ERR) {
-                    LRESULT item_data = SendMessage(list, LB_GETITEMDATA, sel, 0);
-                    if (item_data == 0 || item_data == 1) {
-                        data->selected_index = sel;
-                    } else {
-                        SendMessage(list, LB_SETCURSEL, -1, 0);
-                        data->selected_index = -1;
-                    }
-                    UpdateDescriptionText(data);
-                    EnableWindow(GetDlgItem(dlg, IDC_BTN_NEXT), data->selected_index >= 0);
-                    EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), item_data == 0);
-                }
-            } else if (HIWORD(wp) == LBN_DBLCLK) {
-                HWND list = GetDlgItem(dlg, IDC_IMAGE_LIST);
-                int sel = static_cast<int>(SendMessage(list, LB_GETCURSEL, 0, 0));
-                if (sel != LB_ERR) {
-                    LRESULT item_data = SendMessage(list, LB_GETITEMDATA, sel, 0);
-                    if (item_data == 0 || item_data == 1) {
-                        SendMessage(dlg, WM_COMMAND, IDC_BTN_NEXT, 0);
-                    }
-                }
             }
             return 0;
 
@@ -790,7 +848,6 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
             data->cached_images = image_source::GetCachedImages(data->ImagesDir());
             data->selected_index = -1;
             RefreshImageList(data);
-            UpdateDescriptionText(data);
             EnableWindow(GetDlgItem(dlg, IDC_BTN_NEXT), FALSE);
             EnableWindow(GetDlgItem(dlg, IDC_BTN_DELETE_CACHE), FALSE);
             SetWindowTextW(GetDlgItem(dlg, IDC_STATUS_TEXT), i18n::tr_w(i18n::S::kImgCacheDeleted).c_str());
@@ -849,18 +906,6 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
             ShowPage(data, Page::kConfirm);
             return 0;
         }
-
-        case IDC_BTN_RETRY:
-            data->download_error.clear();
-            if (!data->sources_loaded) {
-                data->loading_sources = false;
-                FetchSources(data);
-            } else {
-                data->online_loaded = false;
-                data->loading_online = false;
-                FetchOnlineImages(data);
-            }
-            return 0;
 
         case IDC_BTN_BACK:
             if (data->current_page == Page::kConfirm) {
@@ -1062,11 +1107,10 @@ bool ShowCreateVmDialog2(HWND parent, ManagerService& mgr, std::string* error) {
     int load_btn_w = scale_px(72);
     int source_label_w = scale_px(84);
     int row_h = (btn_h + scale_px(4) > scale_px(30)) ? (btn_h + scale_px(4)) : scale_px(30);
-    int desc_h = scale_px(52);
     int list_top = margin + row_h + scale_px(8);
     int bottom_btns_y = h - margin - btn_h;
     int status_y = bottom_btns_y - scale_px(28);
-    int list_h = status_y - list_top - desc_h - scale_px(10);
+    int list_h = status_y - list_top - scale_px(6);
     if (list_h < scale_px(120)) list_h = scale_px(120);
 
     int top_ctrl_y = margin + (row_h - btn_h) / 2;
@@ -1086,15 +1130,29 @@ bool ShowCreateVmDialog2(HWND parent, ManagerService& mgr, std::string* error) {
         w - margin - load_btn_w, top_ctrl_y, load_btn_w, btn_h,
         dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_BTN_LOAD)), nullptr, nullptr);
 
-    CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
-        WS_CHILD | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+    HWND list_view = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+        WS_CHILD | WS_VSCROLL | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS |
+        LVS_NOSORTHEADER | LVS_NOCOLUMNHEADER,
         margin, list_top, w - 2 * margin, list_h,
         dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_IMAGE_LIST)), nullptr, nullptr);
 
-    CreateWindowExW(0, L"STATIC", L"",
-        WS_CHILD | SS_LEFT,
-        margin, list_top + list_h + scale_px(6), w - 2 * margin, desc_h,
-        dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_DESC_TEXT)), nullptr, nullptr);
+    ListView_SetExtendedListViewStyle(list_view,
+        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    ListView_EnableGroupView(list_view, TRUE);
+
+    {
+        int lv_w = w - 2 * margin - GetSystemMetrics(SM_CXVSCROLL) - 4;
+        LVCOLUMNW col{};
+        col.mask = LVCF_WIDTH;
+        col.cx = lv_w;
+        ListView_InsertColumn(list_view, 0, &col);
+    }
+
+    {
+        int item_h = scale_px(46);
+        HIMAGELIST hil = ImageList_Create(1, item_h, ILC_COLOR, 1, 0);
+        ListView_SetImageList(list_view, hil, LVSIL_SMALL);
+    }
 
     CreateWindowExW(0, L"STATIC", L"",
         WS_CHILD | SS_LEFT,
@@ -1144,16 +1202,11 @@ bool ShowCreateVmDialog2(HWND parent, ManagerService& mgr, std::string* error) {
     int delete_max_w = back_x - margin - btn_gap;
     if (secondary_btn_w > delete_max_w) secondary_btn_w = delete_max_w;
     if (secondary_btn_w < scale_px(90)) secondary_btn_w = scale_px(90);
-    int retry_x = w - margin - btn_w;
     int delete_x = margin;
 
     CreateWindowExW(0, L"BUTTON", i18n::tr_w(i18n::S::kImgBtnDeleteCache).c_str(),
         WS_CHILD | BS_PUSHBUTTON, delete_x, bottom_btns_y, secondary_btn_w, btn_h,
         dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_BTN_DELETE_CACHE)), nullptr, nullptr);
-    CreateWindowExW(0, L"BUTTON", i18n::tr_w(i18n::S::kImgBtnRetry).c_str(),
-        WS_CHILD | BS_PUSHBUTTON, retry_x, status_y - scale_px(6) - btn_h, btn_w, btn_h,
-        dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_BTN_RETRY)), nullptr, nullptr);
-
     CreateWindowExW(0, L"BUTTON", i18n::tr_w(i18n::S::kImgBtnBack).c_str(),
         WS_CHILD | BS_PUSHBUTTON, w - margin - 3 * btn_w - 2 * btn_gap, bottom_btns_y, btn_w, btn_h,
         dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_BTN_BACK)), nullptr, nullptr);
@@ -1218,8 +1271,6 @@ bool ShowCreateVmDialog2(HWND parent, ManagerService& mgr, std::string* error) {
     data.cancel_download = true;
     if (data.download_thread.joinable())
         data.download_thread.join();
-    if (data.sources_thread.joinable())
-        data.sources_thread.join();
     if (data.online_images_thread.joinable())
         data.online_images_thread.join();
 

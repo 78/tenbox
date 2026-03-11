@@ -1,4 +1,5 @@
 #include "manager/app_settings.h"
+#include "manager/image_source.h"
 #include "manager/i18n.h"
 
 #define NOMINMAX
@@ -54,6 +55,10 @@ std::string EffectiveVmStorageDir(const AppSettings& s) {
 
 std::string EffectiveImageCacheDir(const AppSettings& s, const std::string& data_dir) {
     return s.image_cache_dir.empty() ? DefaultImageCacheDir(data_dir) : s.image_cache_dir;
+}
+
+std::vector<image_source::ImageSource> EffectiveSources(const AppSettings& s) {
+    return s.sources.empty() ? image_source::DefaultSources() : s.sources;
 }
 
 std::string GenerateUuid() {
@@ -118,6 +123,20 @@ AppSettings LoadSettings(const std::string& data_dir) {
             auto v = j["image_cache_dir"].get<std::string>();
             if (!v.empty()) s.image_cache_dir = v;
         }
+        if (j.contains("sources") && j["sources"].is_array()) {
+            for (auto& item : j["sources"]) {
+                if (item.is_object()) {
+                    image_source::ImageSource src;
+                    src.name = item.value("name", "");
+                    src.url = item.value("url", "");
+                    if (!src.url.empty())
+                        s.sources.push_back(std::move(src));
+                }
+            }
+        }
+        if (j.contains("last_selected_source") && j["last_selected_source"].is_string()) {
+            s.last_selected_source = j["last_selected_source"].get<std::string>();
+        }
         if (j.contains("vm_paths") && j["vm_paths"].is_array()) {
             auto default_storage = DefaultVmStorageDir();
             for (auto& item : j["vm_paths"]) {
@@ -166,6 +185,15 @@ void SaveSettings(const std::string& data_dir, const AppSettings& s) {
         j["vm_storage_dir"] = s.vm_storage_dir;
     if (!s.image_cache_dir.empty())
         j["image_cache_dir"] = s.image_cache_dir;
+    if (!s.sources.empty()) {
+        json sources_json = json::array();
+        for (const auto& src : s.sources) {
+            sources_json.push_back({{"name", src.name}, {"url", src.url}});
+        }
+        j["sources"] = sources_json;
+    }
+    if (!s.last_selected_source.empty())
+        j["last_selected_source"] = s.last_selected_source;
 
     auto path = fs::path(data_dir) / "settings.json";
     std::ofstream ofs(path, std::ios::trunc);

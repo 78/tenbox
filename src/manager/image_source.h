@@ -38,6 +38,9 @@ struct ImageEntry {
     }
 };
 
+// Built-in default sources (used when no user override is configured).
+std::vector<ImageSource> DefaultSources();
+
 // Parse JSON strings into structs
 std::vector<ImageSource> ParseSources(const std::string& json);
 std::vector<ImageEntry> ParseImages(const std::string& json);

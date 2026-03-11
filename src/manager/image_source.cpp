@@ -11,6 +11,13 @@ namespace image_source {
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
+std::vector<ImageSource> DefaultSources() {
+    return {
+        {"China Mainland", "https://tenbox.ai/api/images.json"},
+        {"China Mainland 2", "https://baidufsadfsadf.io/api/images.json"},
+    };
+}
+
 std::vector<ImageSource> ParseSources(const std::string& json_str) {
     std::vector<ImageSource> result;
     try {
