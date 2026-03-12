@@ -1,4 +1,4 @@
-#include "core/device/virtio/qcow2.h"
+#include "core/disk/qcow2.h"
 #include <cstring>
 #include <algorithm>
 #include <cstdlib>
@@ -526,6 +526,45 @@ bool Qcow2DiskImage::Write(uint64_t offset, const void* buf, uint32_t len) {
         len -= chunk;
     }
     return true;
+}
+
+bool Qcow2DiskImage::Discard(uint64_t offset, uint64_t len) {
+    while (len > 0) {
+        uint64_t in_cluster_off = offset & (cluster_size_ - 1);
+        uint64_t chunk = std::min(len,
+            static_cast<uint64_t>(cluster_size_) - in_cluster_off);
+
+        // Only discard whole clusters -- partial cluster discard is a no-op
+        if (in_cluster_off == 0 && chunk >= cluster_size_) {
+            uint32_t l1_idx = static_cast<uint32_t>(
+                offset / (static_cast<uint64_t>(l2_entries_) * cluster_size_));
+            uint32_t l2_idx = static_cast<uint32_t>(
+                (offset / cluster_size_) % l2_entries_);
+
+            if (l1_idx < l1_size_) {
+                uint64_t l1_entry = l1_table_[l1_idx];
+                if (l1_entry != 0) {
+                    uint64_t l2_table_off = l1_entry & kOffsetMask;
+                    uint64_t* l2 = GetL2Table(l2_table_off);
+                    if (l2 && l2[l2_idx] != 0) {
+                        l2[l2_idx] = 0;
+                        auto it = l2_map_.find(l2_table_off);
+                        if (it != l2_map_.end())
+                            it->second->dirty = true;
+                    }
+                }
+            }
+        }
+
+        offset += chunk;
+        len -= chunk;
+    }
+    return true;
+}
+
+bool Qcow2DiskImage::WriteZeros(uint64_t offset, uint64_t len) {
+    // For qcow2, zeroed data == unallocated cluster (reads back as zeros).
+    return Discard(offset, len);
 }
 
 bool Qcow2DiskImage::Flush() {

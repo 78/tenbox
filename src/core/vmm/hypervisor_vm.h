@@ -25,4 +25,15 @@ public:
         uint32_t index, AddressSpace* addr_space) = 0;
 
     virtual void RequestInterrupt(const InterruptRequest& req) = 0;
+
+    virtual void SetGuestMemMap(const GuestMemMap*) {}
+
+    virtual void QueueInterrupt(uint32_t vector, uint32_t dest_vcpu) {
+        InterruptRequest req{};
+        req.vector = vector;
+        req.destination = dest_vcpu;
+        req.logical_destination = false;
+        req.level_triggered = false;
+        RequestInterrupt(req);
+    }
 };

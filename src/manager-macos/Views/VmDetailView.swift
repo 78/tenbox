@@ -203,20 +203,14 @@ struct VmDetailView: View {
     }
 
     var body: some View {
-        TabView(selection: $session.activeTab) {
-            InfoView(vm: vm)
-                .tabItem { Image(systemName: "info.circle") }
-                .tag(0)
-
-            ConsoleView(session: session)
-                .tabItem { Image(systemName: "terminal") }
-                .tag(1)
-
-            DisplayView(session: session)
-                .tabItem { Image(systemName: "display") }
-                .tag(2)
+        VStack(spacing: 0) {
+            switch session.activeTab {
+            case 0:  InfoView(vm: vm)
+            case 1:  ConsoleView(session: session)
+            default: DisplayView(session: session)
+            }
         }
-        .padding()
+        .padding(.horizontal)
         .onAppear {
             if vm.state == .running {
                 session.connectIfNeeded()

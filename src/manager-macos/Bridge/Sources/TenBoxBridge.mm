@@ -148,7 +148,7 @@ static NSString* GetVmsDir() {
         info.cpuCount = [dict[@"cpu_count"] integerValue] ?: 2;
         info.state = state;
         info.netEnabled = [dict[@"net_enabled"] boolValue];
-        info.cmdline = dict[@"cmdline"] ?: @"";
+        // cmdline is handled by the runtime with its built-in default
         NSNumber* displayScaleNum = dict[@"display_scale"];
         info.displayScale = displayScaleNum ? [displayScaleNum integerValue] : 1;
         if (info.displayScale < 1) info.displayScale = 1;
@@ -321,12 +321,6 @@ static NSString* GetVmsDir() {
     if (cpuCount) {
         [args addObject:@"--cpus"];
         [args addObject:[cpuCount stringValue]];
-    }
-
-    NSString* cmdline = config[@"cmdline"];
-    if (cmdline && cmdline.length > 0) {
-        [args addObject:@"--cmdline"];
-        [args addObject:cmdline];
     }
 
     NSNumber* netEnabled = config[@"net_enabled"];

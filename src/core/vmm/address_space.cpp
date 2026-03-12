@@ -54,6 +54,12 @@ bool AddressSpace::HandlePortOut(uint16_t port, uint8_t size, uint32_t value) {
     return false;
 }
 
+bool AddressSpace::IsMmioAddress(uint64_t addr) const {
+    std::lock_guard<std::mutex> lock(io_mutex_);
+    uint64_t offset = 0;
+    return FindMmioDevice(addr, &offset) != nullptr;
+}
+
 bool AddressSpace::HandleMmioRead(uint64_t addr, uint8_t size,
                                    uint64_t* value) {
     std::lock_guard<std::mutex> lock(io_mutex_);

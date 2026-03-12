@@ -2,41 +2,31 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showDeleteConfirm = false
     @State private var showForceStopConfirm = false
     @State private var showSharedFoldersSheet = false
     @State private var showPortForwardsSheet = false
 
+    private var selectedVm: VmInfo? {
+        guard let vmId = appState.selectedVmId else { return nil }
+        return appState.vms.first(where: { $0.id == vmId })
+    }
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationView {
             VmListView()
-        } detail: {
-            if let vmId = appState.selectedVmId,
-               let vm = appState.vms.first(where: { $0.id == vmId }) {
-                VmDetailView(vm: vm, appState: appState)
-                    .id(vmId)
-            } else {
-                Text("Select a VM")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            detailView
         }
-        .onChange(of: columnVisibility, perform: { newValue in
-            if newValue != .all {
-                columnVisibility = .all
-            }
-        })
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(action: { appState.showCreateVmDialog = true }) {
                     Label("New VM", systemImage: "plus.rectangle")
                 }
                 .help("Create a new virtual machine")
+            }
 
-                if let vmId = appState.selectedVmId,
-                   let vm = appState.vms.first(where: { $0.id == vmId }) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if let vm = selectedVm {
                     Button(action: { appState.showEditVmDialog = true }) {
                         Label("Edit", systemImage: "pencil")
                     }
@@ -50,16 +40,15 @@ struct ContentView: View {
                     }
                     .disabled(vm.state == .running)
                     .help("Delete this VM")
+
+                    Divider()
                 }
             }
 
-            if let vmId = appState.selectedVmId,
-               let vm = appState.vms.first(where: { $0.id == vmId }) {
-                ToolbarItem(placement: .primaryAction) { Divider() }
-
-                ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if let vm = selectedVm {
                     if vm.state == .stopped || vm.state == .crashed {
-                        Button(action: { appState.requestStartVm(id: vmId) }) {
+                        Button(action: { appState.requestStartVm(id: vm.id) }) {
                             Label("Start", systemImage: "play.fill")
                         }
                         .help("Start VM")
@@ -71,35 +60,29 @@ struct ContentView: View {
                         }
                         .help("Force stop VM immediately")
 
-                        Button(action: { appState.rebootVm(id: vmId) }) {
+                        Button(action: { appState.rebootVm(id: vm.id) }) {
                             Label("Reboot", systemImage: "arrow.clockwise")
                         }
                         .help("Reboot VM")
 
-                        Button(action: { appState.shutdownVm(id: vmId) }) {
+                        Button(action: { appState.shutdownVm(id: vm.id) }) {
                             Label("Shutdown", systemImage: "power")
                         }
                         .help("Gracefully shut down VM")
-                    }
-                }
 
-                if vm.state == .running {
-                    ToolbarItem(placement: .primaryAction) { Divider() }
+                        Divider()
 
-                    ToolbarItemGroup(placement: .primaryAction) {
                         Button(action: {
-                            appState.setDisplayScale(vm.displayScale == 1 ? 2 : 1, forVm: vmId)
+                            appState.setDisplayScale(vm.displayScale == 1 ? 2 : 1, forVm: vm.id)
                         }) {
                             Label(vm.displayScale == 2 ? "Display 1x" : "Display 2x",
                                   systemImage: vm.displayScale == 2 ? "minus.magnifyingglass" : "plus.magnifyingglass")
                         }
                         .help(vm.displayScale == 2 ? "Switch to 1x display scale" : "Switch to 2x Retina display scale")
                     }
-                }
 
-                ToolbarItem(placement: .primaryAction) { Divider() }
+                    Divider()
 
-                ToolbarItemGroup(placement: .primaryAction) {
                     Button(action: { showSharedFoldersSheet = true }) {
                         ToolbarBadgeLabel(
                             title: "Shared Folders",
@@ -117,6 +100,17 @@ struct ContentView: View {
                         )
                     }
                     .help("Manage port forwards")
+
+                    Divider()
+
+                    Picker("", selection: appState.activeTabBinding(for: vm.id)) {
+                        Image(systemName: "info.circle").tag(0)
+                        Image(systemName: "terminal").tag(1)
+                        Image(systemName: "display").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 180)
                 }
             }
         }
@@ -124,46 +118,39 @@ struct ContentView: View {
             CreateVmDialog()
         }
         .sheet(isPresented: $appState.showEditVmDialog) {
-            if let vmId = appState.selectedVmId,
-               let vm = appState.vms.first(where: { $0.id == vmId }) {
+            if let vm = selectedVm {
                 EditVmDialog(vm: vm)
             }
         }
         .sheet(isPresented: $showSharedFoldersSheet) {
-            if let vmId = appState.selectedVmId {
-                SharedFoldersSheet(vmId: vmId)
+            if let vm = selectedVm {
+                SharedFoldersSheet(vmId: vm.id)
             }
         }
         .sheet(isPresented: $showPortForwardsSheet) {
-            if let vmId = appState.selectedVmId {
-                PortForwardsSheet(vmId: vmId)
+            if let vm = selectedVm {
+                PortForwardsSheet(vmId: vm.id)
             }
         }
         .alert("Delete VM", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
-                if let vmId = appState.selectedVmId {
-                    appState.deleteVm(id: vmId)
+                if let vm = selectedVm {
+                    appState.deleteVm(id: vm.id)
                 }
             }
         } message: {
-            if let vmId = appState.selectedVmId,
-               let vm = appState.vms.first(where: { $0.id == vmId }) {
-                Text("Are you sure you want to delete \"\(vm.name)\"? This action cannot be undone.")
-            }
+            Text("Are you sure you want to delete \"\(selectedVm?.name ?? "")\"? This action cannot be undone.")
         }
         .alert("Force Stop VM", isPresented: $showForceStopConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Force Stop", role: .destructive) {
-                if let vmId = appState.selectedVmId {
-                    appState.stopVm(id: vmId)
+                if let vm = selectedVm {
+                    appState.stopVm(id: vm.id)
                 }
             }
         } message: {
-            if let vmId = appState.selectedVmId,
-               let vm = appState.vms.first(where: { $0.id == vmId }) {
-                Text("Are you sure you want to force stop \"\(vm.name)\"? Unsaved data may be lost.")
-            }
+            Text("Are you sure you want to force stop \"\(selectedVm?.name ?? "")\"? Unsaved data may be lost.")
         }
         .alert("Enable Full Keyboard Capture?", isPresented: $appState.showKeyboardCapturePermissionAlert) {
             Button("Request Permissions") {
@@ -178,6 +165,35 @@ struct ContentView: View {
             }
         } message: {
             keyboardCapturePermissionMessage
+        }
+        .alert("Start VM Failed", isPresented: showStartVmErrorBinding) {
+            Button("OK", role: .cancel) {
+                appState.startVmError = nil
+            }
+        } message: {
+            Text(appState.startVmError ?? "")
+        }
+    }
+
+    private var showStartVmErrorBinding: Binding<Bool> {
+        Binding(
+            get: { appState.startVmError != nil },
+            set: { if !$0 { appState.startVmError = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var detailView: some View {
+        if let vm = selectedVm {
+            VmDetailView(vm: vm, appState: appState)
+                .id(vm.id)
+                .navigationTitle(vm.name)
+        } else {
+            Text("Select a VM")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationTitle("")
         }
     }
 

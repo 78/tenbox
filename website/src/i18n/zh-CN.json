@@ -17,7 +17,7 @@
     "cta_win": "Windows 下载",
     "cta_mac": "macOS 下载",
     "version": "v0.1.0",
-    "requirements": "Windows 10+ · macOS 15+ (Apple Silicon)",
+    "requirements": "Windows 10+ · macOS 12+ (Intel / Apple Silicon)",
     "qq_group": "QQ 互助群",
     "qq_group_number": "295838092"
   },

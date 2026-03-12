@@ -1,8 +1,13 @@
-#include "platform/macos/hypervisor/hvf_vcpu.h"
-#include "platform/macos/hypervisor/hvf_mmio_decode.h"
+#include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
+#include "platform/macos/hypervisor/aarch64/hvf_mmio_decode.h"
 #include "core/vmm/types.h"
+#include <chrono>
+#include <cstdio>
 
 namespace hvf {
+
+HvfVCpu::ExitStats HvfVCpu::s_stats_;
+std::atomic<bool> HvfVCpu::s_stats_enabled_{false};
 
 // Exception Class values from ARM Architecture Reference Manual
 static constexpr uint8_t kEcWfiWfe    = 0x01;
@@ -33,23 +38,23 @@ std::unique_ptr<HvfVCpu> HvfVCpu::Create(uint32_t index, AddressSpace* addr_spac
     }
     vcpu->created_ = true;
 
-    // Set MPIDR_EL1 (affinity) — required for GICv3 redistributor routing.
-    // Use Aff0 = index for simple topology.
     uint64_t mpidr = static_cast<uint64_t>(index) & 0xFF;
     hv_vcpu_set_sys_reg(vcpu->vcpu_, HV_SYS_REG_MPIDR_EL1, mpidr);
 
-    // Trap debug exceptions so BRK causes a VM exit
     hv_vcpu_set_trap_debug_exceptions(vcpu->vcpu_, true);
 
-    // Query the vtimer INTID from the GIC for PPI injection
     uint32_t vtimer_intid = 0;
-    hv_return_t gic_ret = hv_gic_get_intid(HV_GIC_INT_EL1_VIRTUAL_TIMER, &vtimer_intid);
-    if (gic_ret == HV_SUCCESS) {
-        vcpu->vtimer_intid_ = vtimer_intid;
+    if (__builtin_available(macOS 15.0, *)) {
+        hv_return_t gic_ret = hv_gic_get_intid(HV_GIC_INT_EL1_VIRTUAL_TIMER, &vtimer_intid);
+        if (gic_ret == HV_SUCCESS) {
+            vcpu->vtimer_intid_ = vtimer_intid;
+        } else {
+            vcpu->vtimer_intid_ = 27;
+            LOG_WARN("hvf: vCPU %u failed to get vtimer INTID (ret=%d), using default 27",
+                     index, (int)gic_ret);
+        }
     } else {
         vcpu->vtimer_intid_ = 27;
-        LOG_WARN("hvf: vCPU %u failed to get vtimer INTID (ret=%d), using default 27",
-                 index, (int)gic_ret);
     }
 
     LOG_INFO("hvf: vCPU %u created (vtimer INTID=%u)", index, vcpu->vtimer_intid_);
@@ -57,12 +62,10 @@ std::unique_ptr<HvfVCpu> HvfVCpu::Create(uint32_t index, AddressSpace* addr_spac
 }
 
 VCpuExitAction HvfVCpu::RunOnce() {
-    // Sync vtimer state: if masked, check if guest has cleared the interrupt
-    // (CNTV_CTL_EL0.ISTATUS=0 or ENABLE=0 or IMASK=1) and unmask.
     if (vtimer_masked_) {
         uint64_t ctl = 0;
         hv_vcpu_get_sys_reg(vcpu_, HV_SYS_REG_CNTV_CTL_EL0, &ctl);
-        bool irq_asserted = (ctl & 0x7) == 0x5;  // ENABLE=1, IMASK=0, ISTATUS=1
+        bool irq_asserted = (ctl & 0x7) == 0x5;
         if (!irq_asserted) {
             hv_vcpu_set_vtimer_mask(vcpu_, false);
             vtimer_masked_ = false;
@@ -75,23 +78,37 @@ VCpuExitAction HvfVCpu::RunOnce() {
         return VCpuExitAction::kError;
     }
 
+    if (s_stats_enabled_.load(std::memory_order_relaxed)) {
+        s_stats_.total.fetch_add(1, std::memory_order_relaxed);
+        PrintExitStats();
+    }
+
     switch (vcpu_exit_->reason) {
     case HV_EXIT_REASON_EXCEPTION:
+    {
+        s_stats_.exception.fetch_add(1, std::memory_order_relaxed);
         return HandleException();
+    }
 
     case HV_EXIT_REASON_CANCELED:
+    {
+        s_stats_.canceled.fetch_add(1, std::memory_order_relaxed);
         return VCpuExitAction::kContinue;
+    }
 
     case HV_EXIT_REASON_VTIMER_ACTIVATED:
     {
-        // VTimer fired. HVF auto-masks the vtimer on this exit.
+        s_stats_.vtimer_activated.fetch_add(1, std::memory_order_relaxed);
         vtimer_masked_ = true;
 
-        // Set PPI pending in GIC redistributor via GICR_ISPENDR0
         uint32_t ppi_bit = 1u << vtimer_intid_;
-        hv_return_t gic_ret = hv_gic_set_redistributor_reg(vcpu_,
-            HV_GIC_REDISTRIBUTOR_REG_GICR_ISPENDR0, ppi_bit);
-        if (gic_ret != HV_SUCCESS) {
+        if (__builtin_available(macOS 15.0, *)) {
+            hv_return_t gic_ret = hv_gic_set_redistributor_reg(vcpu_,
+                HV_GIC_REDISTRIBUTOR_REG_GICR_ISPENDR0, ppi_bit);
+            if (gic_ret != HV_SUCCESS) {
+                hv_vcpu_set_pending_interrupt(vcpu_, HV_INTERRUPT_TYPE_IRQ, true);
+            }
+        } else {
             hv_vcpu_set_pending_interrupt(vcpu_, HV_INTERRUPT_TYPE_IRQ, true);
         }
 
@@ -109,9 +126,11 @@ void HvfVCpu::CancelRun() {
     hv_vcpus_exit(&vcpu_, 1);
 }
 
+void HvfVCpu::OnStartup(const VCpuStartupState& state) {
+    SetupSecondaryCpu(state.entry_addr, state.context_id);
+}
+
 bool HvfVCpu::SetupBootRegisters(uint8_t* /*ram*/) {
-    // ARM64 boot registers are set up via SetupAarch64Boot().
-    // This x86-oriented method is a no-op on ARM64.
     return true;
 }
 
@@ -162,19 +181,28 @@ VCpuExitAction HvfVCpu::HandleException() {
 
     switch (ec) {
     case kEcWfiWfe:
+        s_stats_.ec_wfi_wfe.fetch_add(1, std::memory_order_relaxed);
         return VCpuExitAction::kHalt;
 
     case kEcDabtLower:
+        s_stats_.ec_dabt_lower.fetch_add(1, std::memory_order_relaxed);
+        return HandleDataAbort(syndrome);
+
     case kEcDabtCurr:
+        s_stats_.ec_dabt_curr.fetch_add(1, std::memory_order_relaxed);
         return HandleDataAbort(syndrome);
 
     case kEcHvc64:
+        s_stats_.ec_hvc64.fetch_add(1, std::memory_order_relaxed);
+        return HandleHvc();
+
     case kEcSmc64:
+        s_stats_.ec_smc64.fetch_add(1, std::memory_order_relaxed);
         return HandleHvc();
 
     case kEcSysReg:
-        // System register access trap — skip the instruction
         {
+            s_stats_.ec_sysreg.fetch_add(1, std::memory_order_relaxed);
             uint64_t pc;
             hv_vcpu_get_reg(vcpu_, HV_REG_PC, &pc);
             hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
@@ -183,6 +211,7 @@ VCpuExitAction HvfVCpu::HandleException() {
 
     case kEcBrk:
     {
+        s_stats_.ec_brk.fetch_add(1, std::memory_order_relaxed);
         uint16_t imm = syndrome & 0xFFFF;
         LOG_WARN("hvf: vCPU %u BRK #%u (syndrome=0x%llx) — skipping",
                  index_, imm, (unsigned long long)syndrome);
@@ -193,6 +222,7 @@ VCpuExitAction HvfVCpu::HandleException() {
     }
 
     default:
+        s_stats_.ec_other.fetch_add(1, std::memory_order_relaxed);
         LOG_ERROR("hvf: vCPU %u unhandled EC=0x%02x (syndrome=0x%llx, "
                   "VA=0x%llx, IPA=0x%llx)",
                   index_, ec,
@@ -212,42 +242,35 @@ VCpuExitAction HvfVCpu::HandleHvc() {
 
     uint32_t func_id = static_cast<uint32_t>(x0);
 
-    // HVF advances PC past HVC/SMC automatically on exception exit;
-    // do NOT add 4 here.
-    uint64_t pc;
-    hv_vcpu_get_reg(vcpu_, HV_REG_PC, &pc);
-
-    LOG_INFO("hvf: vCPU %u HVC func_id=0x%08x x1=0x%llx x2=0x%llx x3=0x%llx PC=0x%llx",
-             index_, func_id,
-             (unsigned long long)x1, (unsigned long long)x2,
-             (unsigned long long)x3, (unsigned long long)pc);
-
     switch (func_id) {
     case kPsciVersion:
+        s_stats_.hvc_version.fetch_add(1, std::memory_order_relaxed);
         hv_vcpu_set_reg(vcpu_, HV_REG_X0, 0x00010000);
         return VCpuExitAction::kContinue;
 
     case kPsciFeaturesCall:
     {
+        s_stats_.hvc_features.fetch_add(1, std::memory_order_relaxed);
         uint32_t queried = static_cast<uint32_t>(x1);
         if (queried == kPsciCpuOn64 || queried == kPsciCpuOff ||
             queried == kPsciSystemOff || queried == kPsciSystemReset ||
             queried == kPsciVersion) {
-            hv_vcpu_set_reg(vcpu_, HV_REG_X0, 0);  // supported
+            hv_vcpu_set_reg(vcpu_, HV_REG_X0, 0);
         } else {
-            hv_vcpu_set_reg(vcpu_, HV_REG_X0, static_cast<uint64_t>(-1LL));  // not supported
+            hv_vcpu_set_reg(vcpu_, HV_REG_X0, static_cast<uint64_t>(-1LL));
         }
         return VCpuExitAction::kContinue;
     }
 
     case kPsciCpuOn64:
     {
+        s_stats_.hvc_cpu_on.fetch_add(1, std::memory_order_relaxed);
         PsciCpuOnRequest req;
-        req.target_cpu = static_cast<uint32_t>(x1 & 0xFF);  // Aff0
+        req.target_cpu = static_cast<uint32_t>(x1 & 0xFF);
         req.entry_addr = x2;
         req.context_id = x3;
 
-        int result = -2;  // PSCI_RET_INVALID_PARAMETERS
+        int result = -2;
         if (psci_cpu_on_cb_) {
             result = psci_cpu_on_cb_(req);
         }
@@ -256,22 +279,25 @@ VCpuExitAction HvfVCpu::HandleHvc() {
     }
 
     case kPsciCpuOff:
+        s_stats_.hvc_cpu_off.fetch_add(1, std::memory_order_relaxed);
         LOG_INFO("hvf: vCPU %u PSCI CPU_OFF", index_);
         return VCpuExitAction::kHalt;
 
     case kPsciSystemOff:
+        s_stats_.hvc_system_off.fetch_add(1, std::memory_order_relaxed);
         LOG_INFO("hvf: PSCI SYSTEM_OFF from vCPU %u", index_);
         if (psci_shutdown_cb_) psci_shutdown_cb_();
         return VCpuExitAction::kShutdown;
 
     case kPsciSystemReset:
+        s_stats_.hvc_system_reset.fetch_add(1, std::memory_order_relaxed);
         LOG_INFO("hvf: PSCI SYSTEM_RESET from vCPU %u", index_);
         if (psci_reboot_cb_) psci_reboot_cb_();
         else if (psci_shutdown_cb_) psci_shutdown_cb_();
         return VCpuExitAction::kShutdown;
 
     default:
-        // Unknown PSCI/HVC call — return NOT_SUPPORTED
+        s_stats_.hvc_unknown.fetch_add(1, std::memory_order_relaxed);
         hv_vcpu_set_reg(vcpu_, HV_REG_X0, static_cast<uint64_t>(-1LL));
         return VCpuExitAction::kContinue;
     }
@@ -280,75 +306,148 @@ VCpuExitAction HvfVCpu::HandleHvc() {
 VCpuExitAction HvfVCpu::HandleDataAbort(uint64_t syndrome) {
     uint64_t gpa = vcpu_exit_->exception.physical_address;
 
-    // Read all general-purpose registers for instruction decode
-    uint64_t regs[31] = {};
-    for (int i = 0; i < 31; i++) {
-        hv_vcpu_get_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + i), &regs[i]);
-    }
-
-    // Try ISV fast path first, fall back to instruction decode
     MmioDecodeResult decode{};
     bool isv = (syndrome >> 24) & 1;
 
     if (isv) {
+        s_stats_.dabt_isv_valid.fetch_add(1, std::memory_order_relaxed);
         decode.is_write = (syndrome >> 6) & 1;
         uint8_t sas = (syndrome >> 22) & 3;
         decode.access_size = 1u << sas;
         decode.reg = (syndrome >> 16) & 0x1F;
         decode.is_pair = false;
 
-        if (decode.is_write) {
-            decode.write_value = (decode.reg == 31) ? 0 : regs[decode.reg];
+        if (decode.is_write && decode.reg < 31) {
+            hv_vcpu_get_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + decode.reg),
+                            &decode.write_value);
         }
     } else {
-        // Must decode the instruction from guest memory
+        s_stats_.dabt_isv_invalid.fetch_add(1, std::memory_order_relaxed);
         uint64_t pc;
         hv_vcpu_get_reg(vcpu_, HV_REG_PC, &pc);
 
-        // Fetch the 4-byte instruction from guest memory
-        // PC is a virtual address, but since we're at EL1 with identity mapping
-        // during early boot, we can use it as a physical address hint.
-        // For a proper implementation, we'd need to walk page tables.
-        // For now, assume the instruction is accessible at the faulting PC.
         uint64_t far_el2 = vcpu_exit_->exception.virtual_address;
         (void)far_el2;
 
-        // Read the instruction from ELR_EL2 (which is the guest PC)
-        // This requires the PC to be in mapped guest memory.
-        // TODO: implement proper instruction fetch from guest virtual address
         LOG_WARN("hvf: vCPU %u DABT without ISV at GPA=0x%llx — "
                  "instruction decode not yet fully implemented",
                  index_, (unsigned long long)gpa);
 
-        // Advance PC past the faulting instruction and continue
         hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
         return VCpuExitAction::kContinue;
     }
 
     if (decode.is_write) {
+        s_stats_.dabt_write.fetch_add(1, std::memory_order_relaxed);
         uint64_t value = decode.write_value;
         if (!addr_space_->HandleMmioWrite(gpa, decode.access_size, value)) {
             LOG_WARN("hvf: unhandled MMIO write at GPA=0x%llx size=%u",
                      (unsigned long long)gpa, decode.access_size);
         }
     } else {
+        s_stats_.dabt_read.fetch_add(1, std::memory_order_relaxed);
         uint64_t value = 0;
         if (!addr_space_->HandleMmioRead(gpa, decode.access_size, &value)) {
             LOG_WARN("hvf: unhandled MMIO read at GPA=0x%llx size=%u",
                      (unsigned long long)gpa, decode.access_size);
         }
-        // Write the value back to the destination register
         if (decode.reg < 31) {
             hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + decode.reg), value);
         }
     }
 
-    // Advance PC past the faulting instruction
     uint64_t pc;
     hv_vcpu_get_reg(vcpu_, HV_REG_PC, &pc);
     hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
 
     return VCpuExitAction::kContinue;
+}
+
+void HvfVCpu::PrintExitStats() {
+    auto now = std::chrono::system_clock::now().time_since_epoch();
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+
+    auto last_print = s_stats_.last_print_time.load(std::memory_order_relaxed);
+    if (now_ms - last_print < 1000) {
+        return;
+    }
+
+    if (!s_stats_.last_print_time.compare_exchange_strong(
+            last_print, now_ms, std::memory_order_relaxed)) {
+        return;
+    }
+
+    uint64_t total = s_stats_.total.load(std::memory_order_relaxed);
+    uint64_t exception = s_stats_.exception.load(std::memory_order_relaxed);
+    uint64_t vtimer = s_stats_.vtimer_activated.load(std::memory_order_relaxed);
+    uint64_t canceled = s_stats_.canceled.load(std::memory_order_relaxed);
+
+    printf("\n========== aarch64 Exit Statistics (per second) ==========\n");
+    printf("Total exits: %llu\n", (unsigned long long)total);
+    printf("  Exception: %llu\n", (unsigned long long)exception);
+    printf("  VTimer:    %llu\n", (unsigned long long)vtimer);
+    printf("  Canceled:  %llu\n", (unsigned long long)canceled);
+
+    printf("\n--- Exception Classes ---\n");
+    printf("  WFI/WFE:       %llu\n", (unsigned long long)s_stats_.ec_wfi_wfe.load(std::memory_order_relaxed));
+    printf("  HVC64:         %llu\n", (unsigned long long)s_stats_.ec_hvc64.load(std::memory_order_relaxed));
+    printf("  SMC64:         %llu\n", (unsigned long long)s_stats_.ec_smc64.load(std::memory_order_relaxed));
+    printf("  SysReg:        %llu\n", (unsigned long long)s_stats_.ec_sysreg.load(std::memory_order_relaxed));
+    printf("  DABT Lower:    %llu\n", (unsigned long long)s_stats_.ec_dabt_lower.load(std::memory_order_relaxed));
+    printf("  DABT Curr:     %llu\n", (unsigned long long)s_stats_.ec_dabt_curr.load(std::memory_order_relaxed));
+    printf("  BRK:           %llu\n", (unsigned long long)s_stats_.ec_brk.load(std::memory_order_relaxed));
+    printf("  Other:         %llu\n", (unsigned long long)s_stats_.ec_other.load(std::memory_order_relaxed));
+
+    uint64_t total_dabt = s_stats_.ec_dabt_lower.load(std::memory_order_relaxed) + 
+                          s_stats_.ec_dabt_curr.load(std::memory_order_relaxed);
+    if (total_dabt > 0) {
+        printf("\n--- Data Abort Details ---\n");
+        printf("  Total DABT:    %llu\n", (unsigned long long)total_dabt);
+        printf("  Read:          %llu\n", (unsigned long long)s_stats_.dabt_read.load(std::memory_order_relaxed));
+        printf("  Write:         %llu\n", (unsigned long long)s_stats_.dabt_write.load(std::memory_order_relaxed));
+        printf("  ISV Valid:     %llu\n", (unsigned long long)s_stats_.dabt_isv_valid.load(std::memory_order_relaxed));
+        printf("  ISV Invalid:   %llu\n", (unsigned long long)s_stats_.dabt_isv_invalid.load(std::memory_order_relaxed));
+    }
+
+    uint64_t total_hvc = s_stats_.ec_hvc64.load(std::memory_order_relaxed) + 
+                         s_stats_.ec_smc64.load(std::memory_order_relaxed);
+    if (total_hvc > 0) {
+        printf("\n--- HVC/SMC Details ---\n");
+        printf("  Total HVC/SMC: %llu\n", (unsigned long long)total_hvc);
+        printf("  PSCI Version:  %llu\n", (unsigned long long)s_stats_.hvc_version.load(std::memory_order_relaxed));
+        printf("  PSCI Features: %llu\n", (unsigned long long)s_stats_.hvc_features.load(std::memory_order_relaxed));
+        printf("  PSCI CPU_ON:   %llu\n", (unsigned long long)s_stats_.hvc_cpu_on.load(std::memory_order_relaxed));
+        printf("  PSCI CPU_OFF:  %llu\n", (unsigned long long)s_stats_.hvc_cpu_off.load(std::memory_order_relaxed));
+        printf("  PSCI SYS_OFF:  %llu\n", (unsigned long long)s_stats_.hvc_system_off.load(std::memory_order_relaxed));
+        printf("  PSCI SYS_RST:  %llu\n", (unsigned long long)s_stats_.hvc_system_reset.load(std::memory_order_relaxed));
+        printf("  Unknown:       %llu\n", (unsigned long long)s_stats_.hvc_unknown.load(std::memory_order_relaxed));
+    }
+
+    printf("==========================================================\n\n");
+
+    s_stats_.total.store(0, std::memory_order_relaxed);
+    s_stats_.exception.store(0, std::memory_order_relaxed);
+    s_stats_.vtimer_activated.store(0, std::memory_order_relaxed);
+    s_stats_.canceled.store(0, std::memory_order_relaxed);
+    s_stats_.ec_wfi_wfe.store(0, std::memory_order_relaxed);
+    s_stats_.ec_hvc64.store(0, std::memory_order_relaxed);
+    s_stats_.ec_smc64.store(0, std::memory_order_relaxed);
+    s_stats_.ec_sysreg.store(0, std::memory_order_relaxed);
+    s_stats_.ec_dabt_lower.store(0, std::memory_order_relaxed);
+    s_stats_.ec_dabt_curr.store(0, std::memory_order_relaxed);
+    s_stats_.ec_brk.store(0, std::memory_order_relaxed);
+    s_stats_.ec_other.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_version.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_features.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_cpu_on.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_cpu_off.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_system_off.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_system_reset.store(0, std::memory_order_relaxed);
+    s_stats_.hvc_unknown.store(0, std::memory_order_relaxed);
+    s_stats_.dabt_read.store(0, std::memory_order_relaxed);
+    s_stats_.dabt_write.store(0, std::memory_order_relaxed);
+    s_stats_.dabt_isv_valid.store(0, std::memory_order_relaxed);
+    s_stats_.dabt_isv_invalid.store(0, std::memory_order_relaxed);
 }
 
 } // namespace hvf

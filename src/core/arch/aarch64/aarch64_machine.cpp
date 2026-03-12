@@ -5,8 +5,8 @@
 #include <cstdio>
 
 #ifdef __APPLE__
-#include "platform/macos/hypervisor/hvf_vcpu.h"
-#include "platform/macos/hypervisor/hvf_vm.h"
+#include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
+#include "platform/macos/hypervisor/aarch64/hvf_vm.h"
 #endif
 
 bool Aarch64Machine::SetupPlatformDevices(

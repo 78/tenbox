@@ -1,4 +1,4 @@
-#include "core/device/virtio/raw_image.h"
+#include "core/disk/raw_image.h"
 
 #ifndef _WIN32
 #define _fseeki64 fseeko
@@ -49,4 +49,18 @@ bool RawDiskImage::Write(uint64_t offset, const void* buf, uint32_t len) {
 
 bool RawDiskImage::Flush() {
     return fflush(file_) == 0;
+}
+
+bool RawDiskImage::WriteZeros(uint64_t offset, uint64_t len) {
+    if (offset + len > disk_size_) return false;
+    if (_fseeki64(file_, offset, SEEK_SET) != 0) return false;
+
+    static constexpr uint32_t kChunkSize = 4096;
+    uint8_t zeros[kChunkSize] = {};
+    while (len > 0) {
+        uint32_t chunk = (len < kChunkSize) ? static_cast<uint32_t>(len) : kChunkSize;
+        if (fwrite(zeros, 1, chunk, file_) != chunk) return false;
+        len -= chunk;
+    }
+    return true;
 }

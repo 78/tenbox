@@ -23,7 +23,6 @@ class TenBoxBridgeWrapper {
                 cpuCount: Int(info.cpuCount),
                 state: VmState(rawValue: info.state) ?? .stopped,
                 netEnabled: info.netEnabled,
-                cmdline: info.cmdline,
                 sharedFolders: folders,
                 portForwards: pfs,
                 displayScale: max(1, min(2, Int(info.displayScale)))
@@ -52,8 +51,9 @@ class TenBoxBridgeWrapper {
         bridge.deleteVm(withId: id)
     }
 
-    func startVm(id: String) {
-        bridge.startVm(withId: id)
+    @discardableResult
+    func startVm(id: String) -> Bool {
+        return bridge.startVm(withId: id)
     }
 
     func stopVm(id: String) {

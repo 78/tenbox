@@ -73,11 +73,12 @@ private struct SelectImagePage: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
                     if !vm.cachedImages.isEmpty {
                         Section {
-                            ForEach(vm.cachedImages) { img in
+                            ForEach(vm.cachedImages, id: \.cacheId) { img in
                                 let tag = img.cacheId + "||cached"
                                 SelectableImageRow(image: img, isCached: true, isSelected: vm.selectedImageId == tag) {
                                     vm.selectedImageId = tag
                                 }
+                                .id(tag)
                             }
                         } header: {
                             Text("Cached")
@@ -98,11 +99,12 @@ private struct SelectImagePage: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
                         }
-                        ForEach(vm.filteredOnlineImages) { img in
+                        ForEach(vm.filteredOnlineImages, id: \.cacheId) { img in
                             let tag = img.cacheId + "||online"
                             SelectableImageRow(image: img, isCached: false, isSelected: vm.selectedImageId == tag) {
                                 vm.selectedImageId = tag
                             }
+                            .id(tag)
                         }
                     } header: {
                         Text("Online")
@@ -199,6 +201,8 @@ private struct ConfirmPage: View {
     let appState: AppState
     let dismiss: DismissAction
 
+    private let labelWidth: CGFloat = 72
+
     var body: some View {
         VStack(spacing: 0) {
             Text("Create New VM")
@@ -206,24 +210,32 @@ private struct ConfirmPage: View {
                 .fontWeight(.semibold)
                 .padding()
 
-            Form {
-                Section("General") {
-                    TextField("Name", text: $vm.vmName)
-                    Stepper("CPUs: \(vm.cpuCount)", value: $vm.cpuCount, in: 1...hostMaxCpus)
-                    Stepper("Memory: \(vm.memoryGb) GB", value: $vm.memoryGb, in: 1...hostMaxMemoryGb)
+            VStack(alignment: .leading, spacing: 16) {
+                VmFormSection(title: "General") {
+                    VmFormRow(label: "Name", labelWidth: labelWidth) {
+                        TextField("", text: $vm.vmName)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    VmFormRow(label: "CPUs", labelWidth: labelWidth) {
+                        VmSliderRow(value: $vm.cpuCount, range: 1...hostMaxCpus)
+                    }
+                    VmFormRow(label: "Memory", labelWidth: labelWidth) {
+                        VmSliderRow(value: $vm.memoryGb, range: 1...hostMaxMemoryGb, unit: "GB")
+                    }
                 }
 
                 if let img = vm.selectedImage {
-                    Section("Image") {
-                        LabeledContent("Image") {
+                    VmFormSection(title: "Image") {
+                        VmFormRow(label: "Image", labelWidth: labelWidth) {
                             Text(img.displayName)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
             }
-            .formStyle(.grouped)
-            .padding(.horizontal)
+            .padding(.horizontal, 24)
+
+            Spacer(minLength: 8)
 
             if !vm.errorMessage.isEmpty {
                 Text(vm.errorMessage)
@@ -251,6 +263,58 @@ private struct ConfirmPage: View {
                 .disabled(vm.vmName.isEmpty)
             }
             .padding(16)
+        }
+    }
+}
+
+// MARK: - Form helpers
+
+private struct VmFormSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            content()
+        }
+    }
+}
+
+private struct VmFormRow<Content: View>: View {
+    let label: String
+    let labelWidth: CGFloat
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(label)
+                .frame(width: labelWidth, alignment: .trailing)
+            content()
+        }
+    }
+}
+
+private struct VmSliderRow: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    var unit: String = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Slider(
+                value: Binding<Double>(
+                    get: { Double(value) },
+                    set: { value = Int($0.rounded()) }
+                ),
+                in: Double(range.lowerBound)...Double(range.upperBound),
+                step: 1
+            )
+            Text(unit.isEmpty ? "\(value)" : "\(value) \(unit)")
+                .monospacedDigit()
+                .frame(width: 48, alignment: .trailing)
         }
     }
 }
@@ -290,15 +354,15 @@ private struct SelectableImageRow: View {
     let onSelect: () -> Void
 
     var body: some View {
-        ImageRow(image: image, isCached: isCached)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onSelect()
-            }
+        Button(action: onSelect) {
+            ImageRow(image: image, isCached: isCached)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -660,6 +724,8 @@ struct EditVmDialog: View {
     @State private var memoryGb: Int
     @State private var cpuCount: Int
 
+    private let labelWidth: CGFloat = 72
+
     init(vm: VmInfo) {
         self.vm = vm
         _name = State(initialValue: vm.name)
@@ -674,15 +740,25 @@ struct EditVmDialog: View {
                 .fontWeight(.semibold)
                 .padding()
 
-            Form {
-                Section("General") {
-                    TextField("Name", text: $name)
-                    Stepper("CPUs: \(cpuCount)", value: $cpuCount, in: 1...hostMaxCpus)
-                    Stepper("Memory: \(memoryGb) GB", value: $memoryGb, in: 1...hostMaxMemoryGb)
+            VStack(alignment: .leading, spacing: 16) {
+                VmFormSection(title: "General") {
+                    VmFormRow(label: "Name", labelWidth: labelWidth) {
+                        TextField("", text: $name)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    VmFormRow(label: "CPUs", labelWidth: labelWidth) {
+                        VmSliderRow(value: $cpuCount, range: 1...hostMaxCpus)
+                    }
+                    VmFormRow(label: "Memory", labelWidth: labelWidth) {
+                        VmSliderRow(value: $memoryGb, range: 1...hostMaxMemoryGb, unit: "GB")
+                    }
                 }
             }
-            .formStyle(.grouped)
-            .padding(.horizontal)
+            .padding(.horizontal, 24)
+
+            Spacer(minLength: 8)
+
+            Divider()
 
             HStack {
                 Button("Cancel") { dismiss() }
@@ -692,9 +768,9 @@ struct EditVmDialog: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(name.isEmpty)
             }
-            .padding()
+            .padding(16)
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 450, height: 280)
     }
 
     private func saveVm() {

@@ -20,7 +20,7 @@ public:
     void Layout(HWND hwnd, HFONT ui_font, int px, int py, int pw, int ph);
     void Update(const VmSpec* spec);
 
-    static constexpr int kDetailRows = 7;
+    static constexpr int kDetailRows = 6;
 
 private:
     HWND labels_[kDetailRows] = {};

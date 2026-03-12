@@ -60,7 +60,6 @@ struct VmInfo: Identifiable, Codable {
     let cpuCount: Int
     let state: VmState
     let netEnabled: Bool
-    let cmdline: String
     let sharedFolders: [SharedFolder]
     let portForwards: [PortForward]
     let displayScale: Int

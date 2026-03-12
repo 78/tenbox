@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <atomic>
+#include <mutex>
 
 #include <Hypervisor/Hypervisor.h>
 
@@ -39,12 +41,16 @@ public:
     uint32_t Index() const override { return index_; }
     bool SetupBootRegisters(uint8_t* ram) override;
 
+    void OnStartup(const VCpuStartupState& state) override;
+
     bool SetupAarch64Boot(uint64_t entry_pc, uint64_t fdt_addr);
     bool SetupSecondaryCpu(uint64_t entry_pc, uint64_t context_id);
 
     void SetPsciCpuOnCallback(PsciCpuOnCallback cb) { psci_cpu_on_cb_ = std::move(cb); }
     void SetPsciShutdownCallback(PsciShutdownCallback cb) { psci_shutdown_cb_ = std::move(cb); }
     void SetPsciRebootCallback(PsciRebootCallback cb) { psci_reboot_cb_ = std::move(cb); }
+
+    static void EnableExitStats(bool on) { s_stats_enabled_.store(on, std::memory_order_relaxed); }
 
 private:
     HvfVCpu() = default;
@@ -54,6 +60,40 @@ private:
     VCpuExitAction HandleDataAbort(uint64_t syndrome);
     bool DoMmioRead(uint64_t gpa, uint8_t size, uint8_t reg);
     bool DoMmioWrite(uint64_t gpa, uint8_t size, uint64_t value);
+
+    struct ExitStats {
+        std::atomic<uint64_t> total{0};
+        std::atomic<uint64_t> exception{0};
+        std::atomic<uint64_t> vtimer_activated{0};
+        std::atomic<uint64_t> canceled{0};
+
+        std::atomic<uint64_t> ec_wfi_wfe{0};
+        std::atomic<uint64_t> ec_hvc64{0};
+        std::atomic<uint64_t> ec_smc64{0};
+        std::atomic<uint64_t> ec_sysreg{0};
+        std::atomic<uint64_t> ec_dabt_lower{0};
+        std::atomic<uint64_t> ec_dabt_curr{0};
+        std::atomic<uint64_t> ec_brk{0};
+        std::atomic<uint64_t> ec_other{0};
+
+        std::atomic<uint64_t> hvc_version{0};
+        std::atomic<uint64_t> hvc_features{0};
+        std::atomic<uint64_t> hvc_cpu_on{0};
+        std::atomic<uint64_t> hvc_cpu_off{0};
+        std::atomic<uint64_t> hvc_system_off{0};
+        std::atomic<uint64_t> hvc_system_reset{0};
+        std::atomic<uint64_t> hvc_unknown{0};
+
+        std::atomic<uint64_t> dabt_read{0};
+        std::atomic<uint64_t> dabt_write{0};
+        std::atomic<uint64_t> dabt_isv_valid{0};
+        std::atomic<uint64_t> dabt_isv_invalid{0};
+
+        std::atomic<uint64_t> last_print_time{0};
+    };
+    static ExitStats s_stats_;
+    static std::atomic<bool> s_stats_enabled_;
+    static void PrintExitStats();
 
     uint32_t index_ = 0;
     hv_vcpu_t vcpu_ = 0;

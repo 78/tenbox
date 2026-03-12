@@ -27,6 +27,8 @@ public:
     bool HandleMmioRead(uint64_t addr, uint8_t size, uint64_t* value);
     bool HandleMmioWrite(uint64_t addr, uint8_t size, uint64_t value);
 
+    bool IsMmioAddress(uint64_t addr) const;
+
 private:
     Device* FindPioDevice(uint16_t port, uint16_t* offset) const;
     Device* FindMmioDevice(uint64_t addr, uint64_t* offset) const;

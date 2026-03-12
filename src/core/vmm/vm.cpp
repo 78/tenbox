@@ -2,15 +2,18 @@
 #include "core/vmm/vm_platform.h"
 #include <algorithm>
 
-#ifdef _WIN32
+#if defined(__APPLE__) && defined(__x86_64__)
 #include "core/arch/x86_64/x86_machine.h"
+#include "platform/macos/hypervisor/x86_64/hvf_vcpu.h"
 #elif defined(__APPLE__) && defined(__aarch64__)
 #include "core/arch/aarch64/aarch64_machine.h"
-#include "platform/macos/hypervisor/hvf_vcpu.h"
+#include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
+#elif defined(_WIN32)
+#include "core/arch/x86_64/x86_machine.h"
 #endif
 
 static std::unique_ptr<MachineModel> CreateMachineModel() {
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
     return std::make_unique<X86Machine>();
 #elif defined(__APPLE__) && defined(__aarch64__)
     return std::make_unique<Aarch64Machine>();
@@ -20,11 +23,19 @@ static std::unique_ptr<MachineModel> CreateMachineModel() {
 #endif
 }
 
-static std::string GetDefaultCmdline() {
+static std::string GetDefaultCmdline(bool debug_mode) {
 #ifdef __aarch64__
-    return "console=ttyAMA0 earlycon root=/dev/vda1 rw";
+    if (debug_mode) {
+        return "console=ttyAMA0 earlycon root=/dev/vda1 rw";
+    } else {
+        return "console=ttyAMA0 quiet loglevel=4 earlycon root=/dev/vda1 rw";
+    }
 #else
-    return "console=ttyS0 earlyprintk=serial lapic no_timer_check tsc=reliable i8042.noprobe";
+    if (debug_mode) {
+        return "console=ttyS0 earlyprintk=serial lapic tsc=reliable clocksource=kvm-clock no_timer_check i8042.noprobe";
+    } else {
+        return "console=ttyS0 quiet loglevel=4 lapic tsc=reliable clocksource=kvm-clock no_timer_check i8042.noprobe";
+    }
 #endif
 }
 
@@ -83,6 +94,8 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     uint64_t ram_bytes = config.memory_mb * 1024 * 1024;
     if (!vm->AllocateMemory(ram_bytes)) return nullptr;
 
+    vm->hv_vm_->SetGuestMemMap(&vm->mem_);
+
     if (!vm->machine_->SetupPlatformDevices(
             vm->addr_space_, vm->mem_, vm->hv_vm_.get(),
             vm->console_port_,
@@ -91,6 +104,50 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
         LOG_ERROR("Failed to set up platform devices");
         return nullptr;
     }
+
+    vm->vcpu_startup_.resize(config.cpu_count);
+    for (uint32_t i = 0; i < config.cpu_count; i++) {
+        vm->vcpu_startup_[i] = std::make_unique<VCpuStartupState>();
+    }
+
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
+    {
+        auto* x86m = dynamic_cast<X86Machine*>(vm->machine_.get());
+        if (x86m) {
+            x86m->InitLapic(config.cpu_count);
+            x86m->SetInitCallback([&vm_ref = *vm](uint32_t target_cpu) {
+                if (target_cpu >= vm_ref.cpu_count_) return;
+                auto& state = vm_ref.vcpu_startup_[target_cpu];
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->init_received = true;
+            });
+            x86m->SetSipiCallback([&vm_ref = *vm](uint32_t target_cpu, uint8_t vector) {
+                if (target_cpu >= vm_ref.cpu_count_) return;
+                auto& state = vm_ref.vcpu_startup_[target_cpu];
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (!state->init_received) return;
+                if (state->started) return;
+                state->sipi_vector = vector;
+                state->started = true;
+                state->cv.notify_one();
+            });
+            x86m->SetIpiCallback([&vm_ref = *vm](uint32_t vector, uint32_t dest, uint8_t shorthand) {
+                uint32_t sender = LocalApic::GetCurrentCpu();
+                if (shorthand == 0) {
+                    vm_ref.hv_vm_->QueueInterrupt(vector, dest);
+                } else if (shorthand == 1) {
+                    vm_ref.hv_vm_->QueueInterrupt(vector, sender);
+                } else if (shorthand == 2) {
+                    for (uint32_t i = 0; i < vm_ref.cpu_count_; i++)
+                        vm_ref.hv_vm_->QueueInterrupt(vector, i);
+                } else if (shorthand == 3) {
+                    for (uint32_t i = 0; i < vm_ref.cpu_count_; i++)
+                        if (i != sender) vm_ref.hv_vm_->QueueInterrupt(vector, i);
+                }
+            });
+        }
+    }
+#endif
 
     auto slots = vm->machine_->GetVirtioSlots();
 
@@ -115,41 +172,66 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (!vm->SetupVirtioSnd(slots[7]))
         return nullptr;
 
-    // Use config cmdline, fall back to platform default
-    VmConfig effective_config = config;
-    if (effective_config.cmdline.empty()) {
-        effective_config.cmdline = GetDefaultCmdline();
-    }
-
-    if (!vm->machine_->LoadKernel(effective_config, vm->mem_, vm->active_virtio_slots_)) {
-        LOG_ERROR("Failed to load kernel");
-        return nullptr;
-    }
-
     vm->cpu_count_ = config.cpu_count;
-
-#ifdef __APPLE__
+    // Resize the vCPU slot vector; actual vCPU objects are created per-thread.
     vm->vcpus_.resize(config.cpu_count);
-    // Allocate per-CPU state for secondary PSCI wakeup
-    vm->secondary_cpu_states_.resize(config.cpu_count);
-    for (uint32_t i = 0; i < config.cpu_count; i++) {
-        vm->secondary_cpu_states_[i] = std::make_unique<Vm::SecondaryCpuState>();
-    }
-#else
-    for (uint32_t i = 0; i < config.cpu_count; i++) {
-        auto vcpu = vm->hv_vm_->CreateVCpu(i, &vm->addr_space_);
-        if (!vcpu) return nullptr;
-        vm->vcpus_.push_back(std::move(vcpu));
-    }
 
-    if (!vm->machine_->SetupBootVCpu(vm->vcpus_[0].get(), vm->mem_.base)) {
-        LOG_ERROR("Failed to set initial vCPU registers");
-        return nullptr;
+    // Save config for FinalizeBoot (called inside Run after all vCPUs are ready).
+    vm->boot_config_ = config;
+    if (vm->boot_config_.cmdline.empty()) {
+        vm->boot_config_.cmdline = GetDefaultCmdline(config.debug_mode);
     }
-#endif
 
     LOG_INFO("VM created successfully (%u vCPUs)", config.cpu_count);
     return vm;
+}
+
+void Vm::SetupVCpuCallbacks(uint32_t vcpu_index) {
+#if defined(__APPLE__) && defined(__aarch64__)
+    auto* hvf_vcpu = dynamic_cast<hvf::HvfVCpu*>(vcpus_[vcpu_index].get());
+    if (hvf_vcpu) {
+        hvf_vcpu->SetPsciCpuOnCallback([this](const hvf::PsciCpuOnRequest& req) -> int {
+            if (req.target_cpu >= cpu_count_) return -2;
+            auto& state = vcpu_startup_[req.target_cpu];
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->started) return -4;
+            state->entry_addr = req.entry_addr;
+            state->context_id = req.context_id;
+            state->started = true;
+            state->cv.notify_one();
+            return 0;
+        });
+        hvf_vcpu->SetPsciShutdownCallback([this]() { RequestStop(); });
+        hvf_vcpu->SetPsciRebootCallback([this]() { RequestReboot(); });
+    }
+#else
+    (void)vcpu_index;
+#endif
+}
+
+void Vm::FinalizeBoot(const VmConfig& config) {
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
+    {
+        auto* x86m = dynamic_cast<X86Machine*>(machine_.get());
+        if (x86m) {
+            std::vector<uint32_t> apic_ids;
+            for (auto& vcpu : vcpus_) {
+                apic_ids.push_back(vcpu->ApicId());
+            }
+            x86m->SetApicIds(std::move(apic_ids));
+        }
+    }
+#endif
+
+    if (!machine_->LoadKernel(config, mem_, active_virtio_slots_)) {
+        LOG_ERROR("Failed to load kernel");
+        RequestStop();
+        return;
+    }
+
+    // NOTE: SetupBootVCpu is called from vCPU 0's own thread (after
+    // boot_complete_) because HVF requires register writes to happen on the
+    // thread that created the vCPU.
 }
 
 bool Vm::AllocateMemory(uint64_t size) {
@@ -405,58 +487,52 @@ bool Vm::SetupVirtioSnd(const VirtioDeviceSlot& slot) {
 }
 
 void Vm::VCpuThreadFunc(uint32_t vcpu_index) {
-#ifdef __APPLE__
+    // Phase 1: create vCPU on this thread (required by HVF; harmless on WHVP).
     auto created = hv_vm_->CreateVCpu(vcpu_index, &addr_space_);
     if (!created) {
-        LOG_ERROR("vCPU %u: failed to create on thread", vcpu_index);
+        LOG_ERROR("vCPU %u: failed to create", vcpu_index);
         RequestStop();
         return;
     }
     vcpus_[vcpu_index] = std::move(created);
 
-    // Set up PSCI callbacks
-    {
-        auto* hvf_vcpu = dynamic_cast<hvf::HvfVCpu*>(vcpus_[vcpu_index].get());
-        if (hvf_vcpu) {
-            hvf_vcpu->SetPsciCpuOnCallback([this](const hvf::PsciCpuOnRequest& req) -> int {
-                if (req.target_cpu >= cpu_count_) return -2;  // INVALID_PARAMETERS
-                auto& state = secondary_cpu_states_[req.target_cpu];
-                std::lock_guard<std::mutex> lock(state->mutex);
-                if (state->powered_on) return -4;  // ALREADY_ON
-                state->entry_addr = req.entry_addr;
-                state->context_id = req.context_id;
-                state->powered_on = true;
-                state->cv.notify_one();
-                return 0;  // SUCCESS
-            });
-            hvf_vcpu->SetPsciShutdownCallback([this]() {
-                RequestStop();
-            });
-            hvf_vcpu->SetPsciRebootCallback([this]() {
-                RequestReboot();
-            });
-        }
-    }
+    // Perform any thread-local initialisation (e.g. LocalApic::SetCurrentCpu).
+    vcpus_[vcpu_index]->OnThreadInit();
 
+    // Install platform-specific callbacks (PSCI on ARM64; no-op elsewhere).
+    SetupVCpuCallbacks(vcpu_index);
+
+    // Signal the main thread that this vCPU is ready.
+    vcpus_ready_.fetch_add(1);
+    boot_cv_.notify_all();
+
+    // Wait for FinalizeBoot (kernel load) to complete.
+    {
+        std::unique_lock<std::mutex> lock(boot_mutex_);
+        boot_cv_.wait(lock, [this] { return boot_complete_ || !running_; });
+    }
+    if (!running_) return;
+
+    // BSP (vCPU 0) sets its own boot registers on this thread, because HVF
+    // requires hv_vcpu_set_reg to be called from the creating thread.
     if (vcpu_index == 0) {
         if (!machine_->SetupBootVCpu(vcpus_[0].get(), mem_.base)) {
             LOG_ERROR("Failed to set initial vCPU registers");
             RequestStop();
             return;
         }
-    } else {
-        // Secondary vCPU: wait for PSCI CPU_ON
-        auto& state = secondary_cpu_states_[vcpu_index];
-        std::unique_lock<std::mutex> lock(state->mutex);
-        state->cv.wait(lock, [&]() { return state->powered_on || !running_; });
-        if (!running_) return;
-
-        auto* hvf_vcpu = dynamic_cast<hvf::HvfVCpu*>(vcpus_[vcpu_index].get());
-        if (hvf_vcpu) {
-            hvf_vcpu->SetupSecondaryCpu(state->entry_addr, state->context_id);
-        }
     }
-#endif
+
+    // Phase 2: AP threads wait for their startup signal (BSP runs immediately).
+    // Hypervisors that manage AP startup internally (e.g. WHVP) skip the wait.
+    if (vcpu_index > 0 && vcpus_[vcpu_index]->NeedsStartupWait()) {
+        auto& state = vcpu_startup_[vcpu_index];
+        std::unique_lock<std::mutex> lock(state->mutex);
+        state->cv.wait(lock, [&] { return state->started || !running_; });
+        if (!running_) return;
+        vcpus_[vcpu_index]->OnStartup(*state);
+    }
+
     auto& vcpu = vcpus_[vcpu_index];
     uint64_t exit_count = 0;
 
@@ -469,7 +545,7 @@ void Vm::VCpuThreadFunc(uint32_t vcpu_index) {
             break;
 
         case VCpuExitAction::kHalt:
-            VmPlatform::YieldCpu();
+            vcpu->WaitForInterrupt(100);
             break;
 
         case VCpuExitAction::kShutdown:
@@ -495,9 +571,30 @@ int Vm::Run() {
     running_ = true;
     LOG_INFO("Starting VM execution...");
 
+    // Phase 1: launch threads; each creates its vCPU then signals ready.
     for (uint32_t i = 0; i < cpu_count_; i++) {
         vcpu_threads_.emplace_back(&Vm::VCpuThreadFunc, this, i);
     }
+
+    // Wait until all vCPUs are created (or a failure triggers RequestStop).
+    {
+        std::unique_lock<std::mutex> lock(boot_mutex_);
+        boot_cv_.wait(lock, [this] {
+            return vcpus_ready_.load() >= cpu_count_ || !running_;
+        });
+    }
+
+    if (running_) {
+        // Load the kernel, set APIC IDs in ACPI MADT, and configure BSP registers.
+        FinalizeBoot(boot_config_);
+    }
+
+    // Phase 2: release all threads into their run loops.
+    {
+        std::lock_guard<std::mutex> lock(boot_mutex_);
+        boot_complete_ = true;
+    }
+    boot_cv_.notify_all();
 
     for (auto& t : vcpu_threads_) {
         t.join();
@@ -508,8 +605,10 @@ int Vm::Run() {
 
 void Vm::RequestStop() {
     running_ = false;
-    // Wake any secondary vCPUs waiting for PSCI CPU_ON
-    for (auto& state : secondary_cpu_states_) {
+    // Wake threads blocked in the boot barrier.
+    boot_cv_.notify_all();
+    // Wake any vCPUs blocked in their per-CPU startup wait.
+    for (auto& state : vcpu_startup_) {
         if (state) {
             std::lock_guard<std::mutex> lock(state->mutex);
             state->cv.notify_all();

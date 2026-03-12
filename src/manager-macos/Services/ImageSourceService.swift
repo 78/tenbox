@@ -69,7 +69,9 @@ class ImageSourceService: ObservableObject {
         guard let url = URL(string: sourceUrl) else {
             throw ImageSourceError.invalidUrl
         }
-        let (data, _) = try await URLSession.shared.data(from: url)
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, _) = try await URLSession.shared.data(for: request)
         let response = try JSONDecoder().decode(ImagesResponse.self, from: data)
         return response.images
     }

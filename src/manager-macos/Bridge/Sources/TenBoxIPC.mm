@@ -321,6 +321,12 @@ static std::string HexDecode(const std::string& hex) {
                   guestAgentStateHandler:(void (^)(BOOL))guestAgentStateHandler
                     displayStateHandler:(void (^)(BOOL, uint32_t, uint32_t))displayStateHandler
                        disconnectHandler:(void (^)(void))disconnectHandler {
+    if (_recvThread.joinable()) {
+        _running = false;
+        if (_connection) _connection->Close();
+        _recvThread.join();
+    }
+
     _running = true;
 
     typedef void (^FrameBlock)(NSData *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);

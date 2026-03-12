@@ -181,11 +181,12 @@ static uint32_t BuildDsdt(uint8_t* buf,
         *p++ = static_cast<uint8_t>(d.size >> 16);
         *p++ = static_cast<uint8_t>(d.size >> 24);
 
-        // Interrupt(ResourceConsumer, Level, ActiveHigh, Exclusive) {irq}
+        // Interrupt(ResourceConsumer, Edge, ActiveHigh, Exclusive) {irq}
+        // Edge-triggered avoids APIC EOI VM exits on WHVP.
         // — 9 bytes
         *p++ = 0x89; // tag
         *p++ = 0x06; *p++ = 0x00; // length=6
-        *p++ = 0x01; // flags: ResourceConsumer, Level, ActiveHigh, Exclusive
+        *p++ = 0x03; // flags: ResourceConsumer, Edge, ActiveHigh, Exclusive
         *p++ = 0x01; // interrupt table length
         *p++ = static_cast<uint8_t>(d.irq);
         *p++ = static_cast<uint8_t>(d.irq >> 8);
@@ -310,7 +311,8 @@ static void BuildFadt(uint8_t* buf, GPA dsdt_addr) {
 // ---------------------------------------------------------------------------
 
 GPA BuildAcpiTables(uint8_t* ram, uint32_t num_cpus,
-                    const std::vector<VirtioMmioAcpiInfo>& virtio_devs) {
+                    const std::vector<VirtioMmioAcpiInfo>& virtio_devs,
+                    const std::vector<uint32_t>& apic_ids) {
 
     // --- MADT ---
     uint8_t* madt_base = ram + AcpiLayout::kMadt;
@@ -332,7 +334,9 @@ GPA BuildAcpiTables(uint8_t* ram, uint32_t num_cpus,
         entry->type = 0;
         entry->length = sizeof(MadtLocalApic);
         entry->processor_id = static_cast<uint8_t>(i);
-        entry->apic_id = static_cast<uint8_t>(i);
+        entry->apic_id = (i < apic_ids.size())
+            ? static_cast<uint8_t>(apic_ids[i])
+            : static_cast<uint8_t>(i);
         entry->flags = 1;
         p += sizeof(MadtLocalApic);
     }

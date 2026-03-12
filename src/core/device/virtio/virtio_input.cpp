@@ -54,12 +54,7 @@ void VirtioInputDevice::UpdateConfigData() {
         break;
     }
     case VIRTIO_INPUT_CFG_PROP_BITS:
-        if (sub_type_ == SubType::kTablet) {
-            SetBit(config_.data, INPUT_PROP_DIRECT);
-            config_.size = 1;
-        } else {
-            config_.size = 0;
-        }
+        config_.size = 0;
         break;
     case VIRTIO_INPUT_CFG_EV_BITS: {
         if (sub_type_ == SubType::kKeyboard) {
@@ -96,8 +91,7 @@ void VirtioInputDevice::UpdateConfigData() {
                 SetBit(config_.data, BTN_LEFT);
                 SetBit(config_.data, BTN_RIGHT);
                 SetBit(config_.data, BTN_MIDDLE);
-                SetBit(config_.data, BTN_TOUCH);
-                config_.size = static_cast<uint8_t>((BTN_TOUCH / 8) + 1);
+                config_.size = static_cast<uint8_t>((BTN_MIDDLE / 8) + 1);
             } else if (config_.subsel == EV_SYN) {
                 SetBit(config_.data, SYN_REPORT);
                 config_.size = 1;
@@ -182,7 +176,7 @@ void VirtioInputDevice::InjectEvent(uint16_t type, uint16_t code,
         // Without this, previously pushed entries sit un-notified and the
         // guest never recycles buffers -- permanent deadlock.
         if (notify) {
-            mmio_->NotifyUsedBuffer();
+            mmio_->NotifyUsedBuffer(0);
         }
         return;
     }
@@ -191,7 +185,7 @@ void VirtioInputDevice::InjectEvent(uint16_t type, uint16_t code,
     if (!vq->WalkChain(head, &chain)) {
         vq->PushUsed(head, 0);
         if (notify) {
-            mmio_->NotifyUsedBuffer();
+            mmio_->NotifyUsedBuffer(0);
         }
         return;
     }
@@ -208,6 +202,6 @@ void VirtioInputDevice::InjectEvent(uint16_t type, uint16_t code,
 
     vq->PushUsed(head, written);
     if (notify) {
-        mmio_->NotifyUsedBuffer();
+        mmio_->NotifyUsedBuffer(0);
     }
 }

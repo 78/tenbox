@@ -142,7 +142,7 @@ void VirtioSerialDevice::HandleControlMessage(VirtQueue& vq) {
     }
 
     if (mmio_) {
-        mmio_->NotifyUsedBuffer();
+        mmio_->NotifyUsedBuffer(3);
     }
 }
 
@@ -189,7 +189,7 @@ void VirtioSerialDevice::SendControlMessage(uint32_t port_id, uint16_t event, ui
     std::vector<VirtqChainElem> chain;
     if (!vq->WalkChain(head, &chain)) {
         vq->PushUsed(head, 0);
-        mmio_->NotifyUsedBuffer();
+        mmio_->NotifyUsedBuffer(2);
         return;
     }
 
@@ -208,7 +208,7 @@ void VirtioSerialDevice::SendControlMessage(uint32_t port_id, uint16_t event, ui
     }
 
     vq->PushUsed(head, written);
-    mmio_->NotifyUsedBuffer();
+    mmio_->NotifyUsedBuffer(2);
 
     LOG_DEBUG("VirtIO Serial: sent control port=%u event=%u value=%u",
               port_id, event, value);
@@ -228,7 +228,7 @@ void VirtioSerialDevice::SendPortName(uint32_t port_id) {
     std::vector<VirtqChainElem> chain;
     if (!vq->WalkChain(head, &chain)) {
         vq->PushUsed(head, 0);
-        mmio_->NotifyUsedBuffer();
+        mmio_->NotifyUsedBuffer(2);
         return;
     }
 
@@ -251,7 +251,7 @@ void VirtioSerialDevice::SendPortName(uint32_t port_id) {
     }
 
     vq->PushUsed(head, written);
-    mmio_->NotifyUsedBuffer();
+    mmio_->NotifyUsedBuffer(2);
 
     LOG_INFO("VirtIO Serial: sent port name '%s' for port %u", name.c_str(), port_id);
 }
@@ -303,6 +303,6 @@ bool VirtioSerialDevice::SendData(uint32_t port_id, const uint8_t* data, size_t 
         vq->PushUsed(head, written);
     }
 
-    mmio_->NotifyUsedBuffer();
+    mmio_->NotifyUsedBuffer(rx_queue);
     return offset == len;
 }

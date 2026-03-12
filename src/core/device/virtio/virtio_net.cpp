@@ -66,7 +66,7 @@ void VirtioNetDevice::OnQueueNotify(uint32_t queue_idx, VirtQueue& vq) {
 
         vq.PushUsed(head, 0);
     }
-    mmio_->NotifyUsedBuffer();
+    mmio_->NotifyUsedBuffer(1);
 }
 
 bool VirtioNetDevice::InjectRx(const uint8_t* frame, uint32_t len) {
@@ -103,7 +103,7 @@ bool VirtioNetDevice::InjectRx(const uint8_t* frame, uint32_t len) {
     }
 
     vq->PushUsed(head, written);
-    mmio_->NotifyUsedBuffer();
+    mmio_->NotifyUsedBuffer(0);
     return true;
 }
 

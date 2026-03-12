@@ -17,7 +17,7 @@ enum EditDlgId {
     IDC_ED_CPU_LABEL   = 205,
     IDC_ED_CPU_SLIDER  = 206,
     IDC_ED_CPU_VALUE   = 207,
-    IDC_ED_NAT         = 208,
+    IDC_ED_DEBUG       = 208,
     IDC_ED_WARN        = 209,
     IDC_ED_OK          = IDOK,
 };
@@ -58,7 +58,7 @@ static LRESULT CALLBACK EditDlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARA
             form.name               = GetDlgText(dlg, IDC_ED_NAME);
             form.memory_mb          = mem_gb * 1024;
             form.cpu_count          = cpu_count;
-            form.nat_enabled        = IsDlgButtonChecked(dlg, IDC_ED_NAT) == BST_CHECKED;
+            form.debug_mode         = IsDlgButtonChecked(dlg, IDC_ED_DEBUG) == BST_CHECKED;
             form.apply_on_next_boot = running;
 
             auto patch = BuildVmPatch(form, data->rec.spec);
@@ -180,9 +180,9 @@ bool ShowEditVmDialog(HWND parent, ManagerService& mgr,
         IDC_ED_CPU_SLIDER, IDC_ED_CPU_VALUE, scale_px);
     ctrl_y += layout.form_row_h;
 
-    CreateWindowExW(0, L"BUTTON", i18n::tr_w(S::kDlgEnableNat).c_str(),
+    CreateWindowExW(0, L"BUTTON", i18n::tr_w(S::kDlgDebugMode).c_str(),
         WS_CHILD | BS_AUTOCHECKBOX, layout.edit_x, ctrl_y + scale_px(4), edit_w, scale_px(22),
-        dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ED_NAT)),
+        dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ED_DEBUG)),
         nullptr, nullptr);
     ctrl_y += layout.form_row_h;
 
@@ -227,12 +227,13 @@ bool ShowEditVmDialog(HWND parent, ManagerService& mgr,
     if (cur_cpus > host_cpus) cur_cpus = host_cpus;
     InitSlider(dlg, IDC_ED_CPU_SLIDER, IDC_ED_CPU_VALUE, 1, host_cpus, cur_cpus, false);
 
-    CheckDlgButton(dlg, IDC_ED_NAT, rec.spec.nat_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dlg, IDC_ED_DEBUG, rec.spec.debug_mode ? BST_CHECKED : BST_UNCHECKED);
 
     bool running = rec.state == VmPowerState::kRunning ||
                    rec.state == VmPowerState::kStarting;
     EnableWindow(GetDlgItem(dlg, IDC_ED_MEM_SLIDER), !running);
     EnableWindow(GetDlgItem(dlg, IDC_ED_CPU_SLIDER), !running);
+    EnableWindow(GetDlgItem(dlg, IDC_ED_DEBUG), !running);
     if (running)
         SetDlgItemTextW(dlg, IDC_ED_WARN, i18n::tr_w(S::kCpuMemoryChangeWarning).c_str());
 

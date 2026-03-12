@@ -1,9 +1,9 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 5.7
 import PackageDescription
 
 let package = Package(
     name: "TenBoxManager",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v12)],
     products: [
         .executable(name: "TenBoxManager", targets: ["TenBoxManager"]),
     ],

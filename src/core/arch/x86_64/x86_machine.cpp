@@ -36,6 +36,7 @@ bool X86Machine::SetupPlatformDevices(
     addr_space.AddPioDevice(
         Uart16550::kCom1Base, Uart16550::kRegCount, &uart_);
 
+    pit_.SetIrqCallback([this]() { irq_injector_(0); });
     addr_space.AddPioDevice(
         I8254Pit::kBasePort, I8254Pit::kRegCount, &pit_);
     sys_ctrl_b_.SetPit(&pit_);
@@ -47,6 +48,13 @@ bool X86Machine::SetupPlatformDevices(
 
     addr_space.AddMmioDevice(
         IoApic::kBaseAddress, IoApic::kSize, &ioapic_);
+
+    lapic_.SetIrqInjectCallback([hv_vm](uint32_t vector, uint32_t cpu) {
+        hv_vm->QueueInterrupt(vector, cpu);
+    });
+    addr_space.AddMmioDevice(
+        LocalApic::kBaseAddress, LocalApic::kSize, &lapic_);
+    lapic_.Start();
 
     acpi_pm_.SetShutdownCallback(std::move(shutdown_cb));
     acpi_pm_.SetResetCallback(std::move(reboot_cb));
@@ -91,6 +99,7 @@ bool X86Machine::LoadKernel(
     boot_cfg.mem = mem;
     boot_cfg.cpu_count = config.cpu_count;
     boot_cfg.virtio_devs = acpi_devs;
+    boot_cfg.apic_ids = apic_ids_;
 
     uint64_t kernel_size = x86::LoadLinuxKernel(boot_cfg);
     return kernel_size != 0;

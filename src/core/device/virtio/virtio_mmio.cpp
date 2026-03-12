@@ -1,5 +1,8 @@
 #include "core/device/virtio/virtio_mmio.h"
 
+static constexpr uint64_t VIRTIO_RING_F_INDIRECT_DESC = (1ULL << 28);
+static constexpr uint64_t VIRTIO_F_EVENT_IDX = (1ULL << 29);
+
 void VirtioMmioDevice::Init(VirtioDeviceOps* ops, const GuestMemMap& mem) {
     ops_ = ops;
     mem_ = mem;
@@ -52,7 +55,7 @@ void VirtioMmioDevice::MmioRead(uint64_t offset, uint8_t size,
         val = kVendorId;
         break;
     case kDeviceFeatures: {
-        uint64_t features = ops_->GetDeviceFeatures();
+        uint64_t features = ops_->GetDeviceFeatures() | VIRTIO_RING_F_INDIRECT_DESC | VIRTIO_F_EVENT_IDX;
         val = static_cast<uint32_t>(features >> (device_features_sel_ * 32));
         break;
     }
@@ -131,10 +134,8 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
                 vq.SetDriverAddr(cfg.driver_addr);
                 vq.SetDeviceAddr(cfg.device_addr);
                 vq.SetReady(true);
-                LOG_INFO("VirtIO queue %u ready: size=%u desc=0x%llX "
-                         "driver=0x%llX device=0x%llX",
-                         queue_sel_, qs, cfg.desc_addr,
-                         cfg.driver_addr, cfg.device_addr);
+                LOG_DEBUG("VirtIO queue %u ready: size=%u desc=0x%llX driver=0x%llX device=0x%llX",
+                         queue_sel_, qs, cfg.desc_addr, cfg.driver_addr, cfg.device_addr);
             } else {
                 queues_[queue_sel_].SetReady(false);
             }
@@ -157,7 +158,15 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
             DoReset();
             ops_->OnStatusChange(0);
         } else {
+            uint32_t prev = status_;
             status_ = val;
+            // When FEATURES_OK (bit 3) is first set, feature negotiation is done.
+            // Propagate EVENT_IDX to all queues.
+            if ((val & 0x8) && !(prev & 0x8)) {
+                bool event_idx = (driver_features_ & VIRTIO_F_EVENT_IDX) != 0;
+                for (auto& vq : queues_)
+                    vq.SetEventIdx(event_idx);
+            }
             ops_->OnStatusChange(val);
         }
         break;
@@ -204,7 +213,12 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
     }
 }
 
-void VirtioMmioDevice::NotifyUsedBuffer() {
+void VirtioMmioDevice::NotifyUsedBuffer(int queue_idx) {
+    if (queue_idx >= 0 && queue_idx < static_cast<int>(queues_.size())) {
+        if (!queues_[queue_idx].ShouldNotifyGuest())
+            return;
+    }
+
     interrupt_status_.fetch_or(1, std::memory_order_release);  // VIRTIO_MMIO_INT_VRING
     if (irq_level_callback_)
         irq_level_callback_(true);

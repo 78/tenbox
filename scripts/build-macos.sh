@@ -1,11 +1,9 @@
 #!/bin/bash
-# Build TenBox for macOS (Apple Silicon).
+# Build TenBox for macOS as a Universal Binary (arm64 + x86_64).
 #
-# This script builds:
-#   1. tenbox-vm-runtime (C++ via CMake)
-#   2. TenBoxManager (Swift/Obj-C++ via SPM)
-#   3. Assembles TenBox.app bundle
-#   4. Signs and optionally creates DMG
+# This script builds both architectures, merges them with lipo, and produces:
+#   build/TenBox-{ver}.app  (universal)
+#   build/TenBox-{ver}.zip  (for Sparkle updates)
 #
 # Usage:
 #   ./build-macos.sh [--release|--debug]
@@ -38,16 +36,15 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-ARCH=$(uname -m)  # arm64 or x86_64
-
 BUILD_DIR="$ROOT_DIR/build"
 MANAGER_SRC="$ROOT_DIR/src/manager-macos"
-APP_DIR="$BUILD_DIR/TenBox.app"
 PLIST="$MANAGER_SRC/Resources/Info.plist"
 ENTITLEMENTS="$MANAGER_SRC/Resources/TenBox.entitlements"
+TARGET_ARCHS="arm64 x86_64"
 
 echo "===================================="
 echo " TenBox macOS Build v$VERSION ($CMAKE_BUILD_TYPE)"
+echo " Universal Binary: $TARGET_ARCHS"
 echo "===================================="
 echo ""
 
@@ -57,67 +54,11 @@ echo ""
 echo "Version $VERSION written to Info.plist"
 echo ""
 
-# ── Step 1: Build tenbox-vm-runtime (C++ via CMake) ─────────────────────────
-echo "[1/3] Building tenbox-vm-runtime..."
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-
-cmake "$ROOT_DIR" \
-    -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64
-
-cmake --build . --target tenbox-vm-runtime -j"$CPU_COUNT"
-
-if [ ! -f "$BUILD_DIR/tenbox-vm-runtime" ]; then
-    echo "Error: tenbox-vm-runtime binary not found after build."
-    exit 1
-fi
-echo "  -> $BUILD_DIR/tenbox-vm-runtime"
-
-codesign --force --sign - --entitlements "$ENTITLEMENTS" "$BUILD_DIR/tenbox-vm-runtime"
-echo "  -> codesign applied (ad-hoc + Hypervisor entitlement)"
-
-# ── Step 2: Build TenBoxManager (Swift/Obj-C++ via SPM) ─────────────────────
-echo ""
-echo "[2/3] Building TenBoxManager via SPM ($SWIFT_CONFIG)..."
-
-cd "$MANAGER_SRC"
-swift build -c "$SWIFT_CONFIG"
-
-SWIFT_BUILD_DIR="$MANAGER_SRC/.build/$SWIFT_CONFIG"
-if [ ! -f "$SWIFT_BUILD_DIR/TenBoxManager" ]; then
-    echo "Error: TenBoxManager binary not found at $SWIFT_BUILD_DIR/TenBoxManager"
-    exit 1
-fi
-echo "  -> $SWIFT_BUILD_DIR/TenBoxManager"
-
-# ── Step 3: Assemble TenBox.app bundle ──────────────────────────────────────
-echo ""
-echo "[3/3] Assembling TenBox.app..."
-
-rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS"
-mkdir -p "$APP_DIR/Contents/Resources"
-
-# Copy Info.plist
-cp "$PLIST" "$APP_DIR/Contents/Info.plist"
-
-# Copy executables
-cp "$SWIFT_BUILD_DIR/TenBoxManager" "$APP_DIR/Contents/MacOS/TenBoxManager"
-cp "$BUILD_DIR/tenbox-vm-runtime" "$APP_DIR/Contents/MacOS/tenbox-vm-runtime"
-
-# Copy SPM resource bundles (icon, etc.)
-BUNDLE_PATH=$(find -L "$SWIFT_BUILD_DIR" -name "TenBoxManager_TenBoxManager.bundle" -type d 2>/dev/null | head -1)
-if [ -n "$BUNDLE_PATH" ] && [ -d "$BUNDLE_PATH" ]; then
-    cp -R "$BUNDLE_PATH" "$APP_DIR/Contents/Resources/"
-    echo "  -> Copied resource bundle"
-else
-    echo "WARNING: TenBoxManager_TenBoxManager.bundle not found!"
-fi
-
-# Convert icon.png to AppIcon.icns (macOS requires .icns format)
+# Pre-generate AppIcon.icns once (shared across both architectures)
+ICNS_PATH=""
 if [ -f "$MANAGER_SRC/Resources/icon.png" ]; then
     ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
+    ICNS_PATH="$BUILD_DIR/AppIcon.icns"
     rm -rf "$ICONSET_DIR"
     mkdir -p "$ICONSET_DIR"
     sips -z 16 16     "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_16x16.png"      >/dev/null
@@ -130,65 +71,206 @@ if [ -f "$MANAGER_SRC/Resources/icon.png" ]; then
     sips -z 512 512   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
     sips -z 512 512   "$MANAGER_SRC/Resources/icon.png" --out "$ICONSET_DIR/icon_512x512.png"    >/dev/null
     cp "$MANAGER_SRC/Resources/icon.png"                       "$ICONSET_DIR/icon_512x512@2x.png"
-    iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
+    iconutil -c icns "$ICONSET_DIR" -o "$ICNS_PATH"
     rm -rf "$ICONSET_DIR"
-    echo "  -> Generated AppIcon.icns from icon.png"
+    echo "Generated AppIcon.icns from icon.png"
+    echo ""
 fi
 
-# Compile Metal shaders if present
+# Pre-compile Metal shaders once (GPU code, architecture-independent)
+METALLIB_PATH=""
 METAL_SRC="$MANAGER_SRC/Resources/Shaders.metal"
 if [ -f "$METAL_SRC" ]; then
-    echo "  -> Compiling Metal shaders..."
+    echo "Compiling Metal shaders..."
+    mkdir -p "$BUILD_DIR"
     if xcrun metal -c "$METAL_SRC" -o "$BUILD_DIR/Shaders.air" 2>/dev/null && \
-       xcrun metallib "$BUILD_DIR/Shaders.air" -o "$APP_DIR/Contents/Resources/default.metallib" 2>/dev/null; then
+       xcrun metallib "$BUILD_DIR/Shaders.air" -o "$BUILD_DIR/default.metallib" 2>/dev/null; then
+        METALLIB_PATH="$BUILD_DIR/default.metallib"
         rm -f "$BUILD_DIR/Shaders.air"
+        echo "  -> $METALLIB_PATH"
     else
         rm -f "$BUILD_DIR/Shaders.air"
-        echo "  -> WARNING: Metal shader compilation failed, copying .metal source as fallback"
-        echo "     To install Metal toolchain: xcodebuild -downloadComponent MetalToolchain"
-        cp "$METAL_SRC" "$APP_DIR/Contents/Resources/"
+        echo "WARNING: Metal shader compilation failed, will copy .metal source as fallback"
     fi
+    echo ""
 fi
 
-# Copy Sparkle framework from SPM build artifacts
-SPARKLE_FRAMEWORK=$(find -L "$MANAGER_SRC/.build/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)
+# Locate Sparkle sign_update tool (available after first SPM resolve)
+SIGN_TOOL=""
+
+# Detect codesign identity once
+CODESIGN_IDENTITY="-"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID"; then
+    CODESIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID" | head -1 | awk -F'"' '{print $2}')
+fi
+
+# ── Build loop: compile each architecture ─────────────────────────────────────
+# Only compile in this loop; assembly happens after merging with lipo.
+
+for ARCH in $TARGET_ARCHS; do
+
+echo "####################################################################"
+echo "# Compiling for $ARCH"
+echo "####################################################################"
+echo ""
+
+CMAKE_DIR="$BUILD_DIR/cmake-$ARCH"
+
+# ── Step 1: Build tenbox-vm-runtime (C++ via CMake) ──────────────────────
+echo "[$ARCH 1/2] Building tenbox-vm-runtime..."
+mkdir -p "$CMAKE_DIR"
+cd "$CMAKE_DIR"
+
+cmake "$ROOT_DIR" \
+    -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" \
+    -DCMAKE_OSX_ARCHITECTURES="$ARCH"
+
+cmake --build . --target tenbox-vm-runtime -j"$CPU_COUNT"
+
+if [ ! -f "$CMAKE_DIR/tenbox-vm-runtime" ]; then
+    echo "Error: tenbox-vm-runtime binary not found after build."
+    exit 1
+fi
+echo "  -> $CMAKE_DIR/tenbox-vm-runtime"
+
+# ── Step 2: Build TenBoxManager (Swift/Obj-C++ via SPM) ─────────────────
+echo ""
+echo "[$ARCH 2/2] Building TenBoxManager via SPM ($SWIFT_CONFIG, $ARCH)..."
+
+cd "$MANAGER_SRC"
+if [ -d "$MANAGER_SRC/.build" ]; then
+    chmod -R u+rwx "$MANAGER_SRC/.build" 2>/dev/null || true
+    rm -rf "$MANAGER_SRC/.build" 2>/dev/null || true
+fi
+SPM_SCRATCH="$MANAGER_SRC/.build-$ARCH"
+if ! swift build -c "$SWIFT_CONFIG" --arch "$ARCH" --scratch-path "$SPM_SCRATCH"; then
+    echo "  -> SPM build failed, resetting scratch directory and retrying..."
+    chmod -R u+rwx "$SPM_SCRATCH" 2>/dev/null || true
+    rm -rf "$SPM_SCRATCH"
+    swift build -c "$SWIFT_CONFIG" --arch "$ARCH" --scratch-path "$SPM_SCRATCH"
+fi
+
+SWIFT_BUILD_DIR="$SPM_SCRATCH/${ARCH}-apple-macosx/$SWIFT_CONFIG"
+if [ ! -f "$SWIFT_BUILD_DIR/TenBoxManager" ]; then
+    echo "Error: TenBoxManager binary not found at $SWIFT_BUILD_DIR/TenBoxManager"
+    exit 1
+fi
+echo "  -> $SWIFT_BUILD_DIR/TenBoxManager"
+
+echo ""
+done
+# ── End of compile loop ──────────────────────────────────────────────────────
+
+# ── Merge into Universal Binary ──────────────────────────────────────────────
+
+echo "####################################################################"
+echo "# Creating Universal Binary"
+echo "####################################################################"
+echo ""
+
+APP_DIR="$BUILD_DIR/TenBox-${VERSION}.app"
+rm -rf "$APP_DIR"
+mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/Resources"
+
+# Merge tenbox-vm-runtime
+echo "Merging tenbox-vm-runtime (arm64 + x86_64)..."
+lipo -create \
+    "$BUILD_DIR/cmake-arm64/tenbox-vm-runtime" \
+    "$BUILD_DIR/cmake-x86_64/tenbox-vm-runtime" \
+    -output "$APP_DIR/Contents/MacOS/tenbox-vm-runtime"
+echo "  -> $(lipo -archs "$APP_DIR/Contents/MacOS/tenbox-vm-runtime")"
+
+codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_DIR/Contents/MacOS/tenbox-vm-runtime"
+echo "  -> codesign applied (ad-hoc + Hypervisor entitlement)"
+
+# Merge TenBoxManager
+echo ""
+echo "Merging TenBoxManager (arm64 + x86_64)..."
+SPM_ARM64="$MANAGER_SRC/.build-arm64/arm64-apple-macosx/$SWIFT_CONFIG"
+SPM_X86="$MANAGER_SRC/.build-x86_64/x86_64-apple-macosx/$SWIFT_CONFIG"
+lipo -create \
+    "$SPM_ARM64/TenBoxManager" \
+    "$SPM_X86/TenBoxManager" \
+    -output "$APP_DIR/Contents/MacOS/TenBoxManager"
+echo "  -> $(lipo -archs "$APP_DIR/Contents/MacOS/TenBoxManager")"
+
+# ── Assemble app bundle resources ────────────────────────────────────────────
+
+echo ""
+echo "Assembling TenBox.app bundle..."
+
+cp "$PLIST" "$APP_DIR/Contents/Info.plist"
+
+# Copy SPM resource bundles from either arch (architecture-independent)
+BUNDLE_PATH=$(find -L "$SPM_ARM64" -name "TenBoxManager_TenBoxManager.bundle" -type d 2>/dev/null | head -1)
+if [ -n "$BUNDLE_PATH" ] && [ -d "$BUNDLE_PATH" ]; then
+    cp -R "$BUNDLE_PATH" "$APP_DIR/Contents/Resources/"
+    echo "  -> Copied resource bundle"
+else
+    echo "WARNING: TenBoxManager_TenBoxManager.bundle not found!"
+fi
+
+if [ -n "$ICNS_PATH" ] && [ -f "$ICNS_PATH" ]; then
+    cp "$ICNS_PATH" "$APP_DIR/Contents/Resources/AppIcon.icns"
+    echo "  -> Copied AppIcon.icns"
+fi
+
+if [ -n "$METALLIB_PATH" ] && [ -f "$METALLIB_PATH" ]; then
+    cp "$METALLIB_PATH" "$APP_DIR/Contents/Resources/default.metallib"
+    echo "  -> Copied default.metallib"
+elif [ -f "$METAL_SRC" ]; then
+    cp "$METAL_SRC" "$APP_DIR/Contents/Resources/"
+    echo "  -> Copied Shaders.metal (fallback)"
+fi
+
+# Copy Sparkle framework from SPM build artifacts (universal xcframework)
+SPM_SCRATCH_REF="$MANAGER_SRC/.build-arm64"
+SPARKLE_FRAMEWORK=$(find -L "$SPM_SCRATCH_REF/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)
 if [ -n "$SPARKLE_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
     mkdir -p "$APP_DIR/Contents/Frameworks"
     cp -R "$SPARKLE_FRAMEWORK" "$APP_DIR/Contents/Frameworks/"
     echo "  -> Copied Sparkle.framework"
 fi
 
-# Add rpath so the binary can find Sparkle.framework at runtime
 install_name_tool -add_rpath "@loader_path/../Frameworks" \
     "$APP_DIR/Contents/MacOS/TenBoxManager" 2>/dev/null || true
 
-# Sign the app bundle
-echo "  -> Signing TenBox.app..."
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID"; then
-    IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID" | head -1 | awk -F'"' '{print $2}')
-    echo "     Using: $IDENTITY"
+# ── Sign the universal app bundle ────────────────────────────────────────────
+
+echo ""
+echo "Signing TenBox.app (universal)..."
+if [ "$CODESIGN_IDENTITY" != "-" ]; then
+    echo "  Using: $CODESIGN_IDENTITY"
     codesign --deep --force --options runtime \
         --entitlements "$ENTITLEMENTS" \
-        --sign "$IDENTITY" "$APP_DIR"
+        --sign "$CODESIGN_IDENTITY" "$APP_DIR"
 else
-    echo "     Using: ad-hoc (no Developer ID found)"
+    echo "  Using: ad-hoc (no Developer ID found)"
     codesign --deep --force --options runtime \
         --entitlements "$ENTITLEMENTS" \
         --sign - "$APP_DIR"
 fi
 
-echo ""
 echo "  -> $APP_DIR"
 
-# ── Step 4: Create ZIP for Sparkle updates + EdDSA signature ────────────────
+# ── Create ZIP for Sparkle updates + EdDSA signature ─────────────────────────
+
 echo ""
-ZIP_PATH="$BUILD_DIR/TenBox_${VERSION}_${ARCH}.zip"
+ZIP_PATH="$BUILD_DIR/TenBox-${VERSION}.zip"
 SIGNATURE_PATH="${ZIP_PATH%.zip}.signature"
-echo "Creating Sparkle update ZIP..."
-ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
+STAGING_APP="$BUILD_DIR/.staging-universal/TenBox.app"
+echo "Creating Sparkle update ZIP (universal)..."
+rm -rf "$(dirname "$STAGING_APP")"
+mkdir -p "$(dirname "$STAGING_APP")"
+cp -R "$APP_DIR" "$STAGING_APP"
+ditto -c -k --keepParent "$STAGING_APP" "$ZIP_PATH"
+rm -rf "$(dirname "$STAGING_APP")"
 echo "  -> $ZIP_PATH"
 
-SIGN_TOOL=$(find -L "$MANAGER_SRC/.build/artifacts" -name "sign_update" -type f 2>/dev/null | head -1)
+if [ -z "$SIGN_TOOL" ]; then
+    SIGN_TOOL=$(find -L "$SPM_SCRATCH_REF/artifacts" -name "sign_update" -type f 2>/dev/null | head -1)
+fi
 if [ -n "$SIGN_TOOL" ] && [ -x "$SIGN_TOOL" ]; then
     echo ""
     echo "Signing ZIP with Sparkle EdDSA key..."
@@ -211,12 +293,14 @@ else
     echo "  then sign manually: sign_update $ZIP_PATH"
 fi
 
+# ── Summary ──────────────────────────────────────────────────────────────────
+
 echo ""
 echo "===================================="
 echo " Build complete!"
 echo "===================================="
 echo ""
-echo "Artifacts:"
+echo "Artifacts (Universal Binary):"
 echo "  App:  $APP_DIR"
 echo "  ZIP:  $ZIP_PATH"
 if [ -f "$SIGNATURE_PATH" ]; then

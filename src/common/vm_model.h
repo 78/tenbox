@@ -34,7 +34,8 @@ struct VmSpec {
     std::string cmdline;
     uint64_t memory_mb = 4096;
     uint32_t cpu_count = 4;
-    bool nat_enabled = false;
+    bool nat_enabled = true;
+    bool debug_mode = false;
     std::vector<PortForward> port_forwards;
     std::vector<SharedFolder> shared_folders;
     int64_t creation_time = 0;   // Unix timestamp (seconds since epoch), 0 = not set
@@ -43,7 +44,7 @@ struct VmSpec {
 
 struct VmMutablePatch {
     std::optional<std::string> name;
-    std::optional<bool> nat_enabled;
+    std::optional<bool> debug_mode;
     std::optional<std::vector<PortForward>> port_forwards;
     std::optional<std::vector<SharedFolder>> shared_folders;
     std::optional<uint64_t> memory_mb;

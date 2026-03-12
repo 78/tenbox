@@ -65,6 +65,8 @@ public:
     bool IsReady() const             { return ready_; }
     uint32_t Size() const            { return queue_size_; }
 
+    void SetEventIdx(bool enabled)   { event_idx_ = enabled; }
+
     void Reset();
 
     bool HasAvailable() const;
@@ -79,6 +81,12 @@ public:
     // Push a completed buffer to the used ring.
     void PushUsed(uint16_t head_idx, uint32_t total_len);
 
+    // When VIRTIO_F_EVENT_IDX is negotiated, returns true only when the
+    // guest needs to be notified (i.e. used_idx crossed used_event).
+    // When EVENT_IDX is not negotiated, always returns true.
+    // Updates internal tracking state, so not const.
+    bool ShouldNotifyGuest();
+
 private:
     uint8_t* GpaToHva(uint64_t gpa) const;
 
@@ -88,6 +96,15 @@ private:
     VirtqAvail* Avail() const;
     VirtqUsed* Used() const;
 
+    // Walk an indirect descriptor table at the given GPA.
+    bool WalkIndirect(uint64_t table_gpa, uint32_t table_len,
+                      std::vector<VirtqChainElem>* chain);
+
+    // used_event is at avail->ring[queue_size] (right after the ring array)
+    uint16_t ReadUsedEvent() const;
+    // avail_event is at used->ring[queue_size] (right after the used ring array)
+    void WriteAvailEvent(uint16_t val);
+
     uint32_t queue_size_ = 0;
     GuestMemMap mem_;
 
@@ -96,5 +113,7 @@ private:
     uint64_t device_gpa_ = 0;
 
     uint16_t last_avail_idx_ = 0;
+    uint16_t last_signalled_used_ = 0;
     bool ready_ = false;
+    bool event_idx_ = false;
 };

@@ -220,6 +220,7 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
         if (j.contains("memory_mb")) spec.memory_mb = j["memory_mb"].get<uint64_t>();
         if (j.contains("cpu_count")) spec.cpu_count = j["cpu_count"].get<uint32_t>();
         if (j.contains("nat_enabled")) spec.nat_enabled = j["nat_enabled"].get<bool>();
+        if (j.contains("debug_mode")) spec.debug_mode = j["debug_mode"].get<bool>();
 
         // Resolve relative paths to absolute
         auto Resolve = [&](const char* key) -> std::string {
@@ -291,6 +292,7 @@ void SaveVmManifest(const VmSpec& spec) {
     j["memory_mb"]   = spec.memory_mb;
     j["cpu_count"]   = spec.cpu_count;
     j["nat_enabled"] = spec.nat_enabled;
+    j["debug_mode"]  = spec.debug_mode;
     if (spec.creation_time > 0) j["creation_time"] = spec.creation_time;
     if (spec.last_boot_time > 0) j["last_boot_time"] = spec.last_boot_time;
 

@@ -6,6 +6,7 @@
 #include "core/device/rtc/cmos_rtc.h"
 #include "core/device/irq/ioapic.h"
 #include "core/device/irq/i8259_pic.h"
+#include "core/device/irq/local_apic.h"
 #include "core/device/pci/pci_host.h"
 #include "core/device/acpi/acpi_pm.h"
 #include "core/arch/x86_64/acpi.h"
@@ -44,12 +45,23 @@ public:
     GPA MmioGapStart() const override { return kMmioGapStart; }
     GPA MmioGapEnd() const override { return kMmioGapEnd; }
 
+    void SetSipiCallback(LocalApic::SipiFunc cb) { lapic_.SetSipiCallback(std::move(cb)); }
+    void SetInitCallback(LocalApic::InitFunc cb) { lapic_.SetInitCallback(std::move(cb)); }
+    void SetIpiCallback(LocalApic::IpiFunc cb) { lapic_.SetIpiCallback(std::move(cb)); }
+    void InitLapic(uint32_t cpu_count) { lapic_.Init(cpu_count); }
+
+    void SetApicIds(std::vector<uint32_t> ids) {
+        apic_ids_ = ids;
+        lapic_.SetApicIds(ids);
+    }
+
 private:
     Uart16550 uart_;
     I8254Pit pit_;
     SystemControlB sys_ctrl_b_;
     CmosRtc rtc_;
     IoApic ioapic_;
+    LocalApic lapic_;
     I8259Pic pic_master_;
     I8259Pic pic_slave_;
     PciHostBridge pci_host_;
@@ -57,4 +69,5 @@ private:
     Device port_sink_;
 
     std::function<void(uint8_t)> irq_injector_;
+    std::vector<uint32_t> apic_ids_;
 };

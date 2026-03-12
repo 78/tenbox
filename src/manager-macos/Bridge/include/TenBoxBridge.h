@@ -27,7 +27,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) NSInteger cpuCount;
 @property (nonatomic, copy) NSString *state;
 @property (nonatomic, assign) BOOL netEnabled;
-@property (nonatomic, copy) NSString *cmdline;
 @property (nonatomic, copy) NSArray<TBSharedFolder *> *sharedFolders;
 @property (nonatomic, copy) NSArray<TBPortForward *> *portForwards;
 @property (nonatomic, assign) NSInteger displayScale;

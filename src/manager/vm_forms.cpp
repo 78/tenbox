@@ -44,8 +44,8 @@ VmMutablePatch BuildVmPatch(const VmEditForm& form, const VmSpec& current_spec) 
     if (form.name != current_spec.name) {
         patch.name = form.name;
     }
-    if (form.nat_enabled != current_spec.nat_enabled) {
-        patch.nat_enabled = form.nat_enabled;
+    if (form.debug_mode != current_spec.debug_mode) {
+        patch.debug_mode = form.debug_mode;
     }
     if (!SameForwards(form.port_forwards, current_spec.port_forwards)) {
         patch.port_forwards = form.port_forwards;

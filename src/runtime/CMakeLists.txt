@@ -32,4 +32,12 @@ elseif(APPLE)
         "-framework Hypervisor"
         "-framework Foundation"
     )
+
+    # Auto-sign with hypervisor entitlement after every build
+    set(ENTITLEMENTS_FILE "${CMAKE_SOURCE_DIR}/runtime.entitlements")
+    add_custom_command(TARGET tenbox-vm-runtime POST_BUILD
+        COMMAND codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}"
+                "$<TARGET_FILE:tenbox-vm-runtime>"
+        COMMENT "Signing tenbox-vm-runtime with hypervisor entitlement"
+    )
 endif()

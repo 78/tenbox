@@ -1,11 +1,21 @@
 #include "core/device/acpi/acpi_pm.h"
-#include <intrin.h>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
+#ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <mach/mach_time.h>
+#include <unistd.h>
+#endif
 
 AcpiPm::AcpiPm() {
-    // Measure TSC frequency for PM Timer emulation
+#ifdef _WIN32
     LARGE_INTEGER qpf, qpc_start, qpc_end;
     QueryPerformanceFrequency(&qpf);
     QueryPerformanceCounter(&qpc_start);
@@ -16,6 +26,17 @@ AcpiPm::AcpiPm() {
 
     double elapsed = static_cast<double>(qpc_end.QuadPart - qpc_start.QuadPart)
                      / qpf.QuadPart;
+#else
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    uint64_t mach_start = mach_absolute_time();
+    uint64_t tsc_start = __rdtsc();
+    usleep(50000);
+    uint64_t tsc_end = __rdtsc();
+    uint64_t mach_end = mach_absolute_time();
+
+    double elapsed = static_cast<double>(mach_end - mach_start) * tb.numer / tb.denom / 1e9;
+#endif
     tsc_freq_ = static_cast<uint64_t>((tsc_end - tsc_start) / elapsed);
     tsc_base_ = __rdtsc();
 }

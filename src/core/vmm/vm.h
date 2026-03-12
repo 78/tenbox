@@ -4,6 +4,7 @@
 #include "core/vmm/address_space.h"
 #include "core/vmm/hypervisor_vm.h"
 #include "core/vmm/machine_model.h"
+#include "core/vmm/vcpu_startup_state.h"
 #include "core/device/virtio/virtio_mmio.h"
 #include "core/device/virtio/virtio_blk.h"
 #include "core/device/virtio/virtio_net.h"
@@ -38,6 +39,7 @@ struct VmConfig {
     uint64_t memory_mb = 256;
     uint32_t cpu_count = 1;
     bool net_link_up = false;
+    bool debug_mode = false;
     std::vector<PortForward> port_forwards;
     std::vector<VmSharedFolder> shared_folders;
     bool interactive = true;
@@ -96,6 +98,8 @@ private:
     bool SetupVirtioSnd(const VirtioDeviceSlot& slot);
 
     void VCpuThreadFunc(uint32_t vcpu_index);
+    void SetupVCpuCallbacks(uint32_t vcpu_index);
+    void FinalizeBoot(const VmConfig& config);
     void InjectIrq(uint8_t irq);
     void SetIrqLevel(uint8_t irq, bool asserted);
 
@@ -140,6 +144,16 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> reboot_requested_{false};
+
+    // Two-phase boot barrier: threads signal ready after vCPU creation;
+    // main thread does FinalizeBoot then releases them.
+    std::atomic<uint32_t> vcpus_ready_{0};
+    std::mutex boot_mutex_;
+    std::condition_variable boot_cv_;
+    bool boot_complete_ = false;
+
+    // Saved config for FinalizeBoot (cmdline, kernel path, etc.)
+    VmConfig boot_config_;
     std::shared_ptr<ConsolePort> console_port_;
     std::shared_ptr<InputPort> input_port_;
     std::shared_ptr<DisplayPort> display_port_;
@@ -147,13 +161,5 @@ private:
     std::shared_ptr<AudioPort> audio_port_;
     uint32_t inject_prev_buttons_ = 0;
 
-    // PSCI CPU_ON support for secondary vCPUs
-    struct SecondaryCpuState {
-        std::mutex mutex;
-        std::condition_variable cv;
-        bool powered_on = false;
-        uint64_t entry_addr = 0;
-        uint64_t context_id = 0;
-    };
-    std::vector<std::unique_ptr<SecondaryCpuState>> secondary_cpu_states_;
+    std::vector<std::unique_ptr<VCpuStartupState>> vcpu_startup_;
 };

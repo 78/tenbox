@@ -39,7 +39,6 @@ void InfoTab::Layout(HWND hwnd, HFONT ui_font, int px, int py, int pw, int ph) {
     std::wstring kLabels[] = {
         i18n::tr_w(i18n::S::kLabelId), i18n::tr_w(i18n::S::kLabelLocation),
         i18n::tr_w(i18n::S::kLabelMemory), i18n::tr_w(i18n::S::kLabelVcpus),
-        i18n::tr_w(i18n::S::kLabelNat),
         i18n::tr_w(i18n::S::kLabelCreatedTime), i18n::tr_w(i18n::S::kLabelLastBootTime)
     };
     int label_w = 0;
@@ -89,7 +88,6 @@ void InfoTab::Update(const VmSpec* spec) {
     std::wstring label_texts[] = {
         i18n::tr_w(S::kLabelId), i18n::tr_w(S::kLabelLocation),
         i18n::tr_w(S::kLabelMemory), i18n::tr_w(S::kLabelVcpus),
-        i18n::tr_w(S::kLabelNat),
         i18n::tr_w(S::kLabelCreatedTime), i18n::tr_w(S::kLabelLastBootTime)
     };
     for (int i = 0; i < kDetailRows; ++i)
@@ -108,7 +106,6 @@ void InfoTab::Update(const VmSpec* spec) {
     SetWindowTextW(values_[1], i18n::to_wide(spec->vm_dir).c_str());
     SetWindowTextW(values_[2], i18n::to_wide(mb_str).c_str());
     SetWindowTextW(values_[3], i18n::to_wide(cpu_str).c_str());
-    SetWindowTextW(values_[4], (spec->nat_enabled ? i18n::tr_w(S::kNatEnabled) : i18n::tr_w(S::kNatDisabled)).c_str());
-    SetWindowTextW(values_[5], i18n::to_wide(FormatTimestamp(spec->creation_time)).c_str());
-    SetWindowTextW(values_[6], i18n::to_wide(FormatTimestamp(spec->last_boot_time)).c_str());
+    SetWindowTextW(values_[4], i18n::to_wide(FormatTimestamp(spec->creation_time)).c_str());
+    SetWindowTextW(values_[5], i18n::to_wide(FormatTimestamp(spec->last_boot_time)).c_str());
 }

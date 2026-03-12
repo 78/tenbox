@@ -11,25 +11,15 @@ struct InfoView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 GroupBox("General") {
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-                        GridRow {
-                            Text("Name").foregroundStyle(.secondary)
-                            Text(vm.name)
-                        }
-                        GridRow {
-                            Text("State").foregroundStyle(.secondary)
-                            Text(vm.state.displayName)
-                        }
-                        GridRow {
-                            Text("CPUs").foregroundStyle(.secondary)
-                            Text("\(vm.cpuCount)")
-                        }
-                        GridRow {
-                            Text("Memory").foregroundStyle(.secondary)
-                            Text("\(vm.memoryMb) MB")
-                        }
-                        GridRow {
-                            Text("Directory").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        InfoRow(label: "Name", value: vm.name)
+                        InfoRow(label: "State", value: vm.state.displayName)
+                        InfoRow(label: "CPUs", value: "\(vm.cpuCount)")
+                        InfoRow(label: "Memory", value: "\(vm.memoryMb) MB")
+                        HStack(spacing: 16) {
+                            Text("Directory")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 70, alignment: .trailing)
                             HStack(spacing: 6) {
                                 Text(vmDirectory)
                                     .lineLimit(1)
@@ -51,6 +41,20 @@ struct InfoView: View {
                 }
             }
             .padding()
+        }
+    }
+}
+
+private struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .trailing)
+            Text(value)
         }
     }
 }
@@ -81,7 +85,6 @@ struct AddSharedFolderSheet: View {
                 }
                 Toggle("Read Only", isOn: $readonly)
             }
-            .formStyle(.grouped)
             .padding(.horizontal)
 
             HStack {
@@ -151,7 +154,6 @@ struct AddPortForwardSheet: View {
                 TextField("Guest Port", text: $guestPortText)
                     .disableAutocorrection(true)
             }
-            .formStyle(.grouped)
             .padding(.horizontal)
 
             HStack {

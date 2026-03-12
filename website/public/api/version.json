@@ -1,28 +1,28 @@
 {
-  "latest_version": "0.4.1",
+  "latest_version": "0.4.2",
   "min_supported_version": "0.1.0",
-  "release_notes": "重构创建虚拟机的镜像列表\n基于事件驱动的通信优化性能\n动态调整 DNS",
-  "release_date": "2026-03-11",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.1.msi",
-  "sha256": "d3bea25533229b374f65aeae218028c58fefe1000a332ae6ca457283f24f2365",
+  "release_notes": "支持虚拟机通过 10.0.2.2 访问主机服务\n默认关闭 Linux 内核日志\n优化设备性能",
+  "release_date": "2026-03-13",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.2a.msi",
+  "sha256": "34c26a1db7961e746e8a9639d68f951d7e0d3b1db9f7560b6eda203d338d055d",
   "platforms": {
     "windows": {
-      "latest_version": "0.4.1",
-      "release_notes": "重构创建虚拟机的镜像列表\n基于事件驱动的通信优化性能\n动态调整 DNS",
-      "release_date": "2026-03-11",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.1.msi",
-      "sha256": "d3bea25533229b374f65aeae218028c58fefe1000a332ae6ca457283f24f2365",
-      "size": 2142208,
+      "latest_version": "0.4.2",
+      "release_notes": "支持虚拟机通过 10.0.2.2 访问主机服务\n默认关闭 Linux 内核日志\n优化设备性能",
+      "release_date": "2026-03-13",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.2a.msi",
+      "sha256": "34c26a1db7961e746e8a9639d68f951d7e0d3b1db9f7560b6eda203d338d055d",
+      "size": 2162688,
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.4.1",
-      "release_notes": "基于事件的通信优化性能\n调整共享文件夹与端口转发的位置",
-      "release_date": "2026-03-11",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.1_arm64.dmg",
-      "sha256": "febee6abe7ca328b3a1cedc54c51eaa1d603a911a0a2abced18b7946ac73e30a",
-      "size": 3158872,
-      "min_os": "macOS 15.0"
+      "latest_version": "0.4.2",
+      "release_notes": "支持虚拟机通过 10.0.2.2 访问主机服务\n默认关闭 Linux 内核日志\n优化设备性能\n支持 macOS 12\n支持 Intel CPU",
+      "release_date": "2026-03-13",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.4.2.dmg",
+      "sha256": "7a0237e5d4b03a67a63774a6935f270d7ad1286097ca72707b683ed2605181ed",
+      "size": 4241724,
+      "min_os": "macOS 12"
     }
   }
 }

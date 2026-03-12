@@ -2,9 +2,18 @@ cmake_minimum_required(VERSION 3.21)
 cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0169 OLD)
 
+set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
+
 file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" TENBOX_VERSION_STRING LIMIT_COUNT 1)
 string(STRIP "${TENBOX_VERSION_STRING}" TENBOX_VERSION_STRING)
 project(TenBox VERSION ${TENBOX_VERSION_STRING} LANGUAGES C CXX)
+
+# When cross-compiling (e.g. building x86_64 on an arm64 host), CMake auto-detects
+# the host processor, not the target. Override it from CMAKE_OSX_ARCHITECTURES so
+# that architecture-specific source selection in src/core and src/platform works.
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_SYSTEM_PROCESSOR "${CMAKE_OSX_ARCHITECTURES}")
+endif()
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/VERSION")
 
@@ -87,7 +96,7 @@ set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
 if(MSVC)
     target_compile_options(lwipcore PRIVATE /W0)
 else()
-    target_compile_options(lwipcore PRIVATE -w)
+    target_compile_options(lwipcore PRIVATE -w -fcommon)
 endif()
 
 configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/version.h)

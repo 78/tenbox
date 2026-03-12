@@ -22,8 +22,11 @@ namespace AcpiLayout {
 
 // Build ACPI tables (RSDP, XSDT, MADT, FADT, DSDT) in guest RAM.
 // The DSDT includes device nodes for each virtio-mmio device in |virtio_devs|.
+// |apic_ids|, if non-empty, supplies the hardware APIC ID for each CPU
+// (must have num_cpus entries); otherwise APIC ID = CPU index.
 // Returns the GPA of the RSDP for boot_params.acpi_rsdp_addr.
 GPA BuildAcpiTables(uint8_t* ram, uint32_t num_cpus,
-                    const std::vector<VirtioMmioAcpiInfo>& virtio_devs = {});
+                    const std::vector<VirtioMmioAcpiInfo>& virtio_devs = {},
+                    const std::vector<uint32_t>& apic_ids = {});
 
 } // namespace x86

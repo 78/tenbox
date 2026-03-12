@@ -80,6 +80,7 @@ enum class S {
     kLabelMemory,
     kLabelVcpus,
     kLabelNat,
+    kLabelDebug,
 
     // VM states
     kStateRunning,
@@ -114,6 +115,7 @@ enum class S {
     kDlgLabelVcpus,
     kDlgLabelLocation,
     kDlgEnableNat,
+    kDlgDebugMode,
     kDlgBtnCreate,
     kDlgBtnSave,
     kDlgBtnCancel,
@@ -136,6 +138,8 @@ enum class S {
     kConsolePlaceholder,
     kNatEnabled,
     kNatDisabled,
+    kDebugEnabled,
+    kDebugDisabled,
     kNone,
     kCpuMemoryChangeWarning,
 

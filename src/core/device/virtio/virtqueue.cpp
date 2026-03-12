@@ -1,4 +1,5 @@
 #include "core/device/virtio/virtqueue.h"
+#include <atomic>
 #include <cstring>
 
 void VirtQueue::Setup(uint32_t queue_size, const GuestMemMap& mem) {
@@ -12,7 +13,9 @@ void VirtQueue::Reset() {
     driver_gpa_ = 0;
     device_gpa_ = 0;
     last_avail_idx_ = 0;
+    last_signalled_used_ = 0;
     ready_ = false;
+    event_idx_ = false;
 }
 
 uint8_t* VirtQueue::GpaToHva(uint64_t gpa) const {
@@ -68,6 +71,11 @@ bool VirtQueue::PopAvail(uint16_t* head_idx) {
 
     *head_idx = ring[last_avail_idx_ % queue_size_];
     last_avail_idx_++;
+
+    if (event_idx_) {
+        WriteAvailEvent(last_avail_idx_);
+    }
+
     return true;
 }
 
@@ -84,18 +92,23 @@ bool VirtQueue::WalkChain(uint16_t head_idx,
             return false;
         }
 
-        uint8_t* hva = GpaToHva(desc->addr);
-        if (!hva) {
-            LOG_ERROR("VirtQueue: bad GPA 0x%llX in descriptor %u",
-                      desc->addr, idx);
-            return false;
-        }
+        if (desc->flags & VIRTQ_DESC_F_INDIRECT) {
+            if (!WalkIndirect(desc->addr, desc->len, chain))
+                return false;
+        } else {
+            uint8_t* hva = GpaToHva(desc->addr);
+            if (!hva) {
+                LOG_ERROR("VirtQueue: bad GPA 0x%llX in descriptor %u",
+                          desc->addr, idx);
+                return false;
+            }
 
-        chain->push_back({
-            hva,
-            desc->len,
-            (desc->flags & VIRTQ_DESC_F_WRITE) != 0
-        });
+            chain->push_back({
+                hva,
+                desc->len,
+                (desc->flags & VIRTQ_DESC_F_WRITE) != 0
+            });
+        }
 
         if (!(desc->flags & VIRTQ_DESC_F_NEXT))
             break;
@@ -105,6 +118,49 @@ bool VirtQueue::WalkChain(uint16_t head_idx,
     }
 
     return !chain->empty();
+}
+
+bool VirtQueue::WalkIndirect(uint64_t table_gpa, uint32_t table_len,
+                              std::vector<VirtqChainElem>* chain) {
+    uint32_t num_descs = table_len / sizeof(VirtqDesc);
+    if (num_descs == 0 || table_len % sizeof(VirtqDesc) != 0) {
+        LOG_ERROR("VirtQueue: invalid indirect table len %u", table_len);
+        return false;
+    }
+
+    auto* table = reinterpret_cast<VirtqDesc*>(GpaToHva(table_gpa));
+    if (!table) {
+        LOG_ERROR("VirtQueue: bad GPA 0x%llX for indirect table", table_gpa);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < num_descs; i++) {
+        auto* d = &table[i];
+
+        // Nested indirect is forbidden by spec
+        if (d->flags & VIRTQ_DESC_F_INDIRECT) {
+            LOG_ERROR("VirtQueue: nested indirect descriptor");
+            return false;
+        }
+
+        uint8_t* hva = GpaToHva(d->addr);
+        if (!hva) {
+            LOG_ERROR("VirtQueue: bad GPA 0x%llX in indirect descriptor %u",
+                      d->addr, i);
+            return false;
+        }
+
+        chain->push_back({
+            hva,
+            d->len,
+            (d->flags & VIRTQ_DESC_F_WRITE) != 0
+        });
+
+        if (!(d->flags & VIRTQ_DESC_F_NEXT))
+            break;
+    }
+
+    return true;
 }
 
 void VirtQueue::PushUsed(uint16_t head_idx, uint32_t total_len) {
@@ -119,15 +175,53 @@ void VirtQueue::PushUsed(uint16_t head_idx, uint32_t total_len) {
     ring[used_idx].len = total_len;
 
     // Memory barrier: ensure the ring entry is visible before updating idx.
-    // ARM64 requires a hardware barrier (dmb); a compiler-only fence is
-    // insufficient due to the weak memory model.
-#ifdef _MSC_VER
-    _ReadWriteBarrier();
-#elif defined(__aarch64__)
-    __asm__ volatile("dmb ish" ::: "memory");
-#else
-    __asm__ volatile("" ::: "memory");
-#endif
+    // The guest vCPU runs on a separate thread, so we need a full hardware
+    // barrier on all architectures, not just a compiler fence.
+    std::atomic_thread_fence(std::memory_order_release);
 
     used->idx++;
+}
+
+uint16_t VirtQueue::ReadUsedEvent() const {
+    auto* ring = AvailRing();
+    if (!ring) return 0;
+    // used_event sits right after avail->ring[queue_size_]
+    return ring[queue_size_];
+}
+
+void VirtQueue::WriteAvailEvent(uint16_t val) {
+    auto* ring = UsedRing();
+    if (!ring) return;
+    // avail_event sits right after used->ring[queue_size_]
+    auto* avail_event = reinterpret_cast<uint16_t*>(&ring[queue_size_]);
+    *avail_event = val;
+}
+
+bool VirtQueue::ShouldNotifyGuest() {
+    if (!event_idx_) {
+        auto* avail = Avail();
+        if (avail && (avail->flags & 1))
+            return false;
+        return true;
+    }
+
+    auto* used = Used();
+    if (!used) return true;
+
+    uint16_t new_idx = used->idx;
+
+    // Virtio spec 2.7.7.2: the device MUST perform a memory barrier after
+    // writing used->idx and before reading used_event, so that the guest's
+    // latest used_event write is visible.
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+
+    uint16_t used_event = ReadUsedEvent();
+
+    // Notify if used->idx crossed the used_event threshold.
+    // Uses unsigned wrap-around arithmetic per virtio spec 2.7.7.2.
+    bool notify = static_cast<uint16_t>(new_idx - used_event - 1) <
+                  static_cast<uint16_t>(new_idx - last_signalled_used_);
+    if (notify)
+        last_signalled_used_ = new_idx;
+    return notify;
 }

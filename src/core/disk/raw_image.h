@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/device/virtio/disk_image.h"
+#include "core/disk/disk_image.h"
 #include <cstdio>
 
 class RawDiskImage : public DiskImage {
@@ -12,6 +12,7 @@ public:
     bool Read(uint64_t offset, void* buf, uint32_t len) override;
     bool Write(uint64_t offset, const void* buf, uint32_t len) override;
     bool Flush() override;
+    bool WriteZeros(uint64_t offset, uint64_t len) override;
 
 private:
     FILE* file_ = nullptr;

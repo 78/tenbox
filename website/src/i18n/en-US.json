@@ -17,7 +17,7 @@
     "cta_win": "Windows",
     "cta_mac": "macOS",
     "version": "v0.1.0",
-    "requirements": "Windows 10+ · macOS 15+ (Apple Silicon)",
+    "requirements": "Windows 10+ · macOS 12+ (Intel / Apple Silicon)",
     "qq_group": "QQ Help Group",
     "qq_group_number": "295838092"
   },

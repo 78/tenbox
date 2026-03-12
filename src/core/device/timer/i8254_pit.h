@@ -1,7 +1,16 @@
 #pragma once
 
 #include "core/device/device.h"
+#include <functional>
+#ifdef _MSC_VER
 #include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
+#ifdef __APPLE__
+#include <dispatch/dispatch.h>
+#endif
 
 // Minimal i8254 PIT emulation for Linux boot timing calibration.
 // Uses host RDTSC for timing to stay perfectly synchronized with guest TSC
@@ -11,7 +20,12 @@ public:
     static constexpr uint16_t kBasePort = 0x40;
     static constexpr uint16_t kRegCount = 4;
 
+    using IrqFunc = std::function<void()>;
+
     I8254Pit();
+    ~I8254Pit();
+
+    void SetIrqCallback(IrqFunc cb) { irq_callback_ = std::move(cb); }
 
     void PioRead(uint16_t offset, uint8_t size, uint32_t* value) override;
     void PioWrite(uint16_t offset, uint8_t size, uint32_t value) override;
@@ -24,6 +38,7 @@ private:
     static uint64_t MeasureTscFrequency();
 
     uint64_t tsc_freq_;
+    IrqFunc irq_callback_;
 
     struct Channel {
         uint16_t reload = 0;
@@ -42,6 +57,14 @@ private:
     uint64_t ElapsedPitTicks(int ch) const;
     uint16_t CurrentCount(int ch) const;
     bool OutputHigh(int ch) const;
+
+    void ArmChannel0Timer();
+    void StopChannel0Timer();
+
+#ifdef __APPLE__
+    dispatch_source_t ch0_timer_ = nullptr;
+    dispatch_queue_t ch0_queue_ = nullptr;
+#endif
 };
 
 // System Control Port B (port 0x61) - gates PIT channel 2.

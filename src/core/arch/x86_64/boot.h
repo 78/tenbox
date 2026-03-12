@@ -62,6 +62,7 @@ struct BootConfig {
     GuestMemMap mem;
     uint32_t cpu_count = 1;
     std::vector<VirtioMmioAcpiInfo> virtio_devs;
+    std::vector<uint32_t> apic_ids;  // hardware APIC IDs (empty = use 0..N-1)
 };
 
 // Load kernel, initrd, set up boot_params in guest RAM.

@@ -204,7 +204,7 @@ void VirtioGpuDevice::ProcessControlQueue(VirtQueue& vq) {
         vq.PushUsed(head, written);
     }
 
-    if (mmio_) mmio_->NotifyUsedBuffer();
+    if (mmio_) mmio_->NotifyUsedBuffer(0);
 }
 
 void VirtioGpuDevice::ProcessCursorQueue(VirtQueue& vq) {
@@ -265,7 +265,7 @@ void VirtioGpuDevice::ProcessCursorQueue(VirtQueue& vq) {
         vq.PushUsed(head, 0);
     }
 
-    if (mmio_) mmio_->NotifyUsedBuffer();
+    if (mmio_) mmio_->NotifyUsedBuffer(1);
 }
 
 void VirtioGpuDevice::WriteResponse(uint8_t* buf, uint32_t type, uint32_t* len) {

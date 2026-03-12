@@ -233,7 +233,7 @@ void VirtioFsDevice::OnQueueNotify(uint32_t queue_idx, VirtQueue& vq) {
         ProcessRequest(vq, head);
     }
 
-    if (mmio_) mmio_->NotifyUsedBuffer();
+    if (mmio_) mmio_->NotifyUsedBuffer(queue_idx);
 }
 
 void VirtioFsDevice::ProcessRequest(VirtQueue& vq, uint16_t head_idx) {

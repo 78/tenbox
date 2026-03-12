@@ -15,9 +15,11 @@ struct VmListView: View {
     }
 
     var body: some View {
-        List(sortedVms, selection: $appState.selectedVmId) { vm in
-            VmRowView(vm: vm)
-                .tag(vm.id)
+        List(selection: $appState.selectedVmId) {
+            ForEach(sortedVms) { vm in
+                VmRowView(vm: vm)
+                    .tag(vm.id)
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("TenBox 本地龙虾")

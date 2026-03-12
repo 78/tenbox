@@ -65,13 +65,11 @@ std::string BuildRuntimeCommand(const std::string& exe, const VmSpec& spec, cons
     if (!spec.disk_path.empty()) {
         cmd << " --disk \"" << spec.disk_path << '"';
     }
-    if (!spec.cmdline.empty()) {
-        cmd << " --cmdline \"" << spec.cmdline << '"';
-    }
     cmd << " --memory " << spec.memory_mb
         << " --cpus " << spec.cpu_count;
-    if (spec.nat_enabled) {
-        cmd << " --net";
+    cmd << " --net";
+    if (spec.debug_mode) {
+        cmd << " --debug";
     }
     // Port forwards are now configured dynamically after VM starts (via IPC)
     // to ensure uniform error feedback. The runtime CLI still supports --forward.
@@ -187,12 +185,11 @@ bool ManagerService::CreateVm(const VmCreateRequest& req, std::string* error) {
     spec.kernel_path = dst_kernel;
     spec.initrd_path = dst_initrd;
     spec.disk_path   = dst_disk;
-    spec.cmdline     = req.cmdline.empty()
-        ? "console=ttyS0 earlyprintk=serial lapic no_timer_check tsc=reliable i8042.noprobe"
-        : req.cmdline;
+    spec.cmdline     = req.cmdline;
     spec.memory_mb   = req.memory_mb;
     spec.cpu_count   = req.cpu_count;
-    spec.nat_enabled = req.nat_enabled;
+    spec.nat_enabled = true;
+    spec.debug_mode  = req.debug_mode;
     spec.creation_time = static_cast<int64_t>(std::chrono::system_clock::to_time_t(
         std::chrono::system_clock::now()));
 
@@ -342,7 +339,7 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
     }
 
     if (patch.name) vm.spec.name = *patch.name;
-    if (patch.nat_enabled) vm.spec.nat_enabled = *patch.nat_enabled;
+    if (patch.debug_mode) vm.spec.debug_mode = *patch.debug_mode;
     if (patch.port_forwards) vm.spec.port_forwards = *patch.port_forwards;
     if (patch.shared_folders) vm.spec.shared_folders = *patch.shared_folders;
 
@@ -353,14 +350,14 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
 
     settings::SaveVmManifest(vm.spec);
 
-    if (running && (patch.nat_enabled || patch.port_forwards)) {
+    if (running && patch.port_forwards) {
         ipc::Message msg;
         msg.channel = ipc::Channel::kControl;
         msg.kind = ipc::Kind::kRequest;
         msg.type = "runtime.update_network";
         msg.vm_id = vm_id;
         msg.request_id = GetTickCount64();
-        msg.fields["link_up"] = vm.spec.nat_enabled ? "true" : "false";
+        msg.fields["link_up"] = "true";
         msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
         for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
@@ -1109,7 +1106,7 @@ bool ManagerService::AddPortForward(const std::string& vm_id, const PortForward&
     vm.spec.port_forwards.push_back(forward);
     settings::SaveVmManifest(vm.spec);
 
-    if (vm.state == VmPowerState::kRunning && vm.spec.nat_enabled) {
+    if (vm.state == VmPowerState::kRunning) {
         ipc::Message msg;
         msg.channel = ipc::Channel::kControl;
         msg.kind = ipc::Kind::kRequest;
@@ -1149,7 +1146,7 @@ bool ManagerService::RemovePortForward(const std::string& vm_id, uint16_t host_p
     vm.spec.port_forwards.erase(pf_it);
     settings::SaveVmManifest(vm.spec);
 
-    if (vm.state == VmPowerState::kRunning && vm.spec.nat_enabled) {
+    if (vm.state == VmPowerState::kRunning) {
         ipc::Message msg;
         msg.channel = ipc::Channel::kControl;
         msg.kind = ipc::Kind::kRequest;
@@ -1714,7 +1711,7 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
                     if (state_str == "running") {
                         vm->state = VmPowerState::kRunning;
                         // Send port forwards when VM becomes running
-                        if (!vm->spec.port_forwards.empty() && vm->spec.nat_enabled) {
+                        if (!vm->spec.port_forwards.empty()) {
                             forwards_to_send = vm->spec.port_forwards;
                             send_forwards = true;
                         }

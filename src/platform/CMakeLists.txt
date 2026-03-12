@@ -21,14 +21,26 @@ if(WIN32)
             WinHvEmulation
     )
 elseif(APPLE)
-    add_library(tenbox_platform STATIC
+    set(HVF_COMMON_SOURCES
         ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/hvf_platform.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/hvf_vm.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/hvf_vcpu.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/hvf_mmio_decode.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/macos/console/posix_console_port.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/macos/vm_platform_macos.cpp
     )
+
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        set(HVF_ARCH_SOURCES
+            ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/aarch64/hvf_vm.cpp
+            ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/aarch64/hvf_vcpu.cpp
+            ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/aarch64/hvf_mmio_decode.cpp
+        )
+    else()
+        set(HVF_ARCH_SOURCES
+            ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/x86_64/hvf_vm.cpp
+            ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/x86_64/hvf_vcpu.cpp
+        )
+    endif()
+
+    add_library(tenbox_platform STATIC ${HVF_COMMON_SOURCES} ${HVF_ARCH_SOURCES})
 
     target_include_directories(tenbox_platform
         PUBLIC

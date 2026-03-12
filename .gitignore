@@ -6,6 +6,7 @@ build/
 .wix/
 .vs/
 .vscode/
+.build*/
 .DS_Store
 *.obj
 *.exe

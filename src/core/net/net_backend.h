@@ -158,6 +158,7 @@ private:
         uint32_t real_dst_ip;
         uint16_t real_dst_port;
         uint16_t proxy_port;
+        bool     gateway_local = false; // dst was gateway; skip ReverseRewrite
         NatState state = NatState::Established;
         void*    listen_pcb = nullptr;
         void*    conn_pcb   = nullptr;

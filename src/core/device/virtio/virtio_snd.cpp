@@ -172,7 +172,7 @@ void VirtioSndDevice::ProcessControlQueue(VirtQueue& vq) {
         vq.PushUsed(head, written);
     }
 
-    if (mmio_) mmio_->NotifyUsedBuffer();
+    if (mmio_) mmio_->NotifyUsedBuffer(VIRTIO_SND_VQ_CONTROL);
 }
 
 void VirtioSndDevice::ProcessEventQueue(VirtQueue& vq) {
@@ -386,7 +386,7 @@ void VirtioSndDevice::FlushPendingTxBuffers() {
             for (auto& buf : buffers) {
                 txq->PushUsed(buf.head, buf.status_len);
             }
-            mmio_->NotifyUsedBuffer();
+            mmio_->NotifyUsedBuffer(VIRTIO_SND_VQ_TX);
         }
     }
 }
@@ -488,7 +488,7 @@ void VirtioSndDevice::PeriodTimerThread() {
             auto* txq = mmio_->GetQueue(VIRTIO_SND_VQ_TX);
             if (txq) {
                 txq->PushUsed(buf.head, buf.status_len);
-                mmio_->NotifyUsedBuffer();
+                mmio_->NotifyUsedBuffer(VIRTIO_SND_VQ_TX);
             }
         }
     }

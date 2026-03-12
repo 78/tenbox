@@ -1,6 +1,6 @@
-#include "core/device/virtio/disk_image.h"
-#include "core/device/virtio/raw_image.h"
-#include "core/device/virtio/qcow2.h"
+#include "core/disk/disk_image.h"
+#include "core/disk/raw_image.h"
+#include "core/disk/qcow2.h"
 #include <cstdio>
 
 static constexpr uint32_t kQcow2Magic = 0x514649FB;
@@ -35,4 +35,34 @@ std::unique_ptr<DiskImage> DiskImage::Create(const std::string& path) {
 
     if (!img->Open(path)) return nullptr;
     return img;
+}
+
+void DiskImage::ReadAsync(uint64_t offset, void* buf, uint32_t len, IoCallback cb) {
+    worker_.Submit([this, offset, buf, len, cb = std::move(cb)] {
+        cb(Read(offset, buf, len));
+    });
+}
+
+void DiskImage::WriteAsync(uint64_t offset, const void* buf, uint32_t len, IoCallback cb) {
+    worker_.Submit([this, offset, buf, len, cb = std::move(cb)] {
+        cb(Write(offset, buf, len));
+    });
+}
+
+void DiskImage::FlushAsync(IoCallback cb) {
+    worker_.Submit([this, cb = std::move(cb)] {
+        cb(Flush());
+    });
+}
+
+void DiskImage::DiscardAsync(uint64_t offset, uint64_t len, IoCallback cb) {
+    worker_.Submit([this, offset, len, cb = std::move(cb)] {
+        cb(Discard(offset, len));
+    });
+}
+
+void DiskImage::WriteZerosAsync(uint64_t offset, uint64_t len, IoCallback cb) {
+    worker_.Submit([this, offset, len, cb = std::move(cb)] {
+        cb(WriteZeros(offset, len));
+    });
 }

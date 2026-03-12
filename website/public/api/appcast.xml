@@ -6,21 +6,24 @@
     <description>TenBox macOS Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.4.1</title>
+      <title>Version 0.4.2</title>
       <description><![CDATA[
         <ul>
-          <li>基于事件的通信优化性能</li>
-          <li>调整共享文件夹与端口转发的位置</li>
+          <li>支持虚拟机通过 10.0.2.2 访问主机服务</li>
+          <li>默认关闭 Linux 内核日志</li>
+          <li>优化设备性能</li>
+          <li>支持 macOS 12</li>
+          <li>支持 Intel CPU</li>
         </ul>
       ]]></description>
-      <pubDate>Wed, 11 Mar 2026 00:00:00 -0000</pubDate>
-      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 13 Mar 2026 00:00:00 -0000</pubDate>
+      <sparkle:minimumSystemVersion>12</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.1_arm64.zip"
-        sparkle:version="0.4.1"
-        sparkle:shortVersionString="0.4.1"
-        sparkle:edSignature="pb8O68XTvRMAPU1YZ6RRHnttZVanGmNm/v4PlS0ZfC9x1KZNejMzieGKwe09B2k+V3axhasMjyH5bnva9wlWCg=="
-        length="3217605"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.4.2.zip"
+        sparkle:version="0.4.2"
+        sparkle:shortVersionString="0.4.2"
+        sparkle:edSignature="yzv8EbjNOKVUjVN+uiUmKbC4h82i7ptPIBtK9E9fopTwZPys7xEmeDjsf4SG3b4PdaoLa7/MUHC3q9rxAAU+Dg=="
+        length="4304136"
         type="application/octet-stream"
       />
     </item>

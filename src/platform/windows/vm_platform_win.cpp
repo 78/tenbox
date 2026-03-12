@@ -1,5 +1,6 @@
 #include "core/vmm/vm_platform.h"
 #include "platform/windows/hypervisor/whvp_vm.h"
+#include "platform/windows/hypervisor/whvp_vcpu.h"
 #include "platform/windows/console/std_console_port.h"
 
 #define NOMINMAX
@@ -11,7 +12,11 @@ bool VmPlatform::IsHypervisorPresent() {
 }
 
 std::unique_ptr<HypervisorVm> VmPlatform::CreateHypervisor(uint32_t cpu_count) {
-    return whvp::WhvpVm::Create(cpu_count);
+    auto vm = whvp::WhvpVm::Create(cpu_count);
+    if (vm) {
+        whvp::WhvpVCpu::EnableExitStats(false);
+    }
+    return vm;
 }
 
 uint8_t* VmPlatform::AllocateRam(uint64_t size) {

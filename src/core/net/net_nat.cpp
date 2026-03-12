@@ -291,7 +291,8 @@ void NetBackend::ReverseRewrite(uint8_t* frame, uint32_t len) {
     }
     if (!entry) return;
 
-    uint32_t new_src_ip = htonl(entry->real_dst_ip);
+    // gateway_local: keep src_ip as 10.0.2.2, only rewrite port back
+    uint32_t new_src_ip = entry->gateway_local ? ip->src_ip : htonl(entry->real_dst_ip);
     uint16_t new_src_port = htons(entry->real_dst_port);
 
     if (ip->proto == IPPROTO_TCP) {
@@ -310,7 +311,8 @@ void NetBackend::ReverseRewrite(uint8_t* frame, uint32_t len) {
         udp->src_port = new_src_port;
     }
 
-    ip->src_ip = new_src_ip;
+    if (!entry->gateway_local)
+        ip->src_ip = new_src_ip;
     RecalcIpChecksum(ip);
 }
 
@@ -574,9 +576,10 @@ void NetBackend::HandleUdpReadable(NatEntry* entry) {
 
     entry->last_active_ms = GetMonotonicMs();
 
+    uint32_t reply_src_ip = entry->gateway_local ? kGatewayIp : entry->real_dst_ip;
     auto frame = frame::BuildUdpFrame(
         kGuestMac, kGatewayMac,
-        entry->real_dst_ip, entry->guest_ip,
+        reply_src_ip, entry->guest_ip,
         entry->real_dst_port, entry->guest_port,
         buf, static_cast<uint32_t>(n));
 

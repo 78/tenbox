@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import Sparkle
 
 let kTenBoxVersion: String = {
@@ -53,6 +54,12 @@ struct TenBoxApp: App {
             return image
         }
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 256, height: 256)
+            return image
+        }
+        // SwiftPM places .copy resources in Bundle.module
+        if let url = Bundle.module.url(forResource: "icon", withExtension: "png"),
            let image = NSImage(contentsOf: url) {
             image.size = NSSize(width: 256, height: 256)
             return image
@@ -113,9 +120,11 @@ class AppState: ObservableObject {
     @Published var showCreateVmDialog = false
     @Published var showEditVmDialog = false
     @Published var showKeyboardCapturePermissionAlert = false
+    @Published var startVmError: String?
 
     private var bridge = TenBoxBridgeWrapper()
     private var activeSessions: [String: VmSession] = [:]
+    private var sessionCancellables: [String: AnyCancellable] = [:]
     private var stateObserver: NSObjectProtocol?
     private var pendingVmStartId: String?
 
@@ -129,10 +138,15 @@ class AppState: ObservableObject {
             self.refreshVmList()
             if let vmId = note.object as? String {
                 let newState = self.vms.first(where: { $0.id == vmId })?.state ?? .stopped
-                if newState == .stopped || newState == .crashed || newState == .rebooting {
+                if newState == .rebooting {
                     self.removeSession(for: vmId)
+                } else if newState == .stopped || newState == .crashed {
+                    // Disconnect but keep session so console output stays visible
+                    self.activeSessions[vmId]?.disconnect()
                 } else if newState == .running {
                     let session = self.getOrCreateSession(for: vmId)
+                    // Clear stale console output from the previous run before reconnecting
+                    session.consoleText = ""
                     session.connectIfNeeded()
                 }
             }
@@ -153,14 +167,26 @@ class AppState: ObservableObject {
         if let vm = vms.first(where: { $0.id == vmId }) {
             session.displayScale = vm.displayScale
         }
+        sessionCancellables[vmId] = session.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         activeSessions[vmId] = session
         return session
+    }
+
+    func activeTabBinding(for vmId: String) -> Binding<Int> {
+        let session = getOrCreateSession(for: vmId)
+        return Binding(
+            get: { session.activeTab },
+            set: { session.activeTab = $0 }
+        )
     }
 
     func removeSession(for vmId: String) {
         if let session = activeSessions[vmId] {
             session.disconnect()
         }
+        sessionCancellables.removeValue(forKey: vmId)
         activeSessions.removeValue(forKey: vmId)
     }
 
@@ -196,10 +222,15 @@ class AppState: ObservableObject {
     }
 
     func startVm(id: String) {
-        bridge.startVm(id: id)
+        let ok = bridge.startVm(id: id)
         refreshVmList()
-        if let session = activeSessions[id] {
-            session.connectIfNeeded()
+        if ok {
+            if let session = activeSessions[id] {
+                session.connectIfNeeded()
+            }
+        } else {
+            let vmName = vms.first(where: { $0.id == id })?.name ?? id
+            startVmError = "Failed to start VM \"\(vmName)\". The runtime binary may be missing or the VM configuration is invalid."
         }
     }
 

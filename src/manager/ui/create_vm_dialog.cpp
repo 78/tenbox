@@ -49,7 +49,7 @@ enum {
     IDC_CPU_LABEL = 112,
     IDC_CPU_SLIDER = 113,
     IDC_CPU_VALUE = 120,
-    IDC_NAT_CHECK = 114,
+    IDC_DEBUG_CHECK = 114,
     IDC_BTN_BACK = 115,
     IDC_BTN_NEXT = 116,
     IDC_BTN_DELETE_CACHE = 118,
@@ -219,7 +219,7 @@ static void ShowPage(DialogData* data, Page page) {
     static const int confirm_ctrls[] = {IDC_NAME_LABEL, IDC_NAME_EDIT, IDC_MEMORY_LABEL,
                                         IDC_MEMORY_SLIDER, IDC_MEMORY_VALUE,
                                         IDC_CPU_LABEL, IDC_CPU_SLIDER, IDC_CPU_VALUE,
-                                        IDC_NAT_CHECK};
+                                        IDC_DEBUG_CHECK};
 
     SetControlsVisible(dlg, select_ctrls, 6, false);
     SetControlsVisible(dlg, download_ctrls, 2, false);
@@ -269,7 +269,7 @@ static void ShowPage(DialogData* data, Page page) {
         int max_cpus = g_host_cpus > 0 ? g_host_cpus : 4;
         InitSlider(dlg, IDC_CPU_SLIDER, IDC_CPU_VALUE, 1, max_cpus, kDefaultVcpus, false);
 
-        CheckDlgButton(dlg, IDC_NAT_CHECK, BST_CHECKED);
+        CheckDlgButton(dlg, IDC_DEBUG_CHECK, BST_UNCHECKED);
         break;
     }
     }
@@ -969,7 +969,7 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
                 req.storage_dir = settings::EffectiveVmStorageDir(data->mgr->app_settings());
                 req.memory_mb = mem_gb * 1024;
                 req.cpu_count = cpu_count;
-                req.nat_enabled = IsDlgButtonChecked(dlg, IDC_NAT_CHECK) == BST_CHECKED;
+                req.debug_mode = IsDlgButtonChecked(dlg, IDC_DEBUG_CHECK) == BST_CHECKED;
 
                 for (const auto& file : data->selected_image.files) {
                     std::string path = (fs::path(cache_dir) / file.name).string();
@@ -1192,9 +1192,9 @@ bool ShowCreateVmDialog2(HWND parent, ManagerService& mgr, std::string* error) {
         IDC_CPU_SLIDER, IDC_CPU_VALUE, scale_px);
     ctrl_y += layout.form_row_h;
 
-    CreateWindowExW(0, L"BUTTON", i18n::tr_w(i18n::S::kDlgEnableNat).c_str(),
+    CreateWindowExW(0, L"BUTTON", i18n::tr_w(i18n::S::kDlgDebugMode).c_str(),
         WS_CHILD | BS_AUTOCHECKBOX, layout.edit_x, ctrl_y + scale_px(4), edit_w, scale_px(22),
-        dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_NAT_CHECK)), nullptr, nullptr);
+        dlg, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_DEBUG_CHECK)), nullptr, nullptr);
 
     int btn_gap = scale_px(10);
     int secondary_btn_w = scale_px(130);

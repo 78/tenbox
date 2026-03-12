@@ -40,7 +40,8 @@ public:
     void MmioWrite(uint64_t offset, uint8_t size, uint64_t value) override;
 
     // Called by the backend device to signal a used buffer notification.
-    void NotifyUsedBuffer();
+    // When queue_idx is provided, EVENT_IDX suppression is applied.
+    void NotifyUsedBuffer(int queue_idx = -1);
 
     // Called when device config changes (e.g. link status).
     // Sets VIRTIO_MMIO_INT_CONFIG (bit 1) and raises IRQ.

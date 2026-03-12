@@ -91,6 +91,7 @@ static void PrintUsage(const char* prog) {
         "  --memory <MB>        Guest RAM in MB (default: 256)\n"
         "  --cpus <N>           Number of vCPUs (default: 1, max: 128)\n"
         "  --net                Start with network link up (default: link down)\n"
+        "  --debug              Enable debug mode (verbose kernel output)\n"
         "  --forward H:G        Port forward host:H -> guest:G (repeatable)\n"
         "  --share TAG:PATH[:ro] Share host directory (repeatable)\n"
         "  --version            Show version\n"
@@ -178,6 +179,8 @@ int main(int argc, char* argv[]) {
             config.cpu_count = std::atoi(v);
         } else if (Arg("--net")) {
             config.net_link_up = true;
+        } else if (Arg("--debug")) {
+            config.debug_mode = true;
         } else if (Arg("--forward")) {
             auto v = NextArg(); if (!v) return 1;
             unsigned hp = 0, gp = 0;
