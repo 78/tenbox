@@ -2,14 +2,14 @@
   "images": [
     {
       "id": "openclaw",
-      "version": "2026.3.8",
-      "name": "OpenClaw 2026.3.8",
+      "version": "2026.3.11",
+      "name": "OpenClaw 2026.3.11",
       "description": "一个基于 Debian 12 的环境，预装了 OpenClaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-09",
+      "updated_at": "2026-03-12",
       "files": [
         {
           "name": "vmlinuz",
@@ -25,9 +25,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.8-fixdesktop.qcow2",
-          "sha256": "4211d404299dd047629fb8ddc0d1a80fffbd4bb26d5c17bea07064c9adbdc563",
-          "size": 1542914048
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.11.qcow2",
+          "sha256": "4d4aa6b681c865331c380af02d41b2695800018aef977d93a8cb80b5489000b3",
+          "size": 1548979200
         }
       ]
     },
@@ -157,14 +157,14 @@
     },
     {
       "id": "openclaw-arm64",
-      "version": "2026.3.8",
-      "name": "OpenClaw 2026.3.8 (ARM64)",
+      "version": "2026.3.11",
+      "name": "OpenClaw 2026.3.11 (ARM64)",
       "description": "一个基于 Debian 12 的环境，预装了 OpenClaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-09",
+      "updated_at": "2026-03-12",
       "files": [
         {
           "name": "vmlinuz",
@@ -180,9 +180,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-arm64-2026.3.8-fixdesktop.qcow2",
-          "sha256": "72723cb1978f5e1a968b0635bdae3f0fb7b6764a663d04f79ae5a7b69997fdd4",
-          "size": 1451491328
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-arm64-2026.3.11.qcow2",
+          "sha256": "43e9b96b877fb362823856a2c60a37e5d97c4fadc5666311ba0d87190af7ec6f",
+          "size": 1456301056
         }
       ]
     }
