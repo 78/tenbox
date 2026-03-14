@@ -26,8 +26,8 @@
         {
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.13.qcow2",
-          "sha256": "69495ea57dcbd235dd2b8dd347978e4d8de0f099dd677b111fa1b71c38b919ec",
-          "size": 1694846976
+          "sha256": "e1df7ec2f5c04363d13a3eb96c2792df1f9f87b302038429f3117ed2858fa8ed",
+          "size": 1650107904
         }
       ]
     },
@@ -181,8 +181,8 @@
         {
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-arm64-2026.3.13.qcow2",
-          "sha256": "ecbd9c60af508ed2375b306d7216ffd3c07e440260a59c64ba953287819f006e",
-          "size": 1647333376
+          "sha256": "4234c329d746a9eb3702957996ce76a8834faacacb0dd21965ef5ed9855615eb",
+          "size": 1650262016
         }
       ]
     }
