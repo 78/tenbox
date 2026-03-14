@@ -71,7 +71,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-09",
+      "updated_at": "2026-03-14",
       "files": [
         {
           "name": "vmlinuz",
@@ -87,9 +87,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/chromium/rootfs-base.qcow2",
-          "sha256": "afc43876fc810f68ff9c870b463e24edcdabe2a2c81ba465b5ab5b8c263ccf64",
-          "size": 864616448
+          "url": "https://files.xiaozhi.me/tenbox/images/chromium/rootfs-chromium-x86_64.qcow2",
+          "sha256": "05592f031a157e98cf2832e72a21bc15ffd1a6e7195bba1cbdfa62c5175d4674",
+          "size": 1169358848
         }
       ]
     },
@@ -102,7 +102,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-09",
+      "updated_at": "2026-03-14",
       "files": [
         {
           "name": "vmlinuz",
@@ -119,8 +119,8 @@
         {
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium-arm64/rootfs-chromium-arm64.qcow2",
-          "sha256": "d577eb05fd2fb2ad15e7689342ce6b4fa66294ec94c471dd589f35e770c073b4",
-          "size": 847380480
+          "sha256": "1c0437947894940d72812c05714263cbe756071382fe8503c35f7ce0738d8b03",
+          "size": 1119158272
         }
       ]
     },
