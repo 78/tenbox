@@ -6,6 +6,8 @@
 #include "manager/ui/win32_ui_shell.h"
 using UiShell = Win32UiShell;
 
+#include <winsparkle.h>
+
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -357,8 +359,16 @@ static int RunManagerApp(int argc, char* argv[]) {
     UiShell ui(manager);
 
     ui.Show();
+
+    win_sparkle_set_appcast_url("https://tenbox.ai/api/appcast.xml");
+    win_sparkle_set_automatic_check_for_updates(1);
+    win_sparkle_set_update_check_interval(86400);
+    win_sparkle_init();
+    // win_sparkle_check_update_without_ui();
+
     ui.Run();
 
+    win_sparkle_cleanup();
     manager.ShutdownAll();
     if (hMutex) CloseHandle(hMutex);
     CloseLogFile();

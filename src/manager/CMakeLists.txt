@@ -4,7 +4,6 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/app_settings.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/image_source.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/http_download.cpp
-    ${CMAKE_SOURCE_DIR}/src/manager/update_checker.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/app.manifest
     ${CMAKE_SOURCE_DIR}/src/manager/toolbar.rc
     # UI layer
@@ -12,7 +11,6 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/ui/create_vm_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/edit_vm_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/shared_folders_dialog.cpp
-    ${CMAKE_SOURCE_DIR}/src/manager/ui/update_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/port_forward_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/settings_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_display_panel.cpp
@@ -35,6 +33,7 @@ target_link_libraries(tenbox-manager
         tenbox_ipc
         uv_a
         nlohmann_json::nlohmann_json
+        winsparkle_lib
         shell32
         advapi32
         comctl32
@@ -42,6 +41,13 @@ target_link_libraries(tenbox-manager
         ole32
         winhttp
         bcrypt
+)
+
+# Copy WinSparkle.dll next to the executable after build
+add_custom_command(TARGET tenbox-manager POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_PROPERTY:winsparkle_lib,IMPORTED_LOCATION>"
+        "$<TARGET_FILE_DIR:tenbox-manager>"
 )
 
 if(MSVC)

@@ -41,43 +41,50 @@ SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 
 
-def generate_appcast_xml(mac_info: dict) -> str:
-    """Build an appcast.xml string from macOS release info.
-
-    ``mac_info`` keys: latest_version, release_notes, release_date,
-    download_url, sha256, size, min_os, ed_signature.
-    """
-    version = mac_info.get("latest_version", "")
-    notes = mac_info.get("release_notes", "")
-    release_date = mac_info.get("release_date", "")
-    download_url = mac_info.get("download_url", "")
-    ed_signature = mac_info.get("ed_signature", "")
-    size = mac_info.get("size", 0)
-    min_os = mac_info.get("min_os", "13.0").replace("macOS ", "")
-
-    notes_html_lines = "".join(
+def _build_notes_html(notes: str) -> str:
+    """Convert newline-separated release notes into an HTML <ul> block."""
+    lines = "".join(
         f"          <li>{line}</li>\n"
         for line in notes.replace("\r\n", "\n").split("\n")
         if line.strip()
     )
-    description_html = (
-        f"        <ul>\n{notes_html_lines}        </ul>"
-    )
+    return f"        <ul>\n{lines}        </ul>"
 
+
+def _build_pub_date(release_date: str) -> str:
     try:
-        dt = datetime.fromisoformat(release_date)
-        pub_date = format_datetime(dt)
+        return format_datetime(datetime.fromisoformat(release_date))
     except Exception:
-        pub_date = release_date
+        return release_date
 
-    return f"""<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="{SPARKLE_NS}" xmlns:dc="{DC_NS}">
-  <channel>
-    <title>TenBox</title>
-    <link>https://tenbox.ai/api/appcast.xml</link>
-    <description>TenBox macOS Updates</description>
-    <language>zh-CN</language>
-    <item>
+
+def _build_appcast_item(info: dict, sparkle_os: str) -> str:
+    """Build a single <item> element for the appcast."""
+    version = info.get("latest_version", "")
+    notes = info.get("release_notes", "")
+    release_date = info.get("release_date", "")
+    download_url = info.get("download_url", "")
+    ed_signature = info.get("ed_signature", "")
+    size = info.get("size", 0)
+    min_os = info.get("min_os", "")
+
+    if sparkle_os == "macos":
+        min_os = min_os.replace("macOS ", "") if min_os else "13.0"
+    else:
+        min_os = min_os.replace("Windows ", "") if min_os else "10.0"
+
+    description_html = _build_notes_html(notes)
+    pub_date = _build_pub_date(release_date)
+
+    ed_sig_attr = ""
+    if ed_signature:
+        ed_sig_attr = f'\n        sparkle:edSignature="{ed_signature}"'
+
+    installer_args_attr = ""
+    if sparkle_os == "windows":
+        installer_args_attr = '\n        sparkle:installerArguments="/passive"'
+
+    return f"""    <item>
       <title>Version {version}</title>
       <description><![CDATA[
 {description_html}
@@ -86,13 +93,38 @@ def generate_appcast_xml(mac_info: dict) -> str:
       <sparkle:minimumSystemVersion>{min_os}</sparkle:minimumSystemVersion>
       <enclosure
         url="{download_url}"
+        sparkle:os="{sparkle_os}"
         sparkle:version="{version}"
-        sparkle:shortVersionString="{version}"
-        sparkle:edSignature="{ed_signature}"
+        sparkle:shortVersionString="{version}"{ed_sig_attr}{installer_args_attr}
         length="{size}"
         type="application/octet-stream"
       />
-    </item>
+    </item>"""
+
+
+def generate_appcast_xml(win_info: dict | None = None,
+                         mac_info: dict | None = None) -> str:
+    """Build an appcast.xml string with items for each platform that has data.
+
+    Each info dict uses keys: latest_version, release_notes, release_date,
+    download_url, sha256, size, min_os, ed_signature.
+    """
+    items: list[str] = []
+    if win_info and win_info.get("latest_version"):
+        items.append(_build_appcast_item(win_info, "windows"))
+    if mac_info and mac_info.get("latest_version"):
+        items.append(_build_appcast_item(mac_info, "macos"))
+
+    items_xml = "\n".join(items)
+
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="{SPARKLE_NS}" xmlns:dc="{DC_NS}">
+  <channel>
+    <title>TenBox</title>
+    <link>https://tenbox.ai/api/appcast.xml</link>
+    <description>TenBox Updates</description>
+    <language>zh-CN</language>
+{items_xml}
   </channel>
 </rss>
 """
@@ -891,7 +923,7 @@ class ReleasePublisher(ttk.Frame):
         self._load_zip_info_from_appcast()
 
     def _load_zip_info_from_appcast(self):
-        """Load ZIP url, size, and edSignature from appcast.xml."""
+        """Load ZIP url, size, and edSignature from the macOS item in appcast.xml."""
         self.var_mac_zip_url.set("")
         self.var_mac_zip_sha.set("")
         self.var_mac_zip_size.set("")
@@ -900,12 +932,14 @@ class ReleasePublisher(ttk.Frame):
             return
         try:
             tree = ET.parse(APPCAST_XML_PATH)
-            enc = tree.find(".//item/enclosure")
-            if enc is not None:
-                self.var_mac_zip_url.set(enc.get("url", ""))
-                self.var_mac_zip_size.set(enc.get("length", ""))
-                self.text_mac_ed_signature.insert(
-                    "1.0", enc.get(f"{{{SPARKLE_NS}}}edSignature", ""))
+            for enc in tree.findall(".//item/enclosure"):
+                os_attr = enc.get(f"{{{SPARKLE_NS}}}os", "")
+                if os_attr == "macos" or not os_attr:
+                    self.var_mac_zip_url.set(enc.get("url", ""))
+                    self.var_mac_zip_size.set(enc.get("length", ""))
+                    self.text_mac_ed_signature.insert(
+                        "1.0", enc.get(f"{{{SPARKLE_NS}}}edSignature", ""))
+                    break
         except Exception:
             pass
 
@@ -966,20 +1000,37 @@ class ReleasePublisher(ttk.Frame):
 
         saved_files = [str(VERSION_JSON_PATH)]
 
+        win = platforms.get("windows", {})
         mac = platforms.get("macos", {})
+
+        win_appcast = None
+        if win.get("latest_version"):
+            win_appcast = {
+                "latest_version": win["latest_version"],
+                "release_notes": win.get("release_notes", ""),
+                "release_date": win.get("release_date", ""),
+                "min_os": win.get("min_os", "Windows 10"),
+                "download_url": win.get("download_url", ""),
+                "size": win.get("size", 0),
+            }
+
+        mac_appcast = None
         if mac.get("latest_version"):
-            appcast_info = {
+            mac_appcast = {
                 "latest_version": mac["latest_version"],
                 "release_notes": mac.get("release_notes", ""),
                 "release_date": mac.get("release_date", ""),
-                "min_os": mac.get("min_os", "13.0"),
+                "min_os": mac.get("min_os", "macOS 13.0"),
                 "download_url": self.var_mac_zip_url.get().strip(),
                 "size": self._parse_size(self.var_mac_zip_size.get()),
                 "ed_signature": self.text_mac_ed_signature.get("1.0", tk.END).strip(),
             }
+
+        if win_appcast or mac_appcast:
             try:
                 APPCAST_XML_PATH.write_text(
-                    generate_appcast_xml(appcast_info), encoding="utf-8",
+                    generate_appcast_xml(win_info=win_appcast, mac_info=mac_appcast),
+                    encoding="utf-8",
                 )
                 saved_files.append(str(APPCAST_XML_PATH))
             except Exception as e:

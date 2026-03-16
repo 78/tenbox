@@ -1,7 +1,6 @@
 #pragma once
 
 #include "manager/manager_service.h"
-#include "manager/update_checker.h"
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -16,7 +15,3 @@ bool ShowEditVmDialog(HWND parent, ManagerService& mgr,
 
 // Modal dialog for managing shared folders of a VM.
 void ShowSharedFoldersDialog(HWND parent, ManagerService& mgr, const std::string& vm_id);
-
-// Show update available prompt and download progress dialog.
-// Returns true if the MSI was downloaded and the installer launched (caller should exit).
-bool ShowUpdateDialog(HWND parent, const update::UpdateInfo& info);

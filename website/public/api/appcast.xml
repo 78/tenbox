@@ -3,8 +3,29 @@
   <channel>
     <title>TenBox</title>
     <link>https://tenbox.ai/api/appcast.xml</link>
-    <description>TenBox macOS Updates</description>
+    <description>TenBox Updates</description>
     <language>zh-CN</language>
+    <item>
+      <title>Version 0.4.8</title>
+      <description><![CDATA[
+        <ul>
+          <li>修复偶尔端口转发失败的问题</li>
+          <li>端口转发设置增加局域网访问选项</li>
+          <li>修复磁盘IO线程初始化失败的问题</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sun, 15 Mar 2026 00:00:00 -0000</pubDate>
+      <sparkle:minimumSystemVersion>10.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.8.msi"
+        sparkle:os="windows"
+        sparkle:version="0.4.8"
+        sparkle:shortVersionString="0.4.8"
+        sparkle:installerArguments="/passive"
+        length="2146304"
+        type="application/octet-stream"
+      />
+    </item>
     <item>
       <title>Version 0.4.7</title>
       <description><![CDATA[
@@ -16,6 +37,7 @@
       <sparkle:minimumSystemVersion>12</sparkle:minimumSystemVersion>
       <enclosure
         url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.4.7.zip"
+        sparkle:os="macos"
         sparkle:version="0.4.7"
         sparkle:shortVersionString="0.4.7"
         sparkle:edSignature="V8yYrZ3e5ppnE/GwUUgFy2pYPpo7YkTp1AcgRgR2JGb4HikFih0/0qPZ8rOfC1p1pbSZG1LF3Cdvo3G5LCLmCQ=="

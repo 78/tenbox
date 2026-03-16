@@ -119,6 +119,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+if(WIN32)
+    # WinSparkle — auto-update framework for Windows (prebuilt DLL)
+    FetchContent_Declare(
+        winsparkle
+        URL https://github.com/vslavik/winsparkle/releases/download/v0.9.2/WinSparkle-0.9.2.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(winsparkle)
+
+    add_library(winsparkle_lib SHARED IMPORTED GLOBAL)
+    set_target_properties(winsparkle_lib PROPERTIES
+        IMPORTED_IMPLIB "${winsparkle_SOURCE_DIR}/x64/Release/WinSparkle.lib"
+        IMPORTED_LOCATION "${winsparkle_SOURCE_DIR}/x64/Release/WinSparkle.dll"
+        INTERFACE_INCLUDE_DIRECTORIES "${winsparkle_SOURCE_DIR}/include"
+    )
+endif()
+
 add_subdirectory(src/core)
 add_subdirectory(src/platform)
 add_subdirectory(src/ipc)

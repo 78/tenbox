@@ -37,6 +37,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Verify WinSparkle.dll was copied to build dir by CMake post-build step
+if not exist "%BUILD_DIR%\WinSparkle.dll" (
+    echo ERROR: WinSparkle.dll not found in build directory.
+    exit /b 1
+)
+
 :: Step 2: Sign exe files (signtool from Windows SDK or PATH)
 :: Certificate thumbprint: set env SIGNING_SHA1, or create scripts\.signing_sha1 (one line, thumbprint; add to .gitignore)
 if not defined SIGNING_SHA1 (
@@ -49,7 +55,7 @@ if not defined SIGNING_SHA1 (
     exit /b 1
 )
 echo.
-echo [2/4] Signing exe files...
+echo [2/4] Signing binaries...
 set SIGNTOOL=signtool
 set SIGN_ARGS=/v /fd sha256 /sha1 %SIGNING_SHA1% /tr http://rfc3161timestamp.globalsign.com/advanced /td sha256
 "%SIGNTOOL%" sign %SIGN_ARGS% "%BUILD_DIR%\tenbox-manager.exe"
@@ -60,6 +66,11 @@ if errorlevel 1 (
 "%SIGNTOOL%" sign %SIGN_ARGS% "%BUILD_DIR%\tenbox-vm-runtime.exe"
 if errorlevel 1 (
     echo ERROR: Signing tenbox-vm-runtime.exe failed.
+    exit /b 1
+)
+"%SIGNTOOL%" sign %SIGN_ARGS% "%BUILD_DIR%\WinSparkle.dll"
+if errorlevel 1 (
+    echo ERROR: Signing WinSparkle.dll failed.
     exit /b 1
 )
 

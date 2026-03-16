@@ -9,8 +9,9 @@
 #include "manager/i18n.h"
 #include "manager/app_settings.h"
 #include "manager/resource.h"
-#include "manager/update_checker.h"
 #include "version.h"
+
+#include <winsparkle.h>
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -68,7 +69,6 @@ enum CtlId : UINT {
 
 // WM_APP range for cross-thread invoke
 static constexpr UINT WM_INVOKE = WM_APP + 100;
-static constexpr UINT WM_UPDATE_AVAILABLE = WM_APP + 101;
 
 // Suppress host→guest clipboard echo after we write VM data to the clipboard.
 // Uses a timestamp instead of a simple bool because EmptyClipboard() +
@@ -134,8 +134,6 @@ struct Win32UiShell::Impl {
     UINT_PTR resize_timer_id = 0;
     static constexpr UINT kResizeTimerId = 9001;
     static constexpr UINT kResizeDebounceMs = 500;
-    static constexpr UINT kUpdateCheckTimerId = 9002;
-    static constexpr UINT kUpdateCheckDelayMs = 2000;
 
     HFONT ui_font     = nullptr;
     HFONT mono_font   = nullptr;
@@ -160,9 +158,6 @@ struct Win32UiShell::Impl {
 
     std::unordered_map<std::string, VmUiState> vm_ui_states;
     std::unordered_map<std::string, std::unique_ptr<WasapiAudioPlayer>> audio_players;
-
-    update::UpdateInfo pending_update;
-    bool update_check_done = false;
 
     VmUiState& GetVmUiState(const std::string& vm_id) {
         return vm_ui_states[vm_id];
@@ -673,18 +668,6 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
             }
         }
-        if (p && wp == Impl::kUpdateCheckTimerId) {
-            KillTimer(hwnd, Impl::kUpdateCheckTimerId);
-            HWND main_hwnd = hwnd;
-            std::thread([main_hwnd]() {
-                auto info = update::CheckForUpdate(TENBOX_VERSION_STR);
-                if (info.update_available) {
-                    auto* heap_info = new update::UpdateInfo(std::move(info));
-                    PostMessage(main_hwnd, WM_UPDATE_AVAILABLE,
-                        reinterpret_cast<WPARAM>(heap_info), 0);
-                }
-            }).detach();
-        }
         return 0;
 
     case WM_COMMAND: {
@@ -732,26 +715,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             ShellExecuteExW(&sei);
             return 0;
         }
-        case IDM_CHECK_UPDATE: {
-            if (p->update_check_done && p->pending_update.update_available) {
-                if (ShowUpdateDialog(hwnd, p->pending_update)) {
-                    PostQuitMessage(0);
-                }
-            } else {
-                auto info = update::CheckForUpdate(TENBOX_VERSION_STR);
-                if (info.update_available) {
-                    p->pending_update = info;
-                    p->update_check_done = true;
-                    if (ShowUpdateDialog(hwnd, info)) {
-                        PostQuitMessage(0);
-                    }
-                } else {
-                    MessageBoxW(hwnd, i18n::tr_w(i18n::S::kUpdateLatest).c_str(),
-                        i18n::tr_w(i18n::S::kMenuCheckUpdate).c_str(), MB_OK | MB_ICONINFORMATION);
-                }
-            }
+        case IDM_CHECK_UPDATE:
+            win_sparkle_check_update_with_ui();
             return 0;
-        }
         case IDM_ABOUT:
             MessageBoxW(hwnd, i18n::tr_w(i18n::S::kAboutText).c_str(),
                 i18n::tr_w(i18n::S::kAboutTitle).c_str(), MB_OK | MB_ICONINFORMATION);
@@ -1097,20 +1063,6 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-    case WM_UPDATE_AVAILABLE: {
-        auto* info = reinterpret_cast<update::UpdateInfo*>(wp);
-        if (info) {
-            p->pending_update = *info;
-            p->update_check_done = true;
-            delete info;
-            if (ShowUpdateDialog(hwnd, p->pending_update)) {
-                PostQuitMessage(0);
-                return 0;
-            }
-        }
-        return 0;
-    }
-
     case WM_CLIPBOARDUPDATE:
         if (GetTickCount64() >= g_clipboard_suppress_until) {
             auto vms = shell->manager_.ListVms();
@@ -1435,8 +1387,6 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
 
     RefreshVmList();
     LayoutControls(impl_.get());
-
-    SetTimer(impl_->hwnd, Impl::kUpdateCheckTimerId, Impl::kUpdateCheckDelayMs, nullptr);
 }
 
 Win32UiShell::~Win32UiShell() {

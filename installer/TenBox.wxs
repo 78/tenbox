@@ -40,6 +40,9 @@
         <Component Id="RuntimeExe" Guid="*" Bitness="always64">
           <File Id="TenBoxRuntime" Source="$(var.BuildDir)\tenbox-vm-runtime.exe" KeyPath="yes" />
         </Component>
+        <Component Id="WinSparkleDll" Guid="*" Bitness="always64">
+          <File Id="WinSparkle" Source="$(var.BuildDir)\WinSparkle.dll" KeyPath="yes" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -75,6 +78,7 @@
     <Feature Id="Main" Title="TenBox" Level="1">
       <ComponentRef Id="ManagerExe" />
       <ComponentRef Id="RuntimeExe" />
+      <ComponentRef Id="WinSparkleDll" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
     </Feature>
