@@ -93,7 +93,7 @@ struct TenBoxApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appDelegate.appState)
-                .frame(minWidth: 640, minHeight: 320)
+                .frame(minWidth: 1020, minHeight: 620)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {

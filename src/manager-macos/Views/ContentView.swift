@@ -110,8 +110,6 @@ struct ContentView: View {
                     }
                     .help("Manage LLM proxy settings")
 
-                    Divider()
-
                     Picker("", selection: appState.activeTabBinding(for: vm.id)) {
                         Image(systemName: "info.circle").tag(0)
                         Image(systemName: "terminal").tag(1)
