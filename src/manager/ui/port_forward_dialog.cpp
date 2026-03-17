@@ -334,6 +334,7 @@ static INT_PTR CALLBACK AddPfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         CenterDialogToParent(dlg);
         SetDlgItemTextW(dlg, IDC_APF_HOST_IP, L"127.0.0.1");
         SetDlgItemTextW(dlg, IDC_APF_GUEST_IP, L"10.0.2.15");
+        EnableWindow(GetDlgItem(dlg, IDC_APF_GUEST_IP), FALSE);
         SetFocus(GetDlgItem(dlg, IDC_APF_HOST_PORT));
         return FALSE;
 
@@ -519,7 +520,8 @@ static INT_PTR CALLBACK PfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 auto forwards = data->mgr->GetPortForwards(data->vm_id);
                 if (sel < static_cast<int>(forwards.size())) {
                     std::string url_str = "http://" + forwards[sel].EffectiveHostIp() +
-                                         ":" + std::to_string(forwards[sel].host_port);
+                                         ":" + std::to_string(forwards[sel].host_port) +
+                                         "/#token=tenbox";
                     std::wstring url = i18n::to_wide(url_str);
                     ShellExecuteW(dlg, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 }

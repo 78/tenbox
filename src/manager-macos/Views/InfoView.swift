@@ -130,11 +130,14 @@ struct AddPortForwardSheet: View {
     let vmId: String
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: PortForwardField?
 
     @State private var hostIpText = "127.0.0.1"
     @State private var hostPortText = ""
     @State private var guestIpText = "10.0.2.15"
     @State private var guestPortText = ""
+
+    private enum PortForwardField { case hostIp, hostPort, guestIp, guestPort }
 
     private var hostPort: UInt16? { UInt16(hostPortText) }
     private var guestPort: UInt16? { UInt16(guestPortText) }
@@ -153,14 +156,20 @@ struct AddPortForwardSheet: View {
             Form {
                 TextField("Host IP", text: $hostIpText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostIp)
                 TextField("Host Port", text: $hostPortText)
                     .disableAutocorrection(true)
-                TextField("Guest IP", text: $guestIpText)
+                    .focused($focusedField, equals: .hostPort)
+                TextField("Guest IP", text: .constant(guestIpText))
                     .disableAutocorrection(true)
+                    .disabled(true)
+                    .foregroundStyle(.secondary)
                 TextField("Guest Port", text: $guestPortText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .guestPort)
             }
             .padding(.horizontal)
+            .onAppear { focusedField = .hostPort }
 
             HStack {
                 Button("Cancel") { dismiss() }
@@ -187,11 +196,14 @@ struct AddGuestForwardSheet: View {
     let vmId: String
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: GuestForwardField?
 
     @State private var guestIpText = "10.0.2.2"
     @State private var guestPortText = ""
     @State private var hostAddrText = "127.0.0.1"
     @State private var hostPortText = ""
+
+    private enum GuestForwardField { case guestIp, guestPort, hostAddr, hostPort }
 
     private var guestPort: UInt16? { UInt16(guestPortText) }
     private var hostPort: UInt16? { UInt16(hostPortText) }
@@ -210,14 +222,19 @@ struct AddGuestForwardSheet: View {
             Form {
                 TextField("Guest IP", text: $guestIpText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .guestIp)
                 TextField("Guest Port", text: $guestPortText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .guestPort)
                 TextField("Host Address", text: $hostAddrText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostAddr)
                 TextField("Host Port", text: $hostPortText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostPort)
             }
             .padding(.horizontal)
+            .onAppear { focusedField = .guestPort }
 
             HStack {
                 Button("Cancel") { dismiss() }
