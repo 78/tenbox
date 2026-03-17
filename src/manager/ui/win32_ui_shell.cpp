@@ -1543,6 +1543,8 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                 SendMessage(impl_->tab, TCM_SETCURSEL, kTabInfo, 0);
                 LayoutControls(impl_.get());
             }
+
+            UpdateSleepPrevention();
         });
     });
 
@@ -1639,6 +1641,10 @@ void Win32UiShell::Run() {
 }
 
 void Win32UiShell::Quit() {
+    if (sleep_prevented_) {
+        SetThreadExecutionState(ES_CONTINUOUS);
+        sleep_prevented_ = false;
+    }
     if (impl_->hwnd) {
         RECT wr;
         GetWindowRect(impl_->hwnd, &wr);
@@ -1689,5 +1695,24 @@ void Win32UiShell::SetClipboardFromVm(bool value) {
         g_clipboard_suppress_until = GetTickCount64() + kClipboardSuppressMs;
     } else {
         g_clipboard_suppress_until = 0;
+    }
+}
+
+void Win32UiShell::UpdateSleepPrevention() {
+    bool has_running = false;
+    for (const auto& rec : impl_->records) {
+        if (rec.state == VmPowerState::kRunning ||
+            rec.state == VmPowerState::kStarting) {
+            has_running = true;
+            break;
+        }
+    }
+
+    if (has_running && !sleep_prevented_) {
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        sleep_prevented_ = true;
+    } else if (!has_running && sleep_prevented_) {
+        SetThreadExecutionState(ES_CONTINUOUS);
+        sleep_prevented_ = false;
     }
 }

@@ -24,5 +24,8 @@ public:
     ManagerService& manager_;
 
 private:
+    void UpdateSleepPrevention();
+
     std::unique_ptr<Impl> impl_;
+    bool sleep_prevented_ = false;
 };
