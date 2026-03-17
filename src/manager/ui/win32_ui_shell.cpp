@@ -719,7 +719,7 @@ static void UpdateCommandStates(Impl* p) {
     EnableCmd(IDM_PORT_FORWARDS, has_sel);
 
     SendMessage(p->toolbar, TB_ENABLEBUTTON, IDM_DPI_ZOOM,
-                MAKELONG(has_sel ? TRUE : FALSE, 0));
+                MAKELONG((has_sel && p->dpi != 96) ? TRUE : FALSE, 0));
     bool dpi_scaled = has_sel && p->records[p->selected_index].spec.dpi_scaled;
     SendMessage(p->toolbar, TB_CHECKBUTTON, IDM_DPI_ZOOM,
                 MAKELONG(dpi_scaled ? TRUE : FALSE, 0));
