@@ -29,7 +29,6 @@ struct ConsoleView: View {
     }
 
     private func sendInput() {
-        guard !inputText.isEmpty else { return }
         let text = inputText + "\n"
         inputText = ""
         session.sendConsoleInput(text)

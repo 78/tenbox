@@ -291,9 +291,16 @@ void NetBackend::ReverseRewrite(uint8_t* frame, uint32_t len) {
     }
     if (!entry) return;
 
-    // gateway_local: keep src_ip as 10.0.2.2, only rewrite port back
-    uint32_t new_src_ip = entry->gateway_local ? ip->src_ip : htonl(entry->real_dst_ip);
-    uint16_t new_src_port = htons(entry->real_dst_port);
+    uint32_t new_src_ip;
+    if (entry->guestfwd_ip)
+        new_src_ip = htonl(entry->guestfwd_ip);
+    else if (entry->gateway_local)
+        new_src_ip = ip->src_ip;
+    else
+        new_src_ip = htonl(entry->real_dst_ip);
+    uint16_t new_src_port = entry->guestfwd_port
+        ? htons(entry->guestfwd_port)
+        : htons(entry->real_dst_port);
 
     if (ip->proto == IPPROTO_TCP) {
         auto* tcp = reinterpret_cast<TcpHdr*>(frame + sizeof(EthHdr) + ip_hdr_len);
@@ -311,7 +318,7 @@ void NetBackend::ReverseRewrite(uint8_t* frame, uint32_t len) {
         udp->src_port = new_src_port;
     }
 
-    if (!entry->gateway_local)
+    if (!entry->gateway_local || entry->guestfwd_ip)
         ip->src_ip = new_src_ip;
     RecalcIpChecksum(ip);
 }

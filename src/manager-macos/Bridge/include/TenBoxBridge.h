@@ -8,7 +8,15 @@ NS_ASSUME_NONNULL_BEGIN
 @interface TBPortForward : NSObject
 @property (nonatomic, assign) uint16_t hostPort;
 @property (nonatomic, assign) uint16_t guestPort;
-@property (nonatomic, assign) BOOL lan;
+@property (nonatomic, copy) NSString *hostIp;
+@property (nonatomic, copy) NSString *guestIp;
+@end
+
+@interface TBGuestForward : NSObject
+@property (nonatomic, copy) NSString *guestIp;
+@property (nonatomic, assign) uint16_t guestPort;
+@property (nonatomic, copy) NSString *hostAddr;
+@property (nonatomic, assign) uint16_t hostPort;
 @end
 
 @interface TBSharedFolder : NSObject
@@ -30,6 +38,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL netEnabled;
 @property (nonatomic, copy) NSArray<TBSharedFolder *> *sharedFolders;
 @property (nonatomic, copy) NSArray<TBPortForward *> *portForwards;
+@property (nonatomic, copy) NSArray<TBGuestForward *> *guestForwards;
 @property (nonatomic, assign) NSInteger displayScale;
 @end
 
@@ -67,6 +76,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)addPortForward:(TBPortForward *)pf toVm:(NSString *)vmId;
 - (BOOL)removePortForwardWithHostPort:(uint16_t)hostPort fromVm:(NSString *)vmId;
 - (NSArray<TBPortForward *> *)getPortForwards:(NSString *)vmId;
+
+// Guest forward management
+- (BOOL)addGuestForward:(TBGuestForward *)gf toVm:(NSString *)vmId;
+- (BOOL)removeGuestForwardWithGuestIp:(NSString *)guestIp guestPort:(uint16_t)guestPort fromVm:(NSString *)vmId;
 
 // Terminate all running VM processes. Call on app exit.
 - (void)stopAllVms;

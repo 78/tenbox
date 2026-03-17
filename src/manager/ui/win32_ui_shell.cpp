@@ -2,6 +2,7 @@
 #include "manager/ui/win32_dialogs.h"
 #include "manager/ui/create_vm_dialog.h"
 #include "manager/ui/settings_dialog.h"
+#include "manager/ui/llm_proxy_dialog.h"
 #include "manager/ui/win32_display_panel.h"
 #include "manager/ui/info_tab.h"
 #include "manager/ui/console_tab.h"
@@ -57,6 +58,7 @@ enum CmdId : UINT {
     IDM_ABOUT         = 1022,
     IDM_SETTINGS      = 1025,
     IDM_DPI_ZOOM      = 1026,
+    IDM_LLM_PROXY     = 1027,
 };
 
 // ── Control IDs ──
@@ -65,6 +67,7 @@ enum CtlId : UINT {
     IDC_TOOLBAR     = 2001,
     IDC_STATUSBAR   = 2002,
     IDC_TAB         = 2007,
+    IDC_SPRING_SEP  = 2010,
 };
 
 // WM_APP range for cross-thread invoke
@@ -88,7 +91,7 @@ static UINT GetWindowDpi(HWND hwnd) {
     return dpi ? dpi : 96;
 }
 
-static constexpr int kDefaultLeftPaneWidth96 = 280;
+static constexpr int kDefaultLeftPaneWidth96 = 200;
 
 // ── Forward declarations for dialog helpers ──
 
@@ -264,6 +267,7 @@ static HMENU BuildMenuBar(bool show_toolbar) {
     AppendMenuW(file_menu, MF_STRING, IDM_NEW_VM, i18n::tr_w(S::kMenuNewVm).c_str());
     AppendMenuW(file_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(file_menu, MF_STRING, IDM_SETTINGS, i18n::tr_w(S::kMenuSettings).c_str());
+    AppendMenuW(file_menu, MF_STRING, IDM_LLM_PROXY, i18n::tr_w(S::kMenuLlmProxy).c_str());
     AppendMenuW(file_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(file_menu, MF_STRING, IDM_EXIT, i18n::tr_w(S::kMenuExit).c_str());
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file_menu), i18n::tr_w(S::kMenuManager).c_str());
@@ -313,11 +317,12 @@ static HIMAGELIST CreateToolbarImageList(HINSTANCE hinst, int icon_size) {
         IDB_TOOLBAR_SHARED_FOLDERS,
         IDB_TOOLBAR_PORT_FORWARDS,
         IDB_TOOLBAR_DPI_ZOOM,
+        IDB_TOOLBAR_LLM_PROXY,
     };
 
     HIMAGELIST hil = ImageList_Create(
         icon_size, icon_size,
-        ILC_COLOR32 | ILC_MASK, 10, 0);
+        ILC_COLOR32 | ILC_MASK, 11, 0);
     if (!hil) return nullptr;
 
     for (UINT id : bmp_ids) {
@@ -368,6 +373,8 @@ static HWND CreateToolbar(HWND parent, HINSTANCE hinst, UINT dpi) {
         {IDM_PORT_FORWARDS, i18n::tr(S::kToolbarPortForwards),   8, 0},
         {0,                 nullptr,                             -1, 0},
         {IDM_DPI_ZOOM,      i18n::tr(S::kToolbarDpiZoom),        9, BTNS_CHECK},
+        {IDC_SPRING_SEP,    nullptr,                             -1, 0},
+        {IDM_LLM_PROXY,     i18n::tr(S::kToolbarLlmProxy),     10, 0},
     };
 
     std::vector<std::wstring> wtexts;
@@ -378,8 +385,9 @@ static HWND CreateToolbar(HWND parent, HINSTANCE hinst, UINT dpi) {
     for (size_t i = 0; i < std::size(items); i++) {
         const auto& item = items[i];
         TBBUTTON btn{};
-        if (item.id == 0) {
+        if (item.id == 0 || item.id == IDC_SPRING_SEP) {
             btn.fsStyle = BTNS_SEP;
+            btn.idCommand = item.id;
         } else {
             btn.iBitmap   = has_icons ? item.icon_idx : I_IMAGENONE;
             btn.idCommand = item.id;
@@ -392,6 +400,48 @@ static HWND CreateToolbar(HWND parent, HINSTANCE hinst, UINT dpi) {
 
     SendMessage(tb, TB_AUTOSIZE, 0, 0);
     return tb;
+}
+
+// ── Spring separator ──
+// Adjusts the spring separator width so that buttons after it are right-aligned.
+
+static void UpdateToolbarSpring(HWND tb) {
+    int spring_idx = static_cast<int>(SendMessage(tb, TB_COMMANDTOINDEX, IDC_SPRING_SEP, 0));
+    if (spring_idx < 0) return;
+
+    int count = static_cast<int>(SendMessage(tb, TB_BUTTONCOUNT, 0, 0));
+
+    // First, set spring to minimal width so TB_AUTOSIZE computes natural layout
+    TBBUTTONINFOW info{};
+    info.cbSize = sizeof(info);
+    info.dwMask = TBIF_SIZE;
+    info.cx = 0;
+    SendMessageW(tb, TB_SETBUTTONINFOW, IDC_SPRING_SEP, reinterpret_cast<LPARAM>(&info));
+    SendMessage(tb, TB_AUTOSIZE, 0, 0);
+
+    // Measure width of all buttons after the spring
+    int right_width = 0;
+    for (int i = spring_idx + 1; i < count; ++i) {
+        RECT r{};
+        SendMessage(tb, TB_GETITEMRECT, i, reinterpret_cast<LPARAM>(&r));
+        right_width += r.right - r.left;
+    }
+
+    // Get toolbar client width
+    RECT rc;
+    GetClientRect(tb, &rc);
+    int tb_width = rc.right;
+
+    // Get the left edge of the spring separator (= total width of all buttons before it)
+    RECT spring_rc{};
+    SendMessage(tb, TB_GETITEMRECT, spring_idx, reinterpret_cast<LPARAM>(&spring_rc));
+    int left_width = spring_rc.left;
+
+    int spring_width = tb_width - left_width - right_width;
+    if (spring_width < 0) spring_width = 0;
+
+    info.cx = static_cast<WORD>(spring_width);
+    SendMessageW(tb, TB_SETBUTTONINFOW, IDC_SPRING_SEP, reinterpret_cast<LPARAM>(&info));
 }
 
 // ── Layout helper ──
@@ -408,7 +458,7 @@ static int GetBadgeCount(Impl* p, UINT cmd_id) {
     if (cmd_id == IDM_SHARED_FOLDERS)
         return static_cast<int>(spec.shared_folders.size());
     if (cmd_id == IDM_PORT_FORWARDS)
-        return static_cast<int>(spec.port_forwards.size());
+        return static_cast<int>(spec.port_forwards.size() + spec.guest_forwards.size());
     return 0;
 }
 
@@ -556,6 +606,7 @@ static void LayoutControls(Impl* p) {
     int tb_h = 0;
     if (IsWindowVisible(p->toolbar)) {
         SendMessage(p->toolbar, TB_AUTOSIZE, 0, 0);
+        UpdateToolbarSpring(p->toolbar);
         RECT tbr;
         GetWindowRect(p->toolbar, &tbr);
         tb_h = tbr.bottom - tbr.top;
@@ -668,7 +719,7 @@ static void UpdateCommandStates(Impl* p) {
     EnableCmd(IDM_PORT_FORWARDS, has_sel);
 
     SendMessage(p->toolbar, TB_ENABLEBUTTON, IDM_DPI_ZOOM,
-                MAKELONG(has_sel ? TRUE : FALSE, 0));
+                MAKELONG((has_sel && p->dpi != 96) ? TRUE : FALSE, 0));
     bool dpi_scaled = has_sel && p->records[p->selected_index].spec.dpi_scaled;
     SendMessage(p->toolbar, TB_CHECKBUTTON, IDM_DPI_ZOOM,
                 MAKELONG(dpi_scaled ? TRUE : FALSE, 0));
@@ -738,7 +789,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             wchar_t buf[1024]{};
             GetWindowTextW(p->console_tab.input_handle(), buf, static_cast<int>(std::size(buf)));
             std::string input = i18n::wide_to_utf8(buf);
-            if (!input.empty() && p->selected_index >= 0 &&
+            if (p->selected_index >= 0 &&
                 p->selected_index < static_cast<int>(p->records.size())) {
                 std::string vm_id = p->records[p->selected_index].spec.vm_id;
                 std::string to_send = input + "\n";
@@ -761,6 +812,13 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case IDM_SETTINGS:
             ShowSettingsDialog(hwnd, shell->manager_);
+            return 0;
+        case IDM_LLM_PROXY:
+            ShowLlmProxyDialog(hwnd, shell->manager_.app_settings().llm_proxy,
+                [&shell](const settings::LlmProxySettings& settings) {
+                    shell->manager_.app_settings().llm_proxy = settings;
+                    shell->manager_.NotifyLlmProxyChanged();
+                });
             return 0;
         case IDM_EXIT:
             SendMessage(hwnd, WM_CLOSE, 0, 0);
@@ -1485,6 +1543,8 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                 SendMessage(impl_->tab, TCM_SETCURSEL, kTabInfo, 0);
                 LayoutControls(impl_.get());
             }
+
+            UpdateSleepPrevention();
         });
     });
 
@@ -1581,6 +1641,10 @@ void Win32UiShell::Run() {
 }
 
 void Win32UiShell::Quit() {
+    if (sleep_prevented_) {
+        SetThreadExecutionState(ES_CONTINUOUS);
+        sleep_prevented_ = false;
+    }
     if (impl_->hwnd) {
         RECT wr;
         GetWindowRect(impl_->hwnd, &wr);
@@ -1631,5 +1695,24 @@ void Win32UiShell::SetClipboardFromVm(bool value) {
         g_clipboard_suppress_until = GetTickCount64() + kClipboardSuppressMs;
     } else {
         g_clipboard_suppress_until = 0;
+    }
+}
+
+void Win32UiShell::UpdateSleepPrevention() {
+    bool has_running = false;
+    for (const auto& rec : impl_->records) {
+        if (rec.state == VmPowerState::kRunning ||
+            rec.state == VmPowerState::kStarting) {
+            has_running = true;
+            break;
+        }
+    }
+
+    if (has_running && !sleep_prevented_) {
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        sleep_prevented_ = true;
+    } else if (!has_running && sleep_prevented_) {
+        SetThreadExecutionState(ES_CONTINUOUS);
+        sleep_prevented_ = false;
     }
 }

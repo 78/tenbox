@@ -1,5 +1,6 @@
 #include "manager/manager_service.h"
 #include "manager/app_settings.h"
+#include "manager/llm_proxy.h"
 #include "manager/i18n.h"
 #include "version.h"
 
@@ -12,6 +13,7 @@ using UiShell = Win32UiShell;
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -293,6 +295,58 @@ static int RunManagerApp(int argc, char* argv[]) {
     ManagerService manager(runtime_exe, data_dir);
     manager.set_hypervisor_available(CheckHypervisorStatus() == HvStatus::kAvailable);
 
+    // Start LLM proxy service if enabled
+    static constexpr uint32_t kLlmGuestFwdIp = 0x0A000203; // 10.0.2.3
+    static constexpr uint16_t kLlmGuestFwdPort = 80;
+
+    llm_proxy::LlmProxyService llm_proxy(manager.app_settings().llm_proxy);
+
+    auto LogProxy = [](const char* fmt, ...) {
+        if (FILE* f = GetManagerLogFile()) {
+            va_list ap;
+            va_start(ap, fmt);
+            fprintf(f, "[llm-proxy] ");
+            vfprintf(f, fmt, ap);
+            fprintf(f, "\r\n");
+            fflush(f);
+            va_end(ap);
+        }
+    };
+
+    auto StartProxyIfNeeded = [&]() {
+        if (llm_proxy.port() == 0 && !manager.app_settings().llm_proxy.mappings.empty()) {
+            LogProxy("Starting proxy (%zu mappings)...",
+                     manager.app_settings().llm_proxy.mappings.size());
+            if (llm_proxy.Start()) {
+                GuestForward gf;
+                gf.guest_ip = kLlmGuestFwdIp;
+                gf.guest_port = kLlmGuestFwdPort;
+                gf.host_port = llm_proxy.port();
+                LogProxy("Proxy started on port %u, setting guestfwd 10.0.2.3:80 -> 127.0.0.1:%u",
+                         llm_proxy.port(), llm_proxy.port());
+                manager.UpdateGlobalGuestForwards({gf});
+            } else {
+                LogProxy("Proxy failed to start");
+            }
+        } else {
+            LogProxy("Proxy not needed (port=%u, mappings=%zu)",
+                     llm_proxy.port(), manager.app_settings().llm_proxy.mappings.size());
+        }
+    };
+
+    StartProxyIfNeeded();
+
+    manager.SetLlmProxyChangedCallback(
+        [&](const settings::LlmProxySettings& settings) {
+            llm_proxy.UpdateSettings(settings);
+            if (settings.mappings.empty()) {
+                llm_proxy.Stop();
+                manager.UpdateGlobalGuestForwards({});
+            } else {
+                StartProxyIfNeeded();
+            }
+        });
+
     // Set up clipboard callbacks for VM <-> Host clipboard sharing
     manager.SetClipboardGrabCallback([&](const std::string& vm_id, const std::vector<uint32_t>& types) {
         for (uint32_t type : types) {
@@ -370,6 +424,7 @@ static int RunManagerApp(int argc, char* argv[]) {
 
     win_sparkle_cleanup();
     manager.ShutdownAll();
+    llm_proxy.Stop();
     if (hMutex) CloseHandle(hMutex);
     CloseLogFile();
     return 0;

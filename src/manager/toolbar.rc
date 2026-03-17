@@ -17,6 +17,7 @@ IDB_TOOLBAR_SHUTDOWN        BITMAP "resources/shutdown.bmp"
 IDB_TOOLBAR_SHARED_FOLDERS  BITMAP "resources/shared_folders.bmp"
 IDB_TOOLBAR_PORT_FORWARDS   BITMAP "resources/port_forwards.bmp"
 IDB_TOOLBAR_DPI_ZOOM        BITMAP "resources/dpi_zoom.bmp"
+IDB_TOOLBAR_LLM_PROXY       BITMAP "resources/llm_proxy.bmp"
 
 // Version information
 VS_VERSION_INFO VERSIONINFO

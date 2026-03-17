@@ -207,7 +207,9 @@ static std::string HexDecode(const std::string& hex) {
     return _connection->Send(ipc::Encode(msg));
 }
 
-- (BOOL)sendPortForwardsUpdate:(NSArray<NSString *> *)entries netEnabled:(BOOL)netEnabled {
+- (BOOL)sendNetworkUpdate:(NSArray<NSString *> *)hostfwdEntries
+         guestfwdEntries:(NSArray<NSString *> *)guestfwdEntries
+              netEnabled:(BOOL)netEnabled {
     if (!_connection || !_connection->IsValid()) return NO;
 
     ipc::Message msg;
@@ -215,9 +217,15 @@ static std::string HexDecode(const std::string& hex) {
     msg.kind = ipc::Kind::kRequest;
     msg.type = "runtime.update_network";
     msg.fields["link_up"] = netEnabled ? "true" : "false";
-    msg.fields["forward_count"] = std::to_string(entries.count);
-    for (NSUInteger i = 0; i < entries.count; ++i) {
-        msg.fields["forward_" + std::to_string(i)] = entries[i].UTF8String;
+    msg.fields["forward_count"] = std::to_string(hostfwdEntries.count);
+    for (NSUInteger i = 0; i < hostfwdEntries.count; ++i) {
+        msg.fields["forward_" + std::to_string(i)] = hostfwdEntries[i].UTF8String;
+    }
+    if (guestfwdEntries.count > 0) {
+        msg.fields["guestfwd_count"] = std::to_string(guestfwdEntries.count);
+        for (NSUInteger i = 0; i < guestfwdEntries.count; ++i) {
+            msg.fields["guestfwd_" + std::to_string(i)] = guestfwdEntries[i].UTF8String;
+        }
     }
 
     std::lock_guard<std::mutex> lock(_sendLock);
@@ -613,6 +621,29 @@ static std::string HexDecode(const std::string& hex) {
         uint32_t h = (hi != msg.fields.end()) ? std::stoul(hi->second) : 0;
         IPC_DEBUG_LOG(@"[IPC] << %s display.state active=%d %ux%u", GetTimestamp().c_str(), active, w, h);
         dispatch_async(dispatch_get_main_queue(), ^{ dsH(active, w, h); });
+    }
+    else if (msg.type == "runtime.update_network.result") {
+        auto it_ok = msg.fields.find("ok");
+        if (it_ok != msg.fields.end() && it_ok->second == "false") {
+            NSMutableArray<NSString *> *failedPorts = [NSMutableArray array];
+            auto it_count = msg.fields.find("failed_count");
+            if (it_count != msg.fields.end()) {
+                int count = std::stoi(it_count->second);
+                for (int i = 0; i < count; ++i) {
+                    auto it_p = msg.fields.find("failed_" + std::to_string(i));
+                    if (it_p != msg.fields.end()) {
+                        [failedPorts addObject:[NSString stringWithUTF8String:it_p->second.c_str()]];
+                    }
+                }
+            }
+            IPC_DEBUG_LOG(@"[IPC] << %s runtime.update_network.result FAILED ports: %@",
+                          GetTimestamp().c_str(), failedPorts);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self->_portForwardErrorHandler) {
+                    self->_portForwardErrorHandler([failedPorts copy]);
+                }
+            });
+        }
     }
 }
 

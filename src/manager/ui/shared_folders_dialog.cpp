@@ -18,6 +18,7 @@ enum SfDlgId {
     IDC_SF_ADD     = 301,
     IDC_SF_REMOVE  = 302,
     IDC_SF_OPEN    = 303,
+    IDC_SF_HINT    = 304,
 };
 
 struct SfDlgData {
@@ -73,7 +74,11 @@ static INT_PTR CALLBACK SfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         int btn_w = du.right, btn_h = du.bottom;
         int gap = btn_h / 2, btn_gap = btn_h / 4;
         int list_w = rc.right - btn_w - gap * 3;
-        int list_h = rc.bottom - gap * 2;
+
+        RECT hdu = {0, 0, 4, 24};
+        MapDialogRect(dlg, &hdu);
+        int hint_h = hdu.bottom;
+        int list_h = rc.bottom - gap * 3 - hint_h;
 
         HWND lv = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
@@ -105,6 +110,15 @@ static INT_PTR CALLBACK SfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         MoveWindow(GetDlgItem(dlg, IDC_SF_ADD),    btn_x, gap,                          btn_w, btn_h, FALSE);
         MoveWindow(GetDlgItem(dlg, IDC_SF_REMOVE), btn_x, gap + btn_h + btn_gap,        btn_w, btn_h, FALSE);
         MoveWindow(GetDlgItem(dlg, IDC_SF_OPEN),   btn_x, gap + (btn_h + btn_gap) * 2,  btn_w, btn_h, FALSE);
+
+        std::wstring hint = i18n::tr_w(i18n::S::kSfHint);
+        HWND hint_ctrl = CreateWindowExW(0, L"STATIC", hint.c_str(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            gap, gap + list_h + gap, rc.right - gap * 2, hint_h,
+            dlg, reinterpret_cast<HMENU>(IDC_SF_HINT),
+            GetModuleHandle(nullptr), nullptr);
+        SendMessageW(hint_ctrl, WM_SETFONT,
+            SendMessageW(dlg, WM_GETFONT, 0, 0), TRUE);
 
         SfRefreshList(data);
         SfUpdateButtons(dlg, lv);

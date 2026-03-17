@@ -12,6 +12,7 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/ui/edit_vm_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/shared_folders_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/port_forward_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/ui/llm_proxy_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/settings_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_display_panel.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/info_tab.cpp
@@ -20,6 +21,7 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/audio/wasapi_audio_player.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/vm_forms.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/i18n.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/llm_proxy.cpp
 )
 
 target_include_directories(tenbox-manager
@@ -41,6 +43,7 @@ target_link_libraries(tenbox-manager
         ole32
         winhttp
         bcrypt
+        ws2_32
 )
 
 # Copy WinSparkle.dll next to the executable after build

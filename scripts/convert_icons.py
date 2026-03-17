@@ -30,6 +30,7 @@ ICONS = [
     "shared_folders",
     "port_forwards",
     "dpi_zoom",
+    "llm_proxy",
 ]
 
 def convert_icon(name: str) -> bool:

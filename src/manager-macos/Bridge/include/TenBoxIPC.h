@@ -4,6 +4,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface TBIpcClient : NSObject
 
+/// Called on main thread when runtime reports port forward bind failures.
+/// Each string is a host port that failed (e.g. "22").
+@property (nonatomic, copy, nullable) void (^portForwardErrorHandler)(NSArray<NSString *> *failedPorts);
+
 - (BOOL)connectToVm:(NSString *)vmId;
 - (BOOL)attachToFd:(int)fd;
 - (void)disconnect;
@@ -27,9 +31,12 @@ NS_ASSUME_NONNULL_BEGIN
 // Each entry: "tag|host_path|readonly(0/1)"
 - (BOOL)sendSharedFoldersUpdate:(NSArray<NSString *> *)entries;
 
-// Hot-update port forwards on a running VM.
-// Each entry: "host_port:guest_port" (e.g. "8080:80")
-- (BOOL)sendPortForwardsUpdate:(NSArray<NSString *> *)entries netEnabled:(BOOL)netEnabled;
+// Send full network config to a running VM.
+// hostfwdEntries: "tcp:host_ip:host_port-guest_ip:guest_port"
+// guestfwdEntries: "guestfwd:guest_ip:guest_port-host_addr:host_port"
+- (BOOL)sendNetworkUpdate:(NSArray<NSString *> *)hostfwdEntries
+         guestfwdEntries:(NSArray<NSString *> *)guestfwdEntries
+              netEnabled:(BOOL)netEnabled;
 
 // Clipboard (data_type: 1=UTF8_TEXT, 2=IMAGE_PNG, 3=IMAGE_BMP)
 - (BOOL)sendClipboardGrab:(NSArray<NSNumber *> *)types;

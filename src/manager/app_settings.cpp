@@ -134,6 +134,23 @@ AppSettings LoadSettings(const std::string& data_dir) {
         if (j.contains("last_selected_source") && j["last_selected_source"].is_string()) {
             s.last_selected_source = j["last_selected_source"].get<std::string>();
         }
+        if (j.contains("llm_proxy") && j["llm_proxy"].is_object()) {
+            auto& lp = j["llm_proxy"];
+            if (lp.contains("mappings") && lp["mappings"].is_array()) {
+                for (auto& item : lp["mappings"]) {
+                    if (!item.is_object()) continue;
+                    LlmModelMapping m;
+                    m.alias      = item.value("alias", "");
+                    m.target_url = item.value("target_url", "");
+                    m.api_key    = item.value("api_key", "");
+                    m.model      = item.value("model", "");
+                    if (item.contains("api_type") && item["api_type"].is_number_unsigned())
+                        m.api_type = static_cast<LlmApiType>(item["api_type"].get<uint8_t>());
+                    if (!m.alias.empty())
+                        s.llm_proxy.mappings.push_back(std::move(m));
+                }
+            }
+        }
         if (j.contains("vm_paths") && j["vm_paths"].is_array()) {
             auto default_storage = DefaultVmStorageDir();
             for (auto& item : j["vm_paths"]) {
@@ -191,6 +208,22 @@ void SaveSettings(const std::string& data_dir, const AppSettings& s) {
     if (!s.last_selected_source.empty())
         j["last_selected_source"] = s.last_selected_source;
 
+    {
+        json lp;
+        json mappings = json::array();
+        for (const auto& m : s.llm_proxy.mappings) {
+            mappings.push_back({
+                {"alias",      m.alias},
+                {"target_url", m.target_url},
+                {"api_key",    m.api_key},
+                {"model",      m.model},
+                {"api_type",   static_cast<uint8_t>(m.api_type)}
+            });
+        }
+        lp["mappings"] = mappings;
+        j["llm_proxy"] = lp;
+    }
+
     auto path = fs::path(data_dir) / "settings.json";
     std::ofstream ofs(path, std::ios::trunc);
     if (ofs) ofs << j.dump(2) << '\n';
@@ -236,8 +269,25 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
                     PortForward pf;
                     pf.host_port = item["host_port"].get<uint16_t>();
                     pf.guest_port = item["guest_port"].get<uint16_t>();
-                    if (item.contains("lan")) pf.lan = item["lan"].get<bool>();
+                    if (item.contains("host_ip")) pf.host_ip = item["host_ip"].get<std::string>();
+                    else if (item.contains("lan") && item["lan"].get<bool>()) pf.host_ip = "0.0.0.0";
+                    if (item.contains("guest_ip")) pf.guest_ip = item["guest_ip"].get<std::string>();
                     spec.port_forwards.push_back(pf);
+                }
+            }
+        }
+
+        if (j.contains("guest_forwards") && j["guest_forwards"].is_array()) {
+            for (auto& item : j["guest_forwards"]) {
+                if (item.contains("guest_ip") && item.contains("guest_port") &&
+                    item.contains("host_port")) {
+                    GuestForward gf;
+                    GuestForward::Ip4FromString(item["guest_ip"].get<std::string>(), gf.guest_ip);
+                    gf.guest_port = item["guest_port"].get<uint16_t>();
+                    if (item.contains("host_addr"))
+                        gf.host_addr = item["host_addr"].get<std::string>();
+                    gf.host_port = item["host_port"].get<uint16_t>();
+                    spec.guest_forwards.push_back(gf);
                 }
             }
         }
@@ -298,10 +348,24 @@ void SaveVmManifest(const VmSpec& spec) {
     json fwds = json::array();
     for (const auto& f : spec.port_forwards) {
         json fj = {{"host_port", f.host_port}, {"guest_port", f.guest_port}};
-        if (f.lan) fj["lan"] = true;
+        if (!f.host_ip.empty() && f.host_ip != "127.0.0.1") fj["host_ip"] = f.host_ip;
+        if (!f.guest_ip.empty()) fj["guest_ip"] = f.guest_ip;
         fwds.push_back(std::move(fj));
     }
     j["port_forwards"] = fwds;
+
+    json gfwds = json::array();
+    for (const auto& gf : spec.guest_forwards) {
+        json gj = {
+            {"guest_ip", GuestForward::Ip4ToString(gf.guest_ip)},
+            {"guest_port", gf.guest_port},
+            {"host_port", gf.host_port}
+        };
+        if (!gf.host_addr.empty() && gf.host_addr != "127.0.0.1")
+            gj["host_addr"] = gf.host_addr;
+        gfwds.push_back(std::move(gj));
+    }
+    j["guest_forwards"] = gfwds;
 
     json shared = json::array();
     for (const auto& sf : spec.shared_folders) {

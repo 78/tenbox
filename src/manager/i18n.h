@@ -184,6 +184,7 @@ enum class S {
     kSfNoSelection,
     kSfConfirmRemoveTitle,
     kSfConfirmRemoveMsg,
+    kSfHint,
 
     // Port forwards dialog
     kDlgPortForwards,
@@ -196,12 +197,15 @@ enum class S {
     kPfConfirmRemoveTitle,
     kPfConfirmRemoveMsg,
     kPfAddTitle,
+    kPfLabelHostIp,
     kPfLabelHostPort,
+    kPfLabelGuestIp,
     kPfLabelGuestPort,
     kPfInvalidPort,
     kPfDuplicatePort,
     kToolbarPortForwards,
     kToolbarDpiZoom,
+    kToolbarLlmProxy,
     kMenuPortForwards,
     kMenuClone,
     kStatusVmCloned,
@@ -209,6 +213,20 @@ enum class S {
     kPfLabelLan,
     kPfBindErrorTitle,
     kPfBindErrorMsg,
+
+    // Guest forward (in port forward dialog)
+    kGfTitle,
+    kGfColGuestAddr,
+    kGfColHostAddr,
+    kGfBtnAdd,
+    kGfBtnRemove,
+    kGfAddTitle,
+    kGfLabelGuestIp,
+    kGfLabelGuestPort,
+    kGfLabelHostAddr,
+    kGfLabelHostPort,
+    kGfInvalidParams,
+    kGfDuplicateEntry,
 
     // Online image dialog
     kImgFetchOnline,
@@ -267,6 +285,30 @@ enum class S {
     kErrLaunchRuntimeFailed,
     kErrVmDisappearedDuringStart,
     kErrIpcConnectionFailed,
+
+    // LLM Proxy dialog
+    kMenuLlmProxy,
+    kDlgLlmProxy,
+    kLlmColAlias,
+    kLlmColApiType,
+    kLlmColTargetUrl,
+    kLlmColModel,
+    kLlmBtnAdd,
+    kLlmBtnEdit,
+    kLlmBtnRemove,
+    kLlmAddTitle,
+    kLlmEditTitle,
+    kLlmLabelAlias,
+    kLlmLabelApiType,
+    kLlmLabelTargetUrl,
+    kLlmLabelApiKey,
+    kLlmLabelModel,
+    kLlmApiTypeOpenAiCompletions,
+    kLlmNoSelection,
+    kLlmConfirmRemoveTitle,
+    kLlmConfirmRemoveMsg,
+    kLlmDuplicateAlias,
+    kLlmHint,
 
     kCount  // Must be last
 };

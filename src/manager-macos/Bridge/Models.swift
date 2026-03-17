@@ -45,10 +45,24 @@ struct SharedFolder: Identifiable, Codable, Equatable {
 }
 
 struct PortForward: Identifiable, Codable, Equatable {
-    var id: String { "\(hostPort):\(guestPort)" }
+    var id: String { "\(effectiveHostIp):\(hostPort):\(guestPort)" }
     let hostPort: UInt16
     let guestPort: UInt16
-    var lan: Bool = false
+    var hostIp: String = "127.0.0.1"
+    var guestIp: String = ""
+
+    var effectiveHostIp: String { hostIp.isEmpty ? "127.0.0.1" : hostIp }
+    var effectiveGuestIp: String { guestIp.isEmpty ? "" : guestIp }
+}
+
+struct GuestForward: Identifiable, Codable, Equatable {
+    var id: String { "\(guestIp):\(guestPort)" }
+    let guestIp: String
+    let guestPort: UInt16
+    var hostAddr: String = "127.0.0.1"
+    let hostPort: UInt16
+
+    var effectiveHostAddr: String { hostAddr.isEmpty ? "127.0.0.1" : hostAddr }
 }
 
 struct VmInfo: Identifiable, Codable {
@@ -63,7 +77,31 @@ struct VmInfo: Identifiable, Codable {
     let netEnabled: Bool
     let sharedFolders: [SharedFolder]
     let portForwards: [PortForward]
+    let guestForwards: [GuestForward]
     let displayScale: Int
+}
+
+// MARK: - LLM Proxy Models
+
+enum LlmApiType: String, Codable, CaseIterable, Identifiable {
+    case openaiCompletions = "openai_completions"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .openaiCompletions: return "OpenAI Completions"
+        }
+    }
+}
+
+struct LlmModelMapping: Identifiable, Codable, Equatable {
+    var id: String { alias }
+    var alias: String
+    var targetUrl: String
+    var apiKey: String
+    var model: String
+    var apiType: LlmApiType = .openaiCompletions
 }
 
 struct VmCreateConfig {

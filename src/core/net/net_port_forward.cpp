@@ -42,7 +42,7 @@ std::vector<uint16_t> NetBackend::SetupPortForwards() {
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(pf.lan ? INADDR_ANY : INADDR_LOOPBACK);
+        addr.sin_addr.s_addr = htonl(pf.host_ip == "0.0.0.0" ? INADDR_ANY : INADDR_LOOPBACK);
         addr.sin_port = htons(pf.host_port);
 
         if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCK_ERR ||
@@ -63,7 +63,7 @@ std::vector<uint16_t> NetBackend::SetupPortForwards() {
         }, &pf);
 
         LOG_INFO("Port forward: %s:%u -> guest:%u",
-                 pf.lan ? "0.0.0.0" : "127.0.0.1", pf.host_port, pf.guest_port);
+                 pf.host_ip == "0.0.0.0" ? "0.0.0.0" : "127.0.0.1", pf.host_port, pf.guest_port);
     }
 
     return failed_ports;
@@ -129,7 +129,7 @@ void NetBackend::CheckPendingUpdates() {
             pf.backend = this;
             pf.host_port = f.host_port;
             pf.guest_port = f.guest_port;
-            pf.lan = f.lan;
+            pf.host_ip = f.host_ip;
         }
         auto failed = SetupPortForwards();
         LOG_INFO("Port forwards updated (%zu entries, %zu failed)",

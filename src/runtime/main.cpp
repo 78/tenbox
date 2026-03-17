@@ -92,9 +92,12 @@ static void PrintUsage(const char* prog) {
         "  --cpus <N>           Number of vCPUs (default: 1, max: 128)\n"
         "  --net                Start with network link up (default: link down)\n"
         "  --debug              Enable debug mode (verbose kernel output)\n"
-        "  --forward <hostfwd>  Port forward (repeatable), e.g.:\n"
+        "  --hostfwd <spec>     Port forward (repeatable), e.g.:\n"
         "                         tcp:127.0.0.1:8080-:80  (loopback)\n"
         "                         tcp:0.0.0.0:8080-:80    (LAN accessible)\n"
+        "  --guestfwd <spec>    Guest forward (repeatable), e.g.:\n"
+        "                         guestfwd:10.0.2.3:80-:18981\n"
+        "                         guestfwd:10.0.2.3:80-127.0.0.1:18981\n"
         "  --share TAG:PATH[:ro] Share host directory (repeatable)\n"
         "  --version            Show version\n"
         "  --help               Show this help\n",
@@ -183,14 +186,24 @@ int main(int argc, char* argv[]) {
             config.net_link_up = true;
         } else if (Arg("--debug")) {
             config.debug_mode = true;
-        } else if (Arg("--forward")) {
+        } else if (Arg("--hostfwd")) {
             auto v = NextArg(); if (!v) return 1;
             PortForward pf;
             if (PortForward::FromHostfwd(v, pf)) {
                 config.port_forwards.push_back(pf);
             } else {
-                fprintf(stderr, "Invalid --forward format: %s\n"
+                fprintf(stderr, "Invalid --hostfwd format: %s\n"
                         "  Expected: tcp:ADDR:HPORT-:GPORT  (e.g. tcp:127.0.0.1:8080-:80)\n", v);
+                return 1;
+            }
+        } else if (Arg("--guestfwd")) {
+            auto v = NextArg(); if (!v) return 1;
+            GuestForward gf;
+            if (GuestForward::FromGuestfwd(v, gf)) {
+                config.guest_forwards.push_back(gf);
+            } else {
+                fprintf(stderr, "Invalid --guestfwd format: %s\n"
+                        "  Expected: guestfwd:GUEST_IP:GPORT-[HOST_ADDR]:HPORT\n", v);
                 return 1;
             }
         } else if (Arg("--share")) {

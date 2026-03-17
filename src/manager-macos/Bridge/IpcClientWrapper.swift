@@ -26,6 +26,9 @@ class IpcClientWrapper: ObservableObject {
     var onRuntimeState: ((String) -> Void)?
     var onGuestAgentState: ((Bool) -> Void)?
 
+    // Port forward errors (host ports that failed to bind)
+    var onPortForwardError: (([String]) -> Void)?
+
     // Disconnect (called when the IPC recv loop exits, e.g. runtime crashed)
     var onDisconnect: (() -> Void)?
 
@@ -104,13 +107,16 @@ class IpcClientWrapper: ObservableObject {
         client.sendSharedFoldersUpdate(entries)
     }
 
-    func sendPortForwardsUpdate(entries: [String], netEnabled: Bool) {
-        client.sendPortForwardsUpdate(entries, netEnabled: netEnabled)
+    func sendNetworkUpdate(hostfwdEntries: [String], guestfwdEntries: [String], netEnabled: Bool) {
+        client.sendNetworkUpdate(hostfwdEntries, guestfwdEntries: guestfwdEntries, netEnabled: netEnabled)
     }
 
     // MARK: - Receive
 
     private func startReceiveLoop() {
+        client.portForwardErrorHandler = { [weak self] failedPorts in
+            self?.onPortForwardError?(failedPorts)
+        }
         client.startReceiveLoop(
             frameHandler: { [weak self] pixelBytes, pixelLength, w, h, stride, resW, resH, dirtyX, dirtyY in
                 self?.onFrame?(pixelBytes, Int(pixelLength), w, h, stride, resW, resH, dirtyX, dirtyY)

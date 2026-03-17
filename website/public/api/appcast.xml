@@ -6,42 +6,46 @@
     <description>TenBox Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.4.8</title>
+      <title>Version 0.5.0</title>
       <description><![CDATA[
         <ul>
-          <li>修复偶尔端口转发失败的问题</li>
-          <li>端口转发设置增加局域网访问选项</li>
-          <li>修复磁盘IO线程初始化失败的问题</li>
+          <li>默认禁用10.0.2.2转发，需要用户配置</li>
+          <li>增加LLM代理工具，保障API Key安全</li>
+          <li>VM在运行时，防止系统进入睡眠</li>
+          <li>更新升级组件</li>
         </ul>
       ]]></description>
-      <pubDate>Sun, 15 Mar 2026 00:00:00 -0000</pubDate>
-      <sparkle:minimumSystemVersion>10.0</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 17 Mar 2026 00:00:00 -0000</pubDate>
+      <sparkle:minimumSystemVersion>10</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.8.msi"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.0.msi"
         sparkle:os="windows"
-        sparkle:version="0.4.8"
-        sparkle:shortVersionString="0.4.8"
+        sparkle:version="0.5.0"
+        sparkle:shortVersionString="0.5.0"
         sparkle:installerArguments="/passive"
-        length="2146304"
+        length="3219456"
         type="application/octet-stream"
       />
     </item>
     <item>
-      <title>Version 0.4.7</title>
+      <title>Version 0.5.0</title>
       <description><![CDATA[
         <ul>
-          <li>修复磁盘线程初始化顺序bug</li>
+          <li>默认禁用10.0.2.2转发，需要用户配置</li>
+          <li>增加LLM代理工具，保障API Key安全</li>
+          <li>VM在运行时，防止系统进入睡眠</li>
+          <li>主机端口冲突时会报错</li>
         </ul>
       ]]></description>
-      <pubDate>Sun, 15 Mar 2026 00:00:00 -0000</pubDate>
+      <pubDate>Tue, 17 Mar 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>12</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.4.7.zip"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.0.zip"
         sparkle:os="macos"
-        sparkle:version="0.4.7"
-        sparkle:shortVersionString="0.4.7"
-        sparkle:edSignature="V8yYrZ3e5ppnE/GwUUgFy2pYPpo7YkTp1AcgRgR2JGb4HikFih0/0qPZ8rOfC1p1pbSZG1LF3Cdvo3G5LCLmCQ=="
-        length="4302117"
+        sparkle:version="0.5.0"
+        sparkle:shortVersionString="0.5.0"
+        sparkle:edSignature="vVSP8x/4bNGDhxSj3lOuU4/KBfC51ZxaKXyqay+tDD24UzE56P4G7mlBJMZdDhi2MJsR6yK7uEfils3b2prRBg=="
+        length="4533728"
         type="application/octet-stream"
       />
     </item>

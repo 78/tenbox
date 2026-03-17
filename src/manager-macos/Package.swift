@@ -42,6 +42,8 @@ let package = Package(
                 "Bridge/TenBoxBridgeWrapper.swift",
                 "Bridge/IpcClientWrapper.swift",
                 "Services/ImageSourceService.swift",
+                "Services/LlmProxyService.swift",
+                "Views/LlmProxyView.swift",
             ],
             resources: [
                 .copy("Resources/icon.png"),

@@ -3,6 +3,7 @@
 #include "common/vm_model.h"
 #include "manager/image_source.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,25 @@ struct WindowGeometry {
     int width = 1024, height = 680;
 };
 
+enum class LlmApiType : uint8_t {
+    kOpenAiCompletions = 0,  // POST /v1/chat/completions
+    // Future:
+    // kOpenAiResponses = 1, // POST /v1/responses
+    // kAnthropicMessages = 2, // POST /v1/messages
+};
+
+struct LlmModelMapping {
+    std::string alias;       // "auto", "default", etc.
+    std::string target_url;  // "https://api.tenclass.net/v1"
+    std::string api_key;     // "sk-..."
+    std::string model;       // "qwen-plus"
+    LlmApiType api_type = LlmApiType::kOpenAiCompletions;
+};
+
+struct LlmProxySettings {
+    std::vector<LlmModelMapping> mappings;
+};
+
 struct AppSettings {
     WindowGeometry window;
     std::vector<std::string> vm_paths;
@@ -26,6 +46,7 @@ struct AppSettings {
     std::string image_cache_dir;    // empty = DefaultImageCacheDir(data_dir)
     std::vector<image_source::ImageSource> sources; // empty = use DefaultSources()
     std::string last_selected_source; // name of last selected source
+    LlmProxySettings llm_proxy;
 };
 
 // Resolve effective directories (returns custom if set, otherwise default).

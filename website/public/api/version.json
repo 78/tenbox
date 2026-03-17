@@ -1,27 +1,27 @@
 {
-  "latest_version": "0.4.8",
+  "latest_version": "0.5.0",
   "min_supported_version": "0.1.0",
-  "release_notes": "修复偶尔端口转发失败的问题\n端口转发设置增加局域网访问选项\n修复磁盘IO线程初始化失败的问题",
-  "release_date": "2026-03-15",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.8.msi",
-  "sha256": "592b287093660a22c33676e6cc04e30586c139e925496309958673d17b0e67f8",
+  "release_notes": "默认禁用10.0.2.2转发，需要用户配置\n增加LLM代理工具，保障API Key安全\nVM在运行时，防止系统进入睡眠\n更新升级组件",
+  "release_date": "2026-03-17",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.0.msi",
+  "sha256": "9152e88a91b8c94d8741fbdf204408c431af2a453d799b40eac222b02afbafa0",
   "platforms": {
     "windows": {
-      "latest_version": "0.4.8",
-      "release_notes": "修复偶尔端口转发失败的问题\n端口转发设置增加局域网访问选项\n修复磁盘IO线程初始化失败的问题",
-      "release_date": "2026-03-15",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.4.8.msi",
-      "sha256": "592b287093660a22c33676e6cc04e30586c139e925496309958673d17b0e67f8",
-      "size": 2146304,
+      "latest_version": "0.5.0",
+      "release_notes": "默认禁用10.0.2.2转发，需要用户配置\n增加LLM代理工具，保障API Key安全\nVM在运行时，防止系统进入睡眠\n更新升级组件",
+      "release_date": "2026-03-17",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.0.msi",
+      "sha256": "9152e88a91b8c94d8741fbdf204408c431af2a453d799b40eac222b02afbafa0",
+      "size": 3219456,
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.4.7",
-      "release_notes": "修复磁盘线程初始化顺序bug",
-      "release_date": "2026-03-15",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.4.7.dmg",
-      "sha256": "385267231957ef23af37bd12a332244321bab3ba8669065192967168f405b9a3",
-      "size": 4239104,
+      "latest_version": "0.5.0",
+      "release_notes": "默认禁用10.0.2.2转发，需要用户配置\n增加LLM代理工具，保障API Key安全\nVM在运行时，防止系统进入睡眠\n主机端口冲突时会报错",
+      "release_date": "2026-03-17",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.0.dmg",
+      "sha256": "d4d14454824cbe2476a074c637a980096a1d4ead1862dbaeeddc3c1c8f26c714",
+      "size": 4485659,
       "min_os": "macOS 12"
     }
   }

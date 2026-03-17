@@ -1,5 +1,4 @@
 #import "TenBoxBridge.h"
-#include "common/vm_model.h"
 #include "ipc/unix_socket.h"
 #include "ipc/protocol_v1.h"
 #include <string>
@@ -81,6 +80,11 @@ static NSString* GetVmsDir() {
 // ── TBPortForward ──────────────────────────────────────────────────
 
 @implementation TBPortForward
+@end
+
+// ── TBGuestForward ──────────────────────────────────────────────────
+
+@implementation TBGuestForward
 @end
 
 // ── TBSharedFolder ──────────────────────────────────────────────────
@@ -186,12 +190,39 @@ static NSString* GetVmsDir() {
                     TBPortForward* pf = [[TBPortForward alloc] init];
                     pf.hostPort = [hp unsignedShortValue];
                     pf.guestPort = [gp unsignedShortValue];
-                    pf.lan = [pfDict[@"lan"] boolValue];
+                    NSString* hip = pfDict[@"host_ip"];
+                    if (hip) {
+                        pf.hostIp = hip;
+                    } else if ([pfDict[@"lan"] boolValue]) {
+                        pf.hostIp = @"0.0.0.0";
+                    } else {
+                        pf.hostIp = @"127.0.0.1";
+                    }
+                    pf.guestIp = pfDict[@"guest_ip"] ?: @"";
                     [pfs addObject:pf];
                 }
             }
         }
         info.portForwards = pfs;
+
+        NSMutableArray<TBGuestForward *>* gfs = [NSMutableArray array];
+        NSArray* gfArray = dict[@"guest_forwards"];
+        if ([gfArray isKindOfClass:[NSArray class]]) {
+            for (NSDictionary* gfDict in gfArray) {
+                NSString* gip = gfDict[@"guest_ip"];
+                NSNumber* gp = gfDict[@"guest_port"];
+                NSNumber* hp = gfDict[@"host_port"];
+                if (gip && gp && hp) {
+                    TBGuestForward* gf = [[TBGuestForward alloc] init];
+                    gf.guestIp = gip;
+                    gf.guestPort = [gp unsignedShortValue];
+                    gf.hostAddr = gfDict[@"host_addr"] ?: @"127.0.0.1";
+                    gf.hostPort = [hp unsignedShortValue];
+                    [gfs addObject:gf];
+                }
+            }
+        }
+        info.guestForwards = gfs;
         [result addObject:info];
     }
 
@@ -330,20 +361,8 @@ static NSString* GetVmsDir() {
         [args addObject:@"--net"];
     }
 
-    NSArray* portForwards = config[@"port_forwards"];
-    if ([portForwards isKindOfClass:[NSArray class]]) {
-        for (NSDictionary* pf in portForwards) {
-            NSNumber* hp = pf[@"host_port"];
-            NSNumber* gp = pf[@"guest_port"];
-            if (hp && gp) {
-                [args addObject:@"--forward"];
-                BOOL lan = [pf[@"lan"] boolValue];
-                [args addObject:[NSString stringWithFormat:@"tcp:%s:%u-:%u",
-                    lan ? "0.0.0.0" : "127.0.0.1",
-                    [hp unsignedShortValue], [gp unsignedShortValue]]];
-            }
-        }
-    }
+    // Port forwards and guest forwards are sent via IPC after the VM
+    // reaches the "running" state so that bind failures can be reported.
 
     NSMutableArray<NSURL *>* scopedUrls = [NSMutableArray array];
     NSArray* sharedFolders = config[@"shared_folders"];
@@ -798,32 +817,11 @@ static NSDictionary* PortForwardToJson(TBPortForward* pf) {
         @"host_port": @(pf.hostPort),
         @"guest_port": @(pf.guestPort),
     } mutableCopy];
-    if (pf.lan) d[@"lan"] = @YES;
+    if (pf.hostIp.length > 0 && ![pf.hostIp isEqualToString:@"127.0.0.1"])
+        d[@"host_ip"] = pf.hostIp;
+    if (pf.guestIp.length > 0)
+        d[@"guest_ip"] = pf.guestIp;
     return d;
-}
-
-static void SendPortForwardsUpdate(const std::string& vmIdStr,
-                                   NSArray* pfJsonArray,
-                                   BOOL netEnabled) {
-    std::lock_guard<std::mutex> lock(g_server_mutex);
-    auto it = g_accepted.find(vmIdStr);
-    if (it == g_accepted.end() || !it->second || !it->second->IsValid()) return;
-
-    ipc::Message msg;
-    msg.channel = ipc::Channel::kControl;
-    msg.kind = ipc::Kind::kRequest;
-    msg.type = "runtime.update_network";
-    msg.fields["link_up"] = netEnabled ? "true" : "false";
-    msg.fields["forward_count"] = std::to_string(pfJsonArray.count);
-    for (NSUInteger i = 0; i < pfJsonArray.count; ++i) {
-        NSDictionary* pf = pfJsonArray[i];
-        PortForward fwd;
-        fwd.host_port = [pf[@"host_port"] unsignedShortValue];
-        fwd.guest_port = [pf[@"guest_port"] unsignedShortValue];
-        fwd.lan = [pf[@"lan"] boolValue];
-        msg.fields["forward_" + std::to_string(i)] = fwd.ToHostfwd();
-    }
-    it->second->Send(ipc::Encode(msg));
 }
 
 - (BOOL)addPortForward:(TBPortForward *)pf toVm:(NSString *)vmId {
@@ -848,9 +846,6 @@ static void SendPortForwardsUpdate(const std::string& vmIdStr,
                                                      options:NSJSONWritingPrettyPrinted
                                                        error:nil];
     if (![newData writeToFile:configPath atomically:YES]) return NO;
-
-    BOOL netEnabled = [config[@"net_enabled"] boolValue];
-    SendPortForwardsUpdate(vmId.UTF8String, pfArray, netEnabled);
     return YES;
 }
 
@@ -878,9 +873,6 @@ static void SendPortForwardsUpdate(const std::string& vmIdStr,
                                                      options:NSJSONWritingPrettyPrinted
                                                        error:nil];
     if (![newData writeToFile:configPath atomically:YES]) return NO;
-
-    BOOL netEnabled = [config[@"net_enabled"] boolValue];
-    SendPortForwardsUpdate(vmId.UTF8String, pfArray, netEnabled);
     return YES;
 }
 
@@ -901,12 +893,88 @@ static void SendPortForwardsUpdate(const std::string& vmIdStr,
                 TBPortForward* pf = [[TBPortForward alloc] init];
                 pf.hostPort = [hp unsignedShortValue];
                 pf.guestPort = [gp unsignedShortValue];
-                pf.lan = [d[@"lan"] boolValue];
+                NSString* hip = d[@"host_ip"];
+                if (hip) {
+                    pf.hostIp = hip;
+                } else if ([d[@"lan"] boolValue]) {
+                    pf.hostIp = @"0.0.0.0";
+                } else {
+                    pf.hostIp = @"127.0.0.1";
+                }
+                pf.guestIp = d[@"guest_ip"] ?: @"";
                 [result addObject:pf];
             }
         }
     }
     return result;
+}
+
+// ── Guest forward helpers ────────────────────────────────────────
+
+static NSDictionary* GuestForwardToJson(TBGuestForward* gf) {
+    NSMutableDictionary* d = [@{
+        @"guest_ip": gf.guestIp,
+        @"guest_port": @(gf.guestPort),
+        @"host_port": @(gf.hostPort),
+    } mutableCopy];
+    if (gf.hostAddr.length > 0 && ![gf.hostAddr isEqualToString:@"127.0.0.1"])
+        d[@"host_addr"] = gf.hostAddr;
+    return d;
+}
+
+- (BOOL)addGuestForward:(TBGuestForward *)gf toVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    NSMutableArray* gfArray = [NSMutableArray arrayWithArray:config[@"guest_forwards"] ?: @[]];
+    for (NSDictionary* existing in gfArray) {
+        if ([existing[@"guest_ip"] isEqualToString:gf.guestIp] &&
+            [existing[@"guest_port"] unsignedShortValue] == gf.guestPort) return NO;
+    }
+    [gfArray addObject:GuestForwardToJson(gf)];
+    config[@"guest_forwards"] = gfArray;
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+    return YES;
+}
+
+- (BOOL)removeGuestForwardWithGuestIp:(NSString *)guestIp guestPort:(uint16_t)guestPort fromVm:(NSString *)vmId {
+    NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
+    NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
+    NSData* data = [NSData dataWithContentsOfFile:configPath];
+    if (!data) return NO;
+
+    NSMutableDictionary* config = [[NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil] mutableCopy];
+    if (!config) return NO;
+
+    NSMutableArray* gfArray = [NSMutableArray arrayWithArray:config[@"guest_forwards"] ?: @[]];
+    NSUInteger idx = NSNotFound;
+    for (NSUInteger i = 0; i < gfArray.count; ++i) {
+        NSDictionary* d = gfArray[i];
+        if ([d[@"guest_ip"] isEqualToString:guestIp] &&
+            [d[@"guest_port"] unsignedShortValue] == guestPort) { idx = i; break; }
+    }
+    if (idx == NSNotFound) return NO;
+    [gfArray removeObjectAtIndex:idx];
+    config[@"guest_forwards"] = gfArray;
+
+    NSData* newData = [NSJSONSerialization dataWithJSONObject:config
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:nil];
+    if (![newData writeToFile:configPath atomically:YES]) return NO;
+    return YES;
 }
 
 - (void)stopAllVms {

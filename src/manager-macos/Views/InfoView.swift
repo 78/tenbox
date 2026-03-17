@@ -130,33 +130,46 @@ struct AddPortForwardSheet: View {
     let vmId: String
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: PortForwardField?
 
+    @State private var hostIpText = "127.0.0.1"
     @State private var hostPortText = ""
+    @State private var guestIpText = "10.0.2.15"
     @State private var guestPortText = ""
-    @State private var lanEnabled = false
+
+    private enum PortForwardField { case hostIp, hostPort, guestIp, guestPort }
 
     private var hostPort: UInt16? { UInt16(hostPortText) }
     private var guestPort: UInt16? { UInt16(guestPortText) }
     private var isValid: Bool {
         guard let hp = hostPort, let gp = guestPort else { return false }
-        return hp >= 1 && gp >= 1
+        return hp >= 1 && gp >= 1 && !hostIpText.isEmpty
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Add Port Forward")
+            Text("Host → Guest")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .padding()
 
             Form {
+                TextField("Host IP", text: $hostIpText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostIp)
                 TextField("Host Port", text: $hostPortText)
                     .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostPort)
+                TextField("Guest IP", text: .constant(guestIpText))
+                    .disableAutocorrection(true)
+                    .disabled(true)
+                    .foregroundStyle(.secondary)
                 TextField("Guest Port", text: $guestPortText)
                     .disableAutocorrection(true)
-                Toggle("LAN accessible", isOn: $lanEnabled)
+                    .focused($focusedField, equals: .guestPort)
             }
             .padding(.horizontal)
+            .onAppear { focusedField = .hostPort }
 
             HStack {
                 Button("Cancel") { dismiss() }
@@ -168,13 +181,78 @@ struct AddPortForwardSheet: View {
             }
             .padding()
         }
-        .frame(width: 340, height: 240)
+        .frame(width: 340, height: 260)
     }
 
     private func addPortForward() {
         guard let hp = hostPort, let gp = guestPort else { return }
-        let pf = PortForward(hostPort: hp, guestPort: gp, lan: lanEnabled)
+        let pf = PortForward(hostPort: hp, guestPort: gp, hostIp: hostIpText, guestIp: guestIpText)
         appState.addPortForward(pf, toVm: vmId)
+        dismiss()
+    }
+}
+
+struct AddGuestForwardSheet: View {
+    let vmId: String
+    @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: GuestForwardField?
+
+    @State private var guestIpText = "10.0.2.2"
+    @State private var guestPortText = ""
+    @State private var hostAddrText = "127.0.0.1"
+    @State private var hostPortText = ""
+
+    private enum GuestForwardField { case guestIp, guestPort, hostAddr, hostPort }
+
+    private var guestPort: UInt16? { UInt16(guestPortText) }
+    private var hostPort: UInt16? { UInt16(hostPortText) }
+    private var isValid: Bool {
+        guard let gp = guestPort, let hp = hostPort else { return false }
+        return gp >= 1 && hp >= 1 && !guestIpText.isEmpty && !hostAddrText.isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Guest → Host")
+                .font(.title3)
+                .fontWeight(.semibold)
+                .padding()
+
+            Form {
+                TextField("Guest IP", text: $guestIpText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .guestIp)
+                TextField("Guest Port", text: $guestPortText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .guestPort)
+                TextField("Host Address", text: $hostAddrText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostAddr)
+                TextField("Host Port", text: $hostPortText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .hostPort)
+            }
+            .padding(.horizontal)
+            .onAppear { focusedField = .guestPort }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Add") { addGuestForward() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!isValid)
+            }
+            .padding()
+        }
+        .frame(width: 340, height: 260)
+    }
+
+    private func addGuestForward() {
+        guard let gp = guestPort, let hp = hostPort else { return }
+        let gf = GuestForward(guestIp: guestIpText, guestPort: gp, hostAddr: hostAddrText, hostPort: hp)
+        appState.addGuestForward(gf, toVm: vmId)
         dismiss()
     }
 }
@@ -237,6 +315,12 @@ struct SharedFoldersSheet: View {
                 }
             }
 
+            Text("Shared folders appear as desktop shortcuts in the VM, making it easy to exchange files between host and guest.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.bottom, 4)
+
             HStack {
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -261,7 +345,8 @@ struct PortForwardsSheet: View {
     let vmId: String
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var showAddSheet = false
+    @State private var showAddPfSheet = false
+    @State private var showAddGfSheet = false
 
     private var vm: VmInfo? {
         appState.vms.first(where: { $0.id == vmId })
@@ -269,12 +354,22 @@ struct PortForwardsSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Port Forwards")
-                .font(.title3)
-                .fontWeight(.semibold)
-                .padding()
-
             if let vm = vm {
+                // Host -> Guest section
+                HStack {
+                    Text("Host → Guest")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        showAddPfSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.horizontal)
+                .padding(.top)
+
                 if vm.portForwards.isEmpty {
                     Text("No port forwards")
                         .foregroundStyle(.secondary)
@@ -283,27 +378,65 @@ struct PortForwardsSheet: View {
                     List {
                         ForEach(vm.portForwards) { pf in
                             HStack(spacing: 8) {
-                                Image(systemName: pf.lan ? "globe" : "network")
+                                Image(systemName: "network")
                                     .foregroundStyle(.secondary)
-                                Text(verbatim: "\(pf.lan ? "0.0.0.0" : "127.0.0.1"):\(pf.hostPort)")
+                                let guestDisplay = pf.guestIp.isEmpty ? "10.0.2.15" : pf.guestIp
+                                Text(verbatim: "\(pf.effectiveHostIp):\(pf.hostPort)")
                                     .fontWeight(.medium)
                                 Image(systemName: "arrow.right")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(verbatim: "guest:\(pf.guestPort)")
+                                Text(verbatim: "\(guestDisplay):\(pf.guestPort)")
                                     .foregroundStyle(.secondary)
-                                if pf.lan {
-                                    Text("LAN")
-                                        .font(.caption2)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(.orange.opacity(0.2))
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                        .foregroundStyle(.orange)
-                                }
                                 Spacer()
                                 Button(role: .destructive) {
                                     appState.removePortForward(hostPort: pf.hostPort, fromVm: vmId)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Guest -> Host section
+                HStack {
+                    Text("Guest → Host")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        showAddGfSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+                if vm.guestForwards.isEmpty {
+                    Text("No guest forwards")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(vm.guestForwards) { gf in
+                            HStack(spacing: 8) {
+                                Image(systemName: "network")
+                                    .foregroundStyle(.secondary)
+                                Text(verbatim: "\(gf.guestIp):\(gf.guestPort)")
+                                    .fontWeight(.medium)
+                                Image(systemName: "arrow.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(verbatim: "\(gf.effectiveHostAddr):\(gf.hostPort)")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button(role: .destructive) {
+                                    appState.removeGuestForward(guestIp: gf.guestIp, guestPort: gf.guestPort, fromVm: vmId)
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
@@ -318,18 +451,15 @@ struct PortForwardsSheet: View {
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button {
-                    showAddSheet = true
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-                .keyboardShortcut(.defaultAction)
             }
             .padding()
         }
-        .frame(width: 420, height: 360)
-        .sheet(isPresented: $showAddSheet) {
+        .frame(width: 460, height: 480)
+        .sheet(isPresented: $showAddPfSheet) {
             AddPortForwardSheet(vmId: vmId)
+        }
+        .sheet(isPresented: $showAddGfSheet) {
+            AddGuestForwardSheet(vmId: vmId)
         }
     }
 }

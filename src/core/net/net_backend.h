@@ -28,7 +28,8 @@ public:
 
     bool Start(VirtioNetDevice* dev,
                std::function<void()> irq_cb,
-               const std::vector<PortForward>& forwards);
+               const std::vector<PortForward>& forwards,
+               const std::vector<GuestForward>& guest_forwards = {});
     void Stop();
 
     void SetLinkUp(bool up);
@@ -36,6 +37,8 @@ public:
     using PortForwardCallback = std::function<void(std::vector<uint16_t> failed_ports)>;
     void UpdatePortForwards(const std::vector<PortForward>& forwards,
                             PortForwardCallback cb = nullptr);
+
+    void UpdateGuestForwards(const std::vector<GuestForward>& guest_forwards);
 
     // Called from vCPU thread when guest transmits an Ethernet frame.
     void EnqueueTx(const uint8_t* frame, uint32_t len);
@@ -84,20 +87,8 @@ private:
     void DetachAndCloseLwipPcb(NatEntry* e);
     void TeardownNatEntry(NatEntry* e);
 
-    // DNS relay (gateway acts as DNS proxy, forwarding to host's current nameserver)
-    void HandleDnsQuery(const uint8_t* frame, uint32_t len,
-                        uint32_t ip_hdr_len, uint16_t src_port);
-    void HandleDnsReadable(uintptr_t sock, uint16_t guest_src_port);
-    static uint32_t GetHostDnsServer();
-
-    struct DnsSession {
-        NetBackend* backend = nullptr;
-        uintptr_t host_socket = ~(uintptr_t)0;
-        uint16_t guest_src_port = 0;
-        PollHandle poll;
-        uint64_t created_ms = 0;
-    };
-    std::vector<std::unique_ptr<DnsSession>> dns_sessions_;
+    // Returns host DNS server addresses (host byte order) for DHCP.
+    static std::vector<uint32_t> GetHostDnsServers();
 
     // ICMP relay
     void HandleIcmpOut(uint32_t src_ip, uint32_t dst_ip,
@@ -160,7 +151,9 @@ private:
         uint32_t real_dst_ip;
         uint16_t real_dst_port;
         uint16_t proxy_port;
-        bool     gateway_local = false; // dst was gateway; skip ReverseRewrite
+        bool     gateway_local = false; // dst was gateway; skip src IP rewrite
+        uint32_t guestfwd_ip = 0;     // if non-zero, rewrite src IP to this (host order)
+        uint16_t guestfwd_port = 0;   // if non-zero, rewrite src port to this
         NatState state = NatState::Established;
         void*    listen_pcb = nullptr;
         void*    conn_pcb   = nullptr;
@@ -179,7 +172,7 @@ private:
         NetBackend* backend = nullptr;
         uint16_t host_port;
         uint16_t guest_port;
-        bool lan = false;
+        std::string host_ip;  // bind address: empty/"127.0.0.1" = loopback, "0.0.0.0" = LAN
         uintptr_t listener = ~(uintptr_t)0;
         PollHandle listener_poll;
         struct Conn {
@@ -203,6 +196,27 @@ private:
     void OnPfListenerReadable(PfEntry* pf);
     void TeardownPortForwards();
     void CheckPendingUpdates();
+
+    // Guest forwarding (guestfwd): guest connects to a virtual IP:port,
+    // traffic is NAT'd to a specific host address:port.
+    struct GfEntry {
+        uint32_t guest_ip;
+        uint16_t guest_port;
+        uint32_t host_ip;     // resolved from host_addr
+        uint16_t host_port;
+    };
+    std::vector<GfEntry> guest_forwards_;
+
+    bool HandleGuestFwdArp(const uint8_t* frame, uint32_t len);
+    bool IsGuestFwdIp(uint32_t ip) const;
+    const GfEntry* FindGuestFwd(uint32_t guest_ip, uint16_t guest_port) const;
+    void ApplyGuestForwards(const std::vector<GuestForward>& gfs);
+
+    std::mutex gf_update_mutex_;
+    std::optional<std::vector<GuestForward>> pending_gf_update_;
+    uv_async_t gf_update_wakeup_{};
+    static void OnGfUpdateReady(uv_async_t* handle);
+    void CheckPendingGfUpdates();
 
     std::atomic<bool> link_up_{true};
 

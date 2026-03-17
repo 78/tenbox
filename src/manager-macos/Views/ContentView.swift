@@ -96,12 +96,19 @@ struct ContentView: View {
                         ToolbarBadgeLabel(
                             title: "Port Forwards",
                             systemImage: "network.badge.shield.half.filled",
-                            count: vm.portForwards.count
+                            count: vm.portForwards.count + vm.guestForwards.count
                         )
                     }
                     .help("Manage port forwards")
 
-                    Divider()
+                    Button(action: { appState.showLlmProxySheet = true }) {
+                        ToolbarBadgeLabel(
+                            title: "LLM Proxy",
+                            systemImage: "key.viewfinder",
+                            count: appState.llmMappings.count
+                        )
+                    }
+                    .help("Manage LLM proxy settings")
 
                     Picker("", selection: appState.activeTabBinding(for: vm.id)) {
                         Image(systemName: "info.circle").tag(0)
@@ -131,6 +138,9 @@ struct ContentView: View {
             if let vm = selectedVm {
                 PortForwardsSheet(vmId: vm.id)
             }
+        }
+        .sheet(isPresented: $appState.showLlmProxySheet) {
+            LlmProxySheet()
         }
         .alert("Delete VM", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -172,6 +182,16 @@ struct ContentView: View {
             }
         } message: {
             Text(appState.startVmError ?? "")
+        }
+        .onChange(of: appState.portForwardError) { error in
+            guard let msg = error else { return }
+            appState.portForwardError = nil
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Port Forward Error"
+            alert.informativeText = msg
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     }
 

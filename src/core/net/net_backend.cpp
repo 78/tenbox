@@ -90,7 +90,8 @@ NetBackend::~NetBackend() {
 
 bool NetBackend::Start(VirtioNetDevice* dev,
                        std::function<void()> irq_cb,
-                       const std::vector<PortForward>& forwards) {
+                       const std::vector<PortForward>& forwards,
+                       const std::vector<GuestForward>& guest_forwards) {
     virtio_net_ = dev;
     irq_callback_ = std::move(irq_cb);
     for (const auto& f : forwards) {
@@ -99,7 +100,18 @@ bool NetBackend::Start(VirtioNetDevice* dev,
         pf.backend = this;
         pf.host_port = f.host_port;
         pf.guest_port = f.guest_port;
-        pf.lan = f.lan;
+        pf.host_ip = f.host_ip;
+    }
+    ApplyGuestForwards(guest_forwards);
+    if (!guest_forwards_.empty()) {
+        LOG_INFO("Guest forwards initialized (%zu entries)", guest_forwards_.size());
+        for (const auto& gf : guest_forwards_) {
+            LOG_INFO("  guestfwd: %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u",
+                     (gf.guest_ip >> 24) & 0xFF, (gf.guest_ip >> 16) & 0xFF,
+                     (gf.guest_ip >> 8) & 0xFF, gf.guest_ip & 0xFF, gf.guest_port,
+                     (gf.host_ip >> 24) & 0xFF, (gf.host_ip >> 16) & 0xFF,
+                     (gf.host_ip >> 8) & 0xFF, gf.host_ip & 0xFF, gf.host_port);
+        }
     }
 
     net_thread_ = std::thread(&NetBackend::NetworkThread, this);
@@ -143,6 +155,14 @@ void NetBackend::UpdatePortForwards(const std::vector<PortForward>& forwards,
         pf_update_cb_ = std::move(cb);
     }
     if (running_) uv_async_send(&pf_update_wakeup_);
+}
+
+void NetBackend::UpdateGuestForwards(const std::vector<GuestForward>& guest_forwards) {
+    {
+        std::lock_guard<std::mutex> lock(gf_update_mutex_);
+        pending_gf_update_ = guest_forwards;
+    }
+    if (running_) uv_async_send(&gf_update_wakeup_);
 }
 
 void NetBackend::EnqueueTx(const uint8_t* frame, uint32_t len) {
@@ -231,21 +251,6 @@ void NetBackend::OnCleanupTimer(uv_timer_t* handle) {
                 && c.poll.closed();
         });
     }
-    // Close stale DNS relay sessions that never received a response
-    uint64_t now = GetMonotonicMs();
-    for (auto& s : self->dns_sessions_) {
-        if ((now - s->created_ms) > 10000 && !s->poll.closing()) {
-            s->poll.Close();
-            if (s->host_socket != ~(uintptr_t)0) {
-                SOCK_CLOSE(static_cast<SocketHandle>(s->host_socket));
-                s->host_socket = ~(uintptr_t)0;
-            }
-        }
-    }
-    self->dns_sessions_.erase(
-        std::remove_if(self->dns_sessions_.begin(), self->dns_sessions_.end(),
-                        [](const auto& s) { return s->poll.closed(); }),
-        self->dns_sessions_.end());
 }
 
 void NetBackend::OnTxReady(uv_async_t* handle) {
@@ -260,6 +265,97 @@ void NetBackend::OnTxReady(uv_async_t* handle) {
 void NetBackend::OnPfUpdateReady(uv_async_t* handle) {
     auto* self = static_cast<NetBackend*>(handle->data);
     self->CheckPendingUpdates();
+}
+
+void NetBackend::OnGfUpdateReady(uv_async_t* handle) {
+    auto* self = static_cast<NetBackend*>(handle->data);
+    self->CheckPendingGfUpdates();
+}
+
+void NetBackend::CheckPendingGfUpdates() {
+    std::optional<std::vector<GuestForward>> update;
+    {
+        std::lock_guard<std::mutex> lock(gf_update_mutex_);
+        if (pending_gf_update_) {
+            update = std::move(pending_gf_update_);
+            pending_gf_update_.reset();
+        }
+    }
+    if (update) {
+        ApplyGuestForwards(*update);
+        LOG_INFO("Guest forwards updated (%zu entries)", guest_forwards_.size());
+    }
+}
+
+void NetBackend::ApplyGuestForwards(const std::vector<GuestForward>& gfs) {
+    guest_forwards_.clear();
+    for (const auto& gf : gfs) {
+        GfEntry entry{};
+        entry.guest_ip = gf.guest_ip;
+        entry.guest_port = gf.guest_port;
+        entry.host_port = gf.host_port;
+        // Resolve host_addr to IP
+        std::string addr = gf.EffectiveHostAddr();
+        unsigned o[4] = {};
+        if (sscanf(addr.c_str(), "%u.%u.%u.%u", &o[0], &o[1], &o[2], &o[3]) == 4) {
+            entry.host_ip = (o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3];
+        } else {
+            entry.host_ip = 0x7F000001; // fallback 127.0.0.1
+        }
+        guest_forwards_.push_back(entry);
+    }
+}
+
+bool NetBackend::IsGuestFwdIp(uint32_t ip) const {
+    for (const auto& gf : guest_forwards_) {
+        if (gf.guest_ip == ip) return true;
+    }
+    return false;
+}
+
+const NetBackend::GfEntry* NetBackend::FindGuestFwd(uint32_t guest_ip, uint16_t guest_port) const {
+    for (const auto& gf : guest_forwards_) {
+        if (gf.guest_ip == guest_ip && gf.guest_port == guest_port)
+            return &gf;
+    }
+    return nullptr;
+}
+
+bool NetBackend::HandleGuestFwdArp(const uint8_t* frame, uint32_t len) {
+    if (len < sizeof(EthHdr) + 28) return false;
+    auto* eth = reinterpret_cast<const EthHdr*>(frame);
+    if (ntohs(eth->type) != 0x0806) return false;
+
+    const uint8_t* arp = frame + sizeof(EthHdr);
+    uint16_t op = (arp[6] << 8) | arp[7];
+    if (op != 1) return false; // only handle ARP request
+
+    uint32_t target_ip = (arp[24] << 24) | (arp[25] << 16) | (arp[26] << 8) | arp[27];
+    if (!IsGuestFwdIp(target_ip)) return false;
+
+    // Build ARP reply using gateway MAC for the guestfwd IP
+    uint8_t reply[sizeof(EthHdr) + 28]{};
+    auto* reth = reinterpret_cast<EthHdr*>(reply);
+    memcpy(reth->dst, eth->src, 6);
+    memcpy(reth->src, kGatewayMac, 6);
+    reth->type = htons(0x0806);
+
+    uint8_t* rarp = reply + sizeof(EthHdr);
+    rarp[0] = 0; rarp[1] = 1;   // hardware type: Ethernet
+    rarp[2] = 0x08; rarp[3] = 0; // protocol type: IPv4
+    rarp[4] = 6;                  // hardware size
+    rarp[5] = 4;                  // protocol size
+    rarp[6] = 0; rarp[7] = 2;    // op: reply
+    memcpy(rarp + 8, kGatewayMac, 6);  // sender MAC
+    rarp[14] = (target_ip >> 24) & 0xFF;
+    rarp[15] = (target_ip >> 16) & 0xFF;
+    rarp[16] = (target_ip >> 8) & 0xFF;
+    rarp[17] = target_ip & 0xFF;
+    memcpy(rarp + 18, arp + 8, 6);     // target MAC = requester MAC
+    memcpy(rarp + 24, arp + 14, 4);    // target IP = requester IP
+
+    InjectFrame(reply, sizeof(reply));
+    return true;
 }
 
 static void CloseWalkCb(uv_handle_t* handle, void*) {
@@ -295,14 +391,6 @@ void NetBackend::OnStopSignal(uv_async_t* handle) {
         self->icmp_socket_ = ~(uintptr_t)0;
     }
 #endif
-
-    for (auto& ds : self->dns_sessions_) {
-        ds->poll.Close();
-        if (ds->host_socket != ~(uintptr_t)0) {
-            SOCK_CLOSE(static_cast<SocketHandle>(ds->host_socket));
-            ds->host_socket = ~(uintptr_t)0;
-        }
-    }
 
     for (auto& pf : self->port_forwards_) {
         pf.listener_poll.Close();
@@ -418,6 +506,9 @@ void NetBackend::NetworkThread() {
     pf_update_wakeup_.data = this;
     uv_async_init(&loop_, &pf_update_wakeup_, OnPfUpdateReady);
 
+    gf_update_wakeup_.data = this;
+    uv_async_init(&loop_, &gf_update_wakeup_, OnGfUpdateReady);
+
     stop_wakeup_.data = this;
     uv_async_init(&loop_, &stop_wakeup_, OnStopSignal);
 
@@ -439,7 +530,6 @@ void NetBackend::NetworkThread() {
         ;
 
     nat_entries_.clear();
-    dns_sessions_.clear();
     for (auto& pf : port_forwards_)
         pf.conns.clear();
 
@@ -466,6 +556,12 @@ void NetBackend::ProcessPendingTx() {
         auto* eth = reinterpret_cast<EthHdr*>(frame.data());
         uint16_t ethertype = ntohs(eth->type);
 
+        // Intercept ARP requests for guestfwd IPs before lwIP sees them
+        if (ethertype == 0x0806) {
+            if (HandleGuestFwdArp(frame.data(), static_cast<uint32_t>(frame.size())))
+                continue;
+        }
+
         // Feed ARP frames to lwIP
         if (ethertype == 0x0806) {
             struct pbuf* p = pbuf_alloc(PBUF_RAW, static_cast<u16_t>(frame.size()), PBUF_RAM);
@@ -483,103 +579,83 @@ void NetBackend::ProcessPendingTx() {
         auto* ip = reinterpret_cast<IpHdr*>(frame.data() + sizeof(EthHdr));
         uint32_t dst = ntohl(ip->dst_ip);
 
-        // Intercept DNS queries (UDP port 53) to the gateway and relay them
-        // to the host's current nameserver so network changes are transparent.
-        if (dst == kGatewayIp && ip->proto == IPPROTO_UDP) {
-            uint32_t ip_hdr_len_g = (ip->ver_ihl & 0xF) * 4;
-            if (frame.size() >= sizeof(EthHdr) + ip_hdr_len_g + sizeof(UdpHdr)) {
-                auto* udp_g = reinterpret_cast<UdpHdr*>(
-                    frame.data() + sizeof(EthHdr) + ip_hdr_len_g);
-                if (ntohs(udp_g->dst_port) == 53) {
-                    HandleDnsQuery(frame.data(), static_cast<uint32_t>(frame.size()),
-                                   ip_hdr_len_g, ntohs(udp_g->src_port));
-                    continue;
-                }
-            }
-        }
-
-        // Packets to gateway: route TCP/UDP to host's 127.0.0.1
-        if (dst == kGatewayIp) {
-            constexpr uint32_t kHostLoopback = 0x7F000001; // 127.0.0.1
-            uint32_t ip_hdr_len_gw = (ip->ver_ihl & 0xF) * 4;
+        // Check for guestfwd match (exact IP+port). This must be tested
+        // before the gateway-lwIP path so rules on kGatewayIp also work.
+        bool handled_by_gf = false;
+        if (IsGuestFwdIp(dst)) {
+            uint32_t ip_hdr_len_gf = (ip->ver_ihl & 0xF) * 4;
 
             if (ip->proto == IPPROTO_TCP &&
-                frame.size() >= sizeof(EthHdr) + ip_hdr_len_gw + sizeof(TcpHdr)) {
+                frame.size() >= sizeof(EthHdr) + ip_hdr_len_gf + sizeof(TcpHdr)) {
                 auto* tcp = reinterpret_cast<TcpHdr*>(
-                    frame.data() + sizeof(EthHdr) + ip_hdr_len_gw);
+                    frame.data() + sizeof(EthHdr) + ip_hdr_len_gf);
+                uint16_t dport = ntohs(tcp->dst_port);
 
-                // Check if this TCP packet belongs to a port-forward
-                // connection (lwIP tcp_connect PCB). If so, feed it
-                // directly to lwIP instead of creating a NAT entry,
-                // which would rewrite the port and break the PCB match.
-                bool is_pf_packet = false;
-                uint16_t tcp_dport = ntohs(tcp->dst_port);
-                uint16_t tcp_sport = ntohs(tcp->src_port);
-                for (const auto& pf : port_forwards_) {
-                    if (tcp_sport != pf.guest_port) continue;
-                    for (const auto& c : pf.conns) {
-                        if (c.guest_pcb) {
-                            is_pf_packet = true;
-                            break;
-                        }
+                const GfEntry* gf = FindGuestFwd(dst, dport);
+                if (gf || dst != kGatewayIp) {
+                    uint32_t fwd_ip = gf ? gf->host_ip : 0x7F000001;
+                    uint16_t fwd_port = gf ? gf->host_port : dport;
+
+                    auto* entry = FindNatEntry(
+                        ntohs(tcp->src_port), fwd_ip, fwd_port, IPPROTO_TCP);
+                    if (!entry) {
+                        entry = CreateNatEntry(
+                            ntohl(ip->src_ip), ntohs(tcp->src_port),
+                            fwd_ip, fwd_port, IPPROTO_TCP);
+                        if (!entry) continue;
+                        entry->gateway_local = true;
+                        entry->guestfwd_ip = dst;
+                        entry->guestfwd_port = dport;
                     }
-                    if (is_pf_packet) break;
+                    RewriteAndFeed(frame.data(), static_cast<uint32_t>(frame.size()), entry);
+                    handled_by_gf = true;
                 }
-
-                if (is_pf_packet) {
-                    struct pbuf* p = pbuf_alloc(PBUF_RAW, static_cast<u16_t>(frame.size()), PBUF_RAM);
-                    if (p) {
-                        pbuf_take(p, frame.data(), static_cast<u16_t>(frame.size()));
-                        auto* nif = static_cast<struct netif*>(netif_);
-                        if (nif->input(p, nif) != ERR_OK) pbuf_free(p);
-                    }
-                    continue;
-                }
-
-                auto* entry = FindNatEntry(
-                    ntohs(tcp->src_port), kHostLoopback, ntohs(tcp->dst_port), IPPROTO_TCP);
-                if (!entry) {
-                    entry = CreateNatEntry(
-                        ntohl(ip->src_ip), ntohs(tcp->src_port),
-                        kHostLoopback, ntohs(tcp->dst_port), IPPROTO_TCP);
-                    if (!entry) continue;
-                    entry->gateway_local = true;
-                }
-                RewriteAndFeed(frame.data(), static_cast<uint32_t>(frame.size()), entry);
-                continue;
-            }
-
-            if (ip->proto == IPPROTO_UDP &&
-                frame.size() >= sizeof(EthHdr) + ip_hdr_len_gw + sizeof(UdpHdr)) {
+            } else if (ip->proto == IPPROTO_UDP &&
+                       frame.size() >= sizeof(EthHdr) + ip_hdr_len_gf + sizeof(UdpHdr)) {
                 auto* udp = reinterpret_cast<UdpHdr*>(
-                    frame.data() + sizeof(EthHdr) + ip_hdr_len_gw);
+                    frame.data() + sizeof(EthHdr) + ip_hdr_len_gf);
                 uint16_t g_sport = ntohs(udp->src_port);
                 uint16_t g_dport = ntohs(udp->dst_port);
-                uint32_t udp_off = sizeof(EthHdr) + ip_hdr_len_gw + sizeof(UdpHdr);
-                uint32_t payload_len = static_cast<uint32_t>(frame.size()) - udp_off;
 
-                auto* entry = FindNatEntry(g_sport, kHostLoopback, g_dport, IPPROTO_UDP);
-                if (!entry) {
-                    entry = CreateNatEntry(
-                        ntohl(ip->src_ip), g_sport, kHostLoopback, g_dport, IPPROTO_UDP);
-                    if (!entry) continue;
-                    entry->gateway_local = true;
+                const GfEntry* gf = FindGuestFwd(dst, g_dport);
+                if (gf || dst != kGatewayIp) {
+                    uint32_t fwd_ip = gf ? gf->host_ip : 0x7F000001;
+                    uint16_t fwd_port = gf ? gf->host_port : g_dport;
+                    uint32_t udp_off = sizeof(EthHdr) + ip_hdr_len_gf + sizeof(UdpHdr);
+                    uint32_t payload_len = static_cast<uint32_t>(frame.size()) - udp_off;
+
+                    auto* entry = FindNatEntry(g_sport, fwd_ip, fwd_port, IPPROTO_UDP);
+                    if (!entry) {
+                        entry = CreateNatEntry(
+                            ntohl(ip->src_ip), g_sport, fwd_ip, fwd_port, IPPROTO_UDP);
+                        if (!entry) continue;
+                        entry->gateway_local = true;
+                        entry->guestfwd_ip = dst;
+                        entry->guestfwd_port = g_dport;
+                    }
+                    if (entry->host_socket != static_cast<uintptr_t>(SOCK_INVALID) && payload_len > 0) {
+                        struct sockaddr_in dest{};
+                        dest.sin_family = AF_INET;
+                        dest.sin_addr.s_addr = htonl(fwd_ip);
+                        dest.sin_port = htons(fwd_port);
+                        sendto(static_cast<SocketHandle>(entry->host_socket),
+                               SOCK_CCAST(frame.data() + udp_off),
+                               static_cast<int>(payload_len), 0,
+                               reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+                        entry->last_active_ms = GetMonotonicMs();
+                    }
+                    handled_by_gf = true;
                 }
-                if (entry->host_socket != static_cast<uintptr_t>(SOCK_INVALID) && payload_len > 0) {
-                    struct sockaddr_in dest{};
-                    dest.sin_family = AF_INET;
-                    dest.sin_addr.s_addr = htonl(kHostLoopback);
-                    dest.sin_port = htons(g_dport);
-                    sendto(static_cast<SocketHandle>(entry->host_socket),
-                           SOCK_CCAST(frame.data() + udp_off),
-                           static_cast<int>(payload_len), 0,
-                           reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
-                    entry->last_active_ms = GetMonotonicMs();
-                }
-                continue;
+            } else if (dst != kGatewayIp) {
+                handled_by_gf = true;
             }
+        }
+        if (handled_by_gf) continue;
 
-            // Non-TCP/UDP packets to gateway (e.g. ICMP): feed to lwIP as before
+        // Packets to gateway: feed to lwIP.
+        // Port-forward PCBs are registered in lwIP and will match; everything
+        // else gets TCP RST / ICMP port-unreachable naturally.
+        if (dst == kGatewayIp) {
             struct pbuf* p = pbuf_alloc(PBUF_RAW, static_cast<u16_t>(frame.size()), PBUF_RAM);
             if (p) {
                 pbuf_take(p, frame.data(), static_cast<u16_t>(frame.size()));

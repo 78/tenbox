@@ -155,7 +155,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
         if (!vm->SetupVirtioBlk(config.disk_path, slots[0])) return nullptr;
     }
 
-    if (!vm->SetupVirtioNet(config.net_link_up, config.port_forwards, slots[1]))
+    if (!vm->SetupVirtioNet(config.net_link_up, config.port_forwards, config.guest_forwards, slots[1]))
         return nullptr;
 
     if (!vm->SetupVirtioInput(slots[2], slots[3])) return nullptr;
@@ -316,6 +316,7 @@ bool Vm::SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& sl
 }
 
 bool Vm::SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
+                        const std::vector<GuestForward>& guest_forwards,
                         const VirtioDeviceSlot& slot) {
     net_backend_ = std::make_unique<NetBackend>();
     virtio_net_ = std::make_unique<VirtioNetDevice>(link_up);
@@ -336,7 +337,7 @@ bool Vm::SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
 
     if (!net_backend_->Start(virtio_net_.get(),
                               [this, irq = slot.irq]() { InjectIrq(irq); },
-                              forwards)) {
+                              forwards, guest_forwards)) {
         LOG_ERROR("Failed to start network backend");
         return false;
     }
@@ -644,6 +645,12 @@ void Vm::UpdatePortForwards(const std::vector<PortForward>& forwards,
         net_backend_->UpdatePortForwards(forwards, std::move(cb));
     } else if (cb) {
         cb({});
+    }
+}
+
+void Vm::UpdateGuestForwards(const std::vector<GuestForward>& guest_forwards) {
+    if (net_backend_) {
+        net_backend_->UpdateGuestForwards(guest_forwards);
     }
 }
 

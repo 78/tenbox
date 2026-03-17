@@ -11,7 +11,12 @@ class TenBoxBridgeWrapper {
                 SharedFolder(tag: sf.tag, hostPath: sf.hostPath, readonly: sf.readonly_, bookmark: sf.bookmark)
             }
             let pfs = info.portForwards.map { pf in
-                PortForward(hostPort: pf.hostPort, guestPort: pf.guestPort, lan: pf.lan)
+                PortForward(hostPort: pf.hostPort, guestPort: pf.guestPort,
+                            hostIp: pf.hostIp ?? "127.0.0.1", guestIp: pf.guestIp ?? "")
+            }
+            let gfs = info.guestForwards.map { gf in
+                GuestForward(guestIp: gf.guestIp ?? "", guestPort: gf.guestPort,
+                             hostAddr: gf.hostAddr ?? "127.0.0.1", hostPort: gf.hostPort)
             }
             return VmInfo(
                 id: info.vmId,
@@ -25,6 +30,7 @@ class TenBoxBridgeWrapper {
                 netEnabled: info.netEnabled,
                 sharedFolders: folders,
                 portForwards: pfs,
+                guestForwards: gfs,
                 displayScale: max(1, min(2, Int(info.displayScale)))
             )
         }
@@ -97,12 +103,26 @@ class TenBoxBridgeWrapper {
         let objcPf = TBPortForward()
         objcPf.hostPort = pf.hostPort
         objcPf.guestPort = pf.guestPort
-        objcPf.lan = pf.lan
+        objcPf.hostIp = pf.hostIp
+        objcPf.guestIp = pf.guestIp
         return bridge.add(objcPf, toVm: vmId)
     }
 
     func removePortForward(hostPort: UInt16, fromVm vmId: String) -> Bool {
         return bridge.removePortForward(withHostPort: hostPort, fromVm: vmId)
+    }
+
+    func addGuestForward(_ gf: GuestForward, toVm vmId: String) -> Bool {
+        let objcGf = TBGuestForward()
+        objcGf.guestIp = gf.guestIp
+        objcGf.guestPort = gf.guestPort
+        objcGf.hostAddr = gf.hostAddr
+        objcGf.hostPort = gf.hostPort
+        return bridge.add(objcGf, toVm: vmId)
+    }
+
+    func removeGuestForward(guestIp: String, guestPort: UInt16, fromVm vmId: String) -> Bool {
+        return bridge.removeGuestForward(withGuestIp: guestIp, guestPort: guestPort, fromVm: vmId)
     }
 
     func setDisplayScale(_ scale: Int, forVm vmId: String) -> Bool {

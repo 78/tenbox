@@ -131,10 +131,24 @@ public:
     void set_hypervisor_available(bool available) { hypervisor_available_ = available; }
     bool hypervisor_available() const { return hypervisor_available_; }
 
+    void set_global_guest_forwards(std::vector<GuestForward> gfs) {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        global_guest_forwards_ = std::move(gfs);
+    }
+
+    // Update guest forwards and broadcast to all running VMs.
+    void UpdateGlobalGuestForwards(std::vector<GuestForward> gfs);
+
     const std::string& data_dir() const { return data_dir_; }
     settings::AppSettings& app_settings() { return settings_; }
+    const settings::AppSettings& app_settings() const { return settings_; }
 
     void SaveAppSettings();
+
+    using LlmProxyChangedCallback =
+        std::function<void(const settings::LlmProxySettings& settings)>;
+    void SetLlmProxyChangedCallback(LlmProxyChangedCallback cb);
+    void NotifyLlmProxyChanged();
 
     using ConsoleCallback = std::function<void(const std::string& vm_id, const std::string& data)>;
     void SetConsoleCallback(ConsoleCallback cb);
@@ -203,6 +217,11 @@ public:
     bool RemovePortForward(const std::string& vm_id, uint16_t host_port, std::string* error);
     std::vector<PortForward> GetPortForwards(const std::string& vm_id) const;
 
+    // Per-VM guest forward management
+    bool AddGuestForward(const std::string& vm_id, const GuestForward& gf, std::string* error);
+    bool RemoveGuestForward(const std::string& vm_id, uint32_t guest_ip, uint16_t guest_port, std::string* error);
+    std::vector<GuestForward> GetGuestForwards(const std::string& vm_id) const;
+
 private:
     VmRecord* FindVm(const std::string& vm_id);
     const VmRecord* FindVm(const std::string& vm_id) const;
@@ -256,8 +275,15 @@ private:
     AudioPcmCallback audio_pcm_callback_;
     GuestAgentStateCallback guest_agent_state_callback_;
     PortForwardErrorCallback port_forward_error_callback_;
+    LlmProxyChangedCallback llm_proxy_changed_callback_;
     bool hypervisor_available_ = true;
     void* job_object_ = nullptr;
+
+    // Guest forwards injected into every VM (e.g. LLM proxy guestfwd)
+    std::vector<GuestForward> global_guest_forwards_;
+
+    void AppendGuestFwdFields(ipc::Message& msg,
+                              const std::vector<GuestForward>& vm_guest_forwards = {}) const;
 
     // Per-VM shared-memory framebuffers for zero-copy display transport.
     std::map<std::string, std::unique_ptr<ipc::SharedFramebuffer>> shm_framebuffers_;

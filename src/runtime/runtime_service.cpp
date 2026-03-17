@@ -665,6 +665,29 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
             }
         }
 
+        // Parse guest forwards (guestfwd_count / guestfwd_N)
+        std::vector<GuestForward> guest_forwards;
+        auto it_gf_count = message.fields.find("guestfwd_count");
+        if (it_gf_count != message.fields.end()) {
+            int gf_count = 0;
+            auto [gp, gec] = std::from_chars(
+                it_gf_count->second.data(),
+                it_gf_count->second.data() + it_gf_count->second.size(), gf_count);
+            if (gec == std::errc{} && gf_count >= 0) {
+                for (int i = 0; i < gf_count; ++i) {
+                    auto it_gf = message.fields.find("guestfwd_" + std::to_string(i));
+                    if (it_gf == message.fields.end()) continue;
+                    GuestForward gf;
+                    if (GuestForward::FromGuestfwd(it_gf->second.c_str(), gf)) {
+                        guest_forwards.push_back(gf);
+                    }
+                }
+            }
+        }
+        if (!guest_forwards.empty()) {
+            vm_->UpdateGuestForwards(guest_forwards);
+        }
+
         uint64_t req_id = message.request_id;
         vm_->UpdatePortForwards(forwards, [this, req_id](std::vector<uint16_t> failed_ports) {
             ipc::Message resp;

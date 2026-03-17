@@ -41,6 +41,7 @@ struct VmConfig {
     bool net_link_up = false;
     bool debug_mode = false;
     std::vector<PortForward> port_forwards;
+    std::vector<GuestForward> guest_forwards;
     std::vector<VmSharedFolder> shared_folders;
     bool interactive = true;
     std::shared_ptr<ConsolePort> console_port;
@@ -69,6 +70,7 @@ public:
     using PortForwardCallback = std::function<void(std::vector<uint16_t> failed_ports)>;
     void UpdatePortForwards(const std::vector<PortForward>& forwards,
                             PortForwardCallback cb = nullptr);
+    void UpdateGuestForwards(const std::vector<GuestForward>& guest_forwards);
     void InjectKeyEvent(uint32_t evdev_code, bool pressed);
     void InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons);
     void InjectWheelEvent(int32_t delta);
@@ -92,7 +94,8 @@ private:
 
     bool AllocateMemory(uint64_t size);
     bool SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& slot);
-    bool SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards, const VirtioDeviceSlot& slot);
+    bool SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
+                        const std::vector<GuestForward>& guest_forwards, const VirtioDeviceSlot& slot);
     bool SetupVirtioInput(const VirtioDeviceSlot& kbd_slot, const VirtioDeviceSlot& tablet_slot);
     bool SetupVirtioGpu(uint32_t width, uint32_t height, const VirtioDeviceSlot& slot);
     bool SetupVirtioSerial(const VirtioDeviceSlot& slot);

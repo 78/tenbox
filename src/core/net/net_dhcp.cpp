@@ -13,7 +13,8 @@
 // Host DNS resolver lookup
 // ============================================================
 
-uint32_t NetBackend::GetHostDnsServer() {
+std::vector<uint32_t> NetBackend::GetHostDnsServers() {
+    std::vector<uint32_t> result;
 #ifdef _WIN32
     struct AdapterDnsInfo {
         uint32_t dns_addr;
@@ -32,39 +33,42 @@ uint32_t NetBackend::GetHostDnsServer() {
                 reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.get()),
                 &buf_len);
         if (ret == ERROR_SUCCESS) break;
-        if (ret != ERROR_BUFFER_OVERFLOW) return 0x08080808;
+        if (ret != ERROR_BUFFER_OVERFLOW) break;
     }
 
-    if (ret != ERROR_SUCCESS) return 0x08080808;
+    if (ret == ERROR_SUCCESS) {
+        std::vector<AdapterDnsInfo> candidates;
+        auto* adapter = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.get());
 
-    std::vector<AdapterDnsInfo> candidates;
-    auto* adapter = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.get());
+        while (adapter) {
+            if (adapter->OperStatus == IfOperStatusUp &&
+                adapter->IfType != IF_TYPE_SOFTWARE_LOOPBACK) {
 
-    while (adapter) {
-        if (adapter->OperStatus == IfOperStatusUp &&
-            adapter->IfType != IF_TYPE_SOFTWARE_LOOPBACK) {
+                uint32_t total_metric = adapter->Ipv4Metric;
 
-            uint32_t total_metric = adapter->Ipv4Metric;
-
-            for (auto* dns = adapter->FirstDnsServerAddress; dns; dns = dns->Next) {
-                if (dns->Address.lpSockaddr->sa_family == AF_INET) {
-                    auto* si = reinterpret_cast<sockaddr_in*>(dns->Address.lpSockaddr);
-                    uint32_t addr = ntohl(si->sin_addr.s_addr);
-                    if ((addr >> 24) != 127 && addr != 0) {
-                        candidates.push_back({addr, total_metric});
+                for (auto* dns = adapter->FirstDnsServerAddress; dns; dns = dns->Next) {
+                    if (dns->Address.lpSockaddr->sa_family == AF_INET) {
+                        auto* si = reinterpret_cast<sockaddr_in*>(dns->Address.lpSockaddr);
+                        uint32_t addr = ntohl(si->sin_addr.s_addr);
+                        if ((addr >> 24) != 127 && addr != 0) {
+                            candidates.push_back({addr, total_metric});
+                        }
                     }
                 }
             }
+            adapter = adapter->Next;
         }
-        adapter = adapter->Next;
-    }
 
-    if (!candidates.empty()) {
         std::sort(candidates.begin(), candidates.end(),
                   [](const AdapterDnsInfo& a, const AdapterDnsInfo& b) {
                       return a.metric < b.metric;
                   });
-        return candidates[0].dns_addr;
+
+        for (const auto& c : candidates) {
+            if (std::find(result.begin(), result.end(), c.dns_addr) == result.end())
+                result.push_back(c.dns_addr);
+            if (result.size() >= 3) break;
+        }
     }
 #else
     FILE* fp = fopen("/etc/resolv.conf", "r");
@@ -77,8 +81,8 @@ uint32_t NetBackend::GetHostDnsServer() {
                 if (inet_pton(AF_INET, ns_str, &addr) == 1) {
                     uint32_t ip = ntohl(addr.s_addr);
                     if ((ip >> 24) != 127 && ip != 0) {
-                        fclose(fp);
-                        return ip;
+                        result.push_back(ip);
+                        if (result.size() >= 3) break;
                     }
                 }
             }
@@ -86,7 +90,9 @@ uint32_t NetBackend::GetHostDnsServer() {
         fclose(fp);
     }
 #endif
-    return 0x08080808; // fallback: 8.8.8.8
+    if (result.empty())
+        result.push_back(0x08080808); // fallback: 8.8.8.8
+    return result;
 }
 
 // ============================================================
@@ -191,10 +197,13 @@ void NetBackend::SendDhcpReply(uint8_t type, uint32_t xid,
     // Router (gateway)
     *opt++ = 3; *opt++ = 4;
     memcpy(opt, &gw_net, 4); opt += 4;
-    // DNS — advertise the gateway as the DNS server so DNS queries go through
-    // our relay, which resolves via the host's current nameserver at query time.
-    *opt++ = 6; *opt++ = 4;
-    memcpy(opt, &gw_net, 4); opt += 4;
+    // DNS servers from the host
+    auto dns_servers = GetHostDnsServers();
+    *opt++ = 6; *opt++ = static_cast<uint8_t>(dns_servers.size() * 4);
+    for (uint32_t dns : dns_servers) {
+        uint32_t dns_net = htonl(dns);
+        memcpy(opt, &dns_net, 4); opt += 4;
+    }
     // End
     *opt++ = 255;
     off = static_cast<uint32_t>(opt - pkt);

@@ -20,6 +20,7 @@ class VmSession: ObservableObject {
     var displayViewSize: CGSize = .zero
     @Published var activeTab = 0
     var displayScale: Int = 1
+    var onRuntimeRunning: (() -> Void)?
 
     private let bridge = TenBoxBridgeWrapper()
     private weak var clipboardHandler: ClipboardHandler?
@@ -39,6 +40,9 @@ class VmSession: ObservableObject {
         }
         ipcClient.onRuntimeState = { [weak self] state in
             self?.runtimeState = state
+            if state == "running" {
+                self?.onRuntimeRunning?()
+            }
         }
         ipcClient.onGuestAgentState = { [weak self] conn in
             self?.guestAgentConnected = conn
