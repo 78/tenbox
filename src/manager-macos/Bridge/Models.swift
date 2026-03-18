@@ -79,6 +79,7 @@ struct VmInfo: Identifiable, Codable {
     let portForwards: [PortForward]
     let guestForwards: [GuestForward]
     let displayScale: Int
+    let debugMode: Bool
 }
 
 // MARK: - LLM Proxy Models
@@ -113,6 +114,7 @@ struct VmCreateConfig {
     let cpuCount: Int
     let netEnabled: Bool
     let sourceDir: String
+    let debugMode: Bool
 }
 
 // MARK: - Image Source Models

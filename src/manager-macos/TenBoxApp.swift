@@ -93,7 +93,7 @@ struct TenBoxApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appDelegate.appState)
-                .frame(minWidth: 1020, minHeight: 620)
+                .frame(minWidth: 1020, minHeight: 600)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -279,8 +279,8 @@ class AppState: ObservableObject {
         refreshVmList()
     }
 
-    func editVm(id: String, name: String, memoryMb: Int, cpuCount: Int, netEnabled: Bool) {
-        bridge.editVm(id: id, name: name, memoryMb: memoryMb, cpuCount: cpuCount, netEnabled: netEnabled)
+    func editVm(id: String, name: String, memoryMb: Int, cpuCount: Int, netEnabled: Bool, debugMode: Bool) {
+        bridge.editVm(id: id, name: name, memoryMb: memoryMb, cpuCount: cpuCount, netEnabled: netEnabled, debugMode: debugMode)
         refreshVmList()
     }
 

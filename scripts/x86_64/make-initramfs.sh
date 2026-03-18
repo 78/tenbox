@@ -62,21 +62,39 @@ cp "$WORKDIR/busybox" "$WORKDIR/initramfs/bin/"
 MODDIR="kmod_extract/lib/modules/$KVER/kernel"
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
-# Only modules required to reach rootfs on /dev/vda.
-# Everything else (network, GPU, audio, virtiofs, input) is loaded
-# on-demand by modprobe from /lib/modules/ inside the rootfs.
+# Modules needed for virtio block/net/input/gpu/fs devices + ext4 filesystem support
 VIRTIO_MODS=(
     "drivers/virtio/virtio.ko"
     "drivers/virtio/virtio_ring.ko"
     "drivers/virtio/virtio_mmio.ko"
     "drivers/block/virtio_blk.ko"
+    "net/core/failover.ko"
+    "drivers/net/net_failover.ko"
+    "drivers/net/virtio_net.ko"
     "drivers/char/virtio_console.ko"
+    "drivers/virtio/virtio_input.ko"
+    "drivers/input/evdev.ko"
+    "drivers/media/rc/rc-core.ko"
+    "drivers/media/cec/cec.ko"
+    "drivers/gpu/drm/drm.ko"
+    "drivers/gpu/drm/drm_kms_helper.ko"
+    "drivers/gpu/drm/drm_shmem_helper.ko"
+    "drivers/virtio/virtio_dma_buf.ko"
+    "drivers/gpu/drm/virtio/virtio-gpu.ko"
+    "fs/fuse/fuse.ko"
+    "fs/fuse/virtiofs.ko"
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
     "crypto/crc32c_generic.ko"
     "lib/libcrc32c.ko"
     "fs/ext4/ext4.ko"
+    # ALSA / virtio-snd modules for audio playback
+    "sound/soundcore.ko"
+    "sound/core/snd.ko"
+    "sound/core/snd-timer.ko"
+    "sound/core/snd-pcm.ko"
+    "sound/virtio/virtio_snd.ko"
 )
 
 copy_module() {
@@ -128,11 +146,42 @@ cat > "$WORKDIR/initramfs/init" << 'EOF'
 
 /bin/busybox --install -s /bin
 
-# Load boot-essential modules only; everything else is loaded
-# on-demand by modprobe from /lib/modules/ inside the rootfs.
+# Load virtio modules — device discovery is handled by ACPI DSDT
 MODDIR=/lib/modules
-for mod in virtio virtio_ring virtio_mmio virtio_blk virtio_console \
-           crc16 crc32c_generic libcrc32c mbcache jbd2 ext4; do
+for mod in virtio virtio_ring virtio_mmio virtio_blk failover net_failover virtio_net virtio_console virtio_input evdev; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load DRM / virtio-gpu modules (order matters: rc-core before cec,
+# drm_shmem_helper before virtio-gpu)
+for mod in rc-core cec drm drm_kms_helper drm_shmem_helper virtio_dma_buf virtio-gpu; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load ext4 filesystem modules
+for mod in crc16 crc32c_generic libcrc32c mbcache jbd2 ext4; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load virtio-fs / fuse modules for shared folder support
+for mod in fuse virtiofs; do
+    if [ -f "$MODDIR/$mod.ko" ]; then
+        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
+            echo "Loaded: $mod" || echo "Failed: $mod"
+    fi
+done
+
+# Load ALSA / virtio sound modules for audio playback
+for mod in soundcore snd snd-timer snd-pcm virtio_snd; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"

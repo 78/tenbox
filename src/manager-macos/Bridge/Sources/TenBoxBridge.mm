@@ -158,6 +158,7 @@ static NSString* GetVmsDir() {
         info.displayScale = displayScaleNum ? [displayScaleNum integerValue] : 1;
         if (info.displayScale < 1) info.displayScale = 1;
         if (info.displayScale > 2) info.displayScale = 2;
+        info.debugMode = [dict[@"debug_mode"] boolValue];
 
         NSMutableArray<TBSharedFolder *>* folders = [NSMutableArray array];
         NSArray* sfArray = dict[@"shared_folders"];
@@ -270,6 +271,7 @@ static NSString* GetVmsDir() {
         @"memory_mb": @(config.memoryMb),
         @"cpu_count": @(config.cpuCount),
         @"net_enabled": @(config.netEnabled),
+        @"debug_mode": @(config.debugMode),
         @"state": @"stopped",
         @"display_scale": @1,
         @"shared_folders": @[],
@@ -283,7 +285,7 @@ static NSString* GetVmsDir() {
     return [data writeToFile:path atomically:YES];
 }
 
-- (BOOL)editVmWithId:(NSString *)vmId name:(NSString *)name memoryMb:(NSInteger)memoryMb cpuCount:(NSInteger)cpuCount netEnabled:(BOOL)netEnabled {
+- (BOOL)editVmWithId:(NSString *)vmId name:(NSString *)name memoryMb:(NSInteger)memoryMb cpuCount:(NSInteger)cpuCount netEnabled:(BOOL)netEnabled debugMode:(BOOL)debugMode {
     NSString* vmDir = [GetVmsDir() stringByAppendingPathComponent:vmId];
     NSString* configPath = [vmDir stringByAppendingPathComponent:@"config.json"];
     NSData* data = [NSData dataWithContentsOfFile:configPath];
@@ -298,6 +300,7 @@ static NSString* GetVmsDir() {
     config[@"memory_mb"] = @(memoryMb);
     config[@"cpu_count"] = @(cpuCount);
     config[@"net_enabled"] = @(netEnabled);
+    config[@"debug_mode"] = @(debugMode);
 
     NSData* newData = [NSJSONSerialization dataWithJSONObject:config
                                                      options:NSJSONWritingPrettyPrinted
@@ -359,6 +362,10 @@ static NSString* GetVmsDir() {
     NSNumber* netEnabled = config[@"net_enabled"];
     if (netEnabled && [netEnabled boolValue]) {
         [args addObject:@"--net"];
+    }
+
+    if ([config[@"debug_mode"] boolValue]) {
+        [args addObject:@"--debug"];
     }
 
     // Port forwards and guest forwards are sent via IPC after the VM

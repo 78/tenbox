@@ -224,6 +224,13 @@ private struct ConfirmPage: View {
                     }
                 }
 
+                VmFormSection(title: "Advanced") {
+                    VmFormRow(label: "", labelWidth: labelWidth) {
+                        Toggle("Linux kernel debug log", isOn: $vm.debugMode)
+                            .toggleStyle(.checkbox)
+                    }
+                }
+
                 if let img = vm.selectedImage {
                     VmFormSection(title: "Image") {
                         VmFormRow(label: "Image", labelWidth: labelWidth) {
@@ -402,6 +409,7 @@ class CreateVmViewModel: ObservableObject {
     @Published var vmName = ""
     @Published var memoryGb: Int = min(4, hostMaxMemoryGb)
     @Published var cpuCount: Int = min(4, hostMaxCpus)
+    @Published var debugMode = false
     @Published var created = false
 
     private let service = ImageSourceService.shared
@@ -669,7 +677,8 @@ class CreateVmViewModel: ObservableObject {
             memoryMb: memoryGb * 1024,
             cpuCount: cpuCount,
             netEnabled: true,
-            sourceDir: sourceDir
+            sourceDir: sourceDir,
+            debugMode: debugMode
         )
         appState.createVm(config: config)
         created = true
@@ -723,6 +732,7 @@ struct EditVmDialog: View {
     @State private var name: String
     @State private var memoryGb: Int
     @State private var cpuCount: Int
+    @State private var debugMode: Bool
 
     private let labelWidth: CGFloat = 72
 
@@ -731,6 +741,7 @@ struct EditVmDialog: View {
         _name = State(initialValue: vm.name)
         _memoryGb = State(initialValue: max(1, vm.memoryMb / 1024))
         _cpuCount = State(initialValue: vm.cpuCount)
+        _debugMode = State(initialValue: vm.debugMode)
     }
 
     var body: some View {
@@ -753,6 +764,13 @@ struct EditVmDialog: View {
                         VmSliderRow(value: $memoryGb, range: 1...hostMaxMemoryGb, unit: "GB")
                     }
                 }
+
+                VmFormSection(title: "Advanced") {
+                    VmFormRow(label: "", labelWidth: labelWidth) {
+                        Toggle("Linux kernel debug log", isOn: $debugMode)
+                            .toggleStyle(.checkbox)
+                    }
+                }
             }
             .padding(.horizontal, 24)
 
@@ -770,7 +788,7 @@ struct EditVmDialog: View {
             }
             .padding(16)
         }
-        .frame(width: 450, height: 280)
+        .frame(width: 450, height: 320)
     }
 
     private func saveVm() {
@@ -779,7 +797,8 @@ struct EditVmDialog: View {
             name: name,
             memoryMb: memoryGb * 1024,
             cpuCount: cpuCount,
-            netEnabled: true
+            netEnabled: true,
+            debugMode: debugMode
         )
         dismiss()
     }

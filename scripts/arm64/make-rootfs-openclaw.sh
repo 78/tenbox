@@ -114,6 +114,7 @@ STEPS=(
     "install_ibus"
     "install_usertools"
     "install_nodejs"
+    "install_ntp"
     "install_openclaw"
     "config_openclaw"
     "copy_readme"
@@ -145,6 +146,7 @@ STEP_DESCRIPTIONS=(
     "Install IBus Chinese input method"
     "Install user tools (Chromium, etc.)"
     "Install Node.js 22"
+    "Install NTP time sync"
     "Install OpenClaw"
     "Configure OpenClaw (tools, daemon)"
     "Copy readme to desktop"
@@ -479,6 +481,26 @@ su - $USER_NAME -c "npm config set registry https://registry.npmmirror.com"
 EOF
 }
 
+do_install_ntp() {
+    sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
+if dpkg -s systemd-timesyncd &>/dev/null; then
+    echo "  NTP time sync already installed"
+    exit 0
+fi
+DEBIAN_FRONTEND=noninteractive apt-get install -y systemd-timesyncd
+
+mkdir -p /etc/systemd/timesyncd.conf.d
+cat > /etc/systemd/timesyncd.conf.d/tenbox.conf << 'NTP'
+[Time]
+NTP=ntp.aliyun.com
+FallbackNTP=cn.pool.ntp.org pool.ntp.org
+NTP
+
+systemctl enable systemd-timesyncd.service 2>/dev/null || true
+timedatectl set-ntp true 2>/dev/null || true
+EOF
+}
+
 do_install_openclaw() {
     if [ ! -f "$CACHE_OPENCLAW" ] || [ ! -s "$CACHE_OPENCLAW" ]; then
         echo "  Downloading OpenClaw install script..."
@@ -765,6 +787,7 @@ check "spice-vdagent"     dpkg -s spice-vdagent
 check "qemu-guest-agent"  dpkg -s qemu-guest-agent
 check "pulseaudio"        dpkg -s pulseaudio
 check "node"              command -v node
+check "ntp"               dpkg -s systemd-timesyncd
 check "curl"              command -v curl
 check "wget"              command -v wget
 check "vim"               command -v vim
@@ -831,6 +854,7 @@ run_step "install_audio"  "Installing audio"             do_install_audio
 run_step "install_ibus"   "Installing IBus"              do_install_ibus
 run_step "install_usertools" "Installing user tools"     do_install_usertools
 run_step "install_nodejs" "Installing Node.js"           do_install_nodejs
+run_step "install_ntp"    "Installing NTP time sync"     do_install_ntp
 run_step "install_openclaw" "Installing OpenClaw"        do_install_openclaw
 run_step "config_openclaw" "Configuring OpenClaw"        do_config_openclaw
 run_step "copy_readme"    "Copying readme to desktop"    do_copy_readme

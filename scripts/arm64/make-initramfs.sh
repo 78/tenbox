@@ -82,19 +82,34 @@ cp "$WORKDIR/busybox" "$WORKDIR/initramfs/bin/"
 MODDIR="kmod_extract/lib/modules/$KVER/kernel"
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
-# Only modules required to reach rootfs on /dev/vda.
-# Everything else (network, GPU, audio, virtiofs, input) is loaded
-# on-demand by modprobe from /lib/modules/ inside the rootfs.
 VIRTIO_MODS=(
     "drivers/virtio/virtio_mmio.ko"
     "drivers/block/virtio_blk.ko"
+    "net/core/failover.ko"
+    "drivers/net/net_failover.ko"
+    "drivers/net/virtio_net.ko"
     "drivers/char/virtio_console.ko"
+    "drivers/virtio/virtio_input.ko"
+    "drivers/input/evdev.ko"
+    "drivers/media/rc/rc-core.ko"
+    "drivers/gpu/drm/drm.ko"
+    "drivers/gpu/drm/drm_kms_helper.ko"
+    "drivers/gpu/drm/drm_shmem_helper.ko"
+    "drivers/virtio/virtio_dma_buf.ko"
+    "drivers/gpu/drm/virtio/virtio-gpu.ko"
+    "fs/fuse/fuse.ko"
+    "fs/fuse/virtiofs.ko"
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
     "crypto/crc32c_generic.ko"
     "lib/libcrc32c.ko"
     "fs/ext4/ext4.ko"
+    "sound/soundcore.ko"
+    "sound/core/snd.ko"
+    "sound/core/snd-timer.ko"
+    "sound/core/snd-pcm.ko"
+    "sound/virtio/virtio_snd.ko"
 )
 
 copy_module() {
@@ -151,11 +166,38 @@ exec 0</dev/console 1>/dev/console 2>/dev/console
 /bin/busybox --install -s /bin
 
 echo ""
-echo "===== Loading boot-essential modules ====="
+echo "===== Loading VirtIO modules ====="
 
 MODDIR=/lib/modules
-for mod in virtio virtio_ring virtio_mmio virtio_blk virtio_console \
-           crc16 crc32c_generic libcrc32c mbcache jbd2 ext4; do
+for mod in virtio virtio_ring virtio_mmio; do
+    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
+done
+
+for mod in virtio_blk failover net_failover virtio_net virtio_console virtio_input evdev; do
+    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
+done
+
+echo ""
+echo "===== Loading DRM / virtio-gpu ====="
+for mod in rc-core cec drm drm_kms_helper drm_shmem_helper virtio_dma_buf virtio-gpu; do
+    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
+done
+
+echo ""
+echo "===== Loading virtiofs / fuse ====="
+for mod in fuse virtiofs; do
+    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
+done
+
+echo ""
+echo "===== Loading ext4 ====="
+for mod in crc16 crc32c_generic libcrc32c mbcache jbd2 ext4; do
+    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
+done
+
+echo ""
+echo "===== Loading ALSA / virtio-snd ====="
+for mod in soundcore snd snd-timer snd-pcm virtio_snd; do
     [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
 done
 

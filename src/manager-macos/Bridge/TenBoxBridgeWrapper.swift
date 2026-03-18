@@ -12,11 +12,11 @@ class TenBoxBridgeWrapper {
             }
             let pfs = info.portForwards.map { pf in
                 PortForward(hostPort: pf.hostPort, guestPort: pf.guestPort,
-                            hostIp: pf.hostIp ?? "127.0.0.1", guestIp: pf.guestIp ?? "")
+                            hostIp: pf.hostIp, guestIp: pf.guestIp)
             }
             let gfs = info.guestForwards.map { gf in
-                GuestForward(guestIp: gf.guestIp ?? "", guestPort: gf.guestPort,
-                             hostAddr: gf.hostAddr ?? "127.0.0.1", hostPort: gf.hostPort)
+                GuestForward(guestIp: gf.guestIp, guestPort: gf.guestPort,
+                             hostAddr: gf.hostAddr, hostPort: gf.hostPort)
             }
             return VmInfo(
                 id: info.vmId,
@@ -31,7 +31,8 @@ class TenBoxBridgeWrapper {
                 sharedFolders: folders,
                 portForwards: pfs,
                 guestForwards: gfs,
-                displayScale: max(1, min(2, Int(info.displayScale)))
+                displayScale: max(1, min(2, Int(info.displayScale))),
+                debugMode: info.debugMode
             )
         }
     }
@@ -46,11 +47,12 @@ class TenBoxBridgeWrapper {
         objcConfig.cpuCount = config.cpuCount
         objcConfig.netEnabled = config.netEnabled
         objcConfig.sourceDir = config.sourceDir
+        objcConfig.debugMode = config.debugMode
         bridge.createVm(with: objcConfig)
     }
 
-    func editVm(id: String, name: String, memoryMb: Int, cpuCount: Int, netEnabled: Bool) {
-        bridge.editVm(withId: id, name: name, memoryMb: memoryMb, cpuCount: cpuCount, netEnabled: netEnabled)
+    func editVm(id: String, name: String, memoryMb: Int, cpuCount: Int, netEnabled: Bool, debugMode: Bool) {
+        bridge.editVm(withId: id, name: name, memoryMb: memoryMb, cpuCount: cpuCount, netEnabled: netEnabled, debugMode: debugMode)
     }
 
     func deleteVm(id: String) {

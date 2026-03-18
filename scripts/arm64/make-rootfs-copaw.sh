@@ -44,6 +44,7 @@ SCRIPTS_CACHE_DIR="$CACHE_DIR/scripts"
 mkdir -p "$CHECKPOINT_DIR" "$APT_CACHE_DIR" "$SCRIPTS_CACHE_DIR"
 
 CACHE_TAR="$(realpath -m "$CACHE_DIR/debootstrap-${SUITE}-arm64.tar")"
+CACHE_NODESOURCE="$SCRIPTS_CACHE_DIR/nodesource_setup_22.x.sh"
 
 WORK_DIR="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-copaw-arm64}"
 
@@ -106,6 +107,8 @@ STEPS=(
     "install_audio"
     "install_ibus"
     "install_usertools"
+    "install_nodejs"
+    "install_ntp"
     "install_copaw"
     "config_copaw"
     "config_locale"
@@ -135,6 +138,8 @@ STEP_DESCRIPTIONS=(
     "Install audio (PulseAudio + ALSA)"
     "Install IBus Chinese input method"
     "Install user tools (Chromium, etc.)"
+    "Install Node.js 22"
+    "Install NTP time sync"
     "Install Copaw"
     "Configure Copaw autostart"
     "Configure locale"
@@ -442,6 +447,51 @@ su - $USER_NAME -c 'echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/ch
 EOF
 }
 
+do_install_nodejs() {
+    if [ ! -f "$CACHE_NODESOURCE" ] || [ ! -s "$CACHE_NODESOURCE" ]; then
+        echo "  Downloading NodeSource setup script..."
+        rm -f "$CACHE_NODESOURCE" "$CACHE_NODESOURCE.tmp"
+        curl -fsSL https://deb.nodesource.com/setup_22.x -o "$CACHE_NODESOURCE.tmp"
+        mv "$CACHE_NODESOURCE.tmp" "$CACHE_NODESOURCE"
+    fi
+    sudo cp "$CACHE_NODESOURCE" "$MOUNT_DIR/tmp/nodesource_setup.sh"
+
+    sudo chroot "$MOUNT_DIR" /bin/bash -e << EOF
+if command -v node &>/dev/null && node --version | grep -q "v22"; then
+    echo "  Node.js 22 already installed"
+    exit 0
+fi
+echo "Installing Node.js 22..."
+bash /tmp/nodesource_setup.sh
+DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+rm -f /tmp/nodesource_setup.sh
+
+npm config set registry https://registry.npmmirror.com --global
+echo "registry=https://registry.npmmirror.com" >> /etc/npmrc
+su - $USER_NAME -c "npm config set registry https://registry.npmmirror.com"
+EOF
+}
+
+do_install_ntp() {
+    sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
+if dpkg -s systemd-timesyncd &>/dev/null; then
+    echo "  NTP time sync already installed"
+    exit 0
+fi
+DEBIAN_FRONTEND=noninteractive apt-get install -y systemd-timesyncd
+
+mkdir -p /etc/systemd/timesyncd.conf.d
+cat > /etc/systemd/timesyncd.conf.d/tenbox.conf << 'NTP'
+[Time]
+NTP=ntp.aliyun.com
+FallbackNTP=cn.pool.ntp.org pool.ntp.org
+NTP
+
+systemctl enable systemd-timesyncd.service 2>/dev/null || true
+timedatectl set-ntp true 2>/dev/null || true
+EOF
+}
+
 do_install_copaw() {
     sudo chroot "$MOUNT_DIR" /bin/bash -e << EOF
 if [ -d /home/$USER_NAME/.copaw ]; then
@@ -640,6 +690,8 @@ check "lightdm"           dpkg -s lightdm
 check "spice-vdagent"     dpkg -s spice-vdagent
 check "qemu-guest-agent"  dpkg -s qemu-guest-agent
 check "pulseaudio"        dpkg -s pulseaudio
+check "node"              command -v node
+check "ntp"               dpkg -s systemd-timesyncd
 check "copaw"             test -d /home/tenbox/.copaw
 check "chromium"          dpkg -s chromium
 check "curl"              command -v curl
@@ -706,6 +758,8 @@ run_step "install_devtools" "Installing dev tools"       do_install_devtools
 run_step "install_audio"  "Installing audio"             do_install_audio
 run_step "install_ibus"   "Installing IBus"              do_install_ibus
 run_step "install_usertools" "Installing user tools"     do_install_usertools
+run_step "install_nodejs" "Installing Node.js"           do_install_nodejs
+run_step "install_ntp"    "Installing NTP time sync"     do_install_ntp
 run_step "install_copaw"  "Installing Copaw"             do_install_copaw
 run_step "config_copaw"   "Configuring Copaw"            do_config_copaw
 run_step "config_locale"  "Configuring locale"           do_config_locale

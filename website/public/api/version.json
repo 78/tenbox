@@ -2,26 +2,26 @@
   "latest_version": "0.5.1",
   "min_supported_version": "0.1.0",
   "release_notes": "配置LLM代理超时时间为5分钟",
-  "release_date": "2026-03-17",
+  "release_date": "2026-03-18",
   "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.1.msi",
   "sha256": "c7daededcdb6d4a95789ba0b62ec4e4a6bd3381fedcc7f5a7585cc945678e5e7",
   "platforms": {
     "windows": {
       "latest_version": "0.5.1",
       "release_notes": "配置LLM代理超时时间为5分钟",
-      "release_date": "2026-03-17",
+      "release_date": "2026-03-18",
       "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.1.msi",
       "sha256": "c7daededcdb6d4a95789ba0b62ec4e4a6bd3381fedcc7f5a7585cc945678e5e7",
       "size": 3223552,
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.5.0",
-      "release_notes": "默认禁用10.0.2.2转发，需要用户配置\n增加LLM代理工具，保障API Key安全\nVM在运行时，防止系统进入睡眠\n主机端口冲突时会报错",
-      "release_date": "2026-03-17",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.0.dmg",
-      "sha256": "d4d14454824cbe2476a074c637a980096a1d4ead1862dbaeeddc3c1c8f26c714",
-      "size": 4485659,
+      "latest_version": "0.5.1",
+      "release_notes": "配置LLM代理超时时间为5分钟",
+      "release_date": "2026-03-18",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.1.dmg",
+      "sha256": "99c557f25e06e2c7d1bdff7c5d77c3714ed8224b7e0a75145761dd0e194ea4d0",
+      "size": 4484720,
       "min_os": "macOS 12"
     }
   }

@@ -9,7 +9,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-14",
+      "updated_at": "2026-03-18",
       "files": [
         {
           "name": "vmlinuz",
@@ -20,27 +20,27 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs/initramfs-x86_64.cpio.gz",
-          "sha256": "25f93b5f17f8f88839c7beccaee4f6a3c66ccc5a56f53079e1546bf2ab74744b",
-          "size": 1693120
+          "sha256": "4c3baafb3d4ed3aa6323adbd2e18022051309f2d6a13496e1cb14132e5e7c85a",
+          "size": 3217912
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.13.qcow2",
-          "sha256": "e1df7ec2f5c04363d13a3eb96c2792df1f9f87b302038429f3117ed2858fa8ed",
-          "size": 1650107904
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.13-x86_64.qcow2",
+          "sha256": "2ec45a0372613ae49b83ae7845174e7be1e8af32100eac78807fa32e08854b68",
+          "size": 1634079232
         }
       ]
     },
     {
       "id": "copaw",
-      "version": "0.0.7",
-      "name": "CoPaw 0.0.7",
+      "version": "0.1.0b3",
+      "name": "CoPaw 0.1.0b3",
       "description": "一个基于 Debian 12 xfce4 的桌面环境，预装了 CoPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-14",
+      "updated_at": "2026-03-18",
       "files": [
         {
           "name": "vmlinuz",
@@ -51,14 +51,14 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs/initramfs-x86_64.cpio.gz",
-          "sha256": "25f93b5f17f8f88839c7beccaee4f6a3c66ccc5a56f53079e1546bf2ab74744b",
-          "size": 1693120
+          "sha256": "4c3baafb3d4ed3aa6323adbd2e18022051309f2d6a13496e1cb14132e5e7c85a",
+          "size": 3217912
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw/rootfs-copaw-0.0.7.qcow2",
-          "sha256": "c4342c19a9a337534c19a256bcaa35c638ef91fd10b7b80dc521c0be2a1715f0",
-          "size": 1522993152
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw/rootfs-copaw-0.1.0b3-x86_64.qcow2",
+          "sha256": "63b73b9a9608adbd84b9e50c0bacea7ce9e580dd8729b3063fbdcbede49be5a7",
+          "size": 1572405248
         }
       ]
     },
@@ -71,7 +71,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-14",
+      "updated_at": "2026-03-18",
       "files": [
         {
           "name": "vmlinuz",
@@ -82,14 +82,14 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs/initramfs-x86_64.cpio.gz",
-          "sha256": "25f93b5f17f8f88839c7beccaee4f6a3c66ccc5a56f53079e1546bf2ab74744b",
-          "size": 1693120
+          "sha256": "4c3baafb3d4ed3aa6323adbd2e18022051309f2d6a13496e1cb14132e5e7c85a",
+          "size": 3217912
         },
         {
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium/rootfs-chromium-x86_64.qcow2",
-          "sha256": "05592f031a157e98cf2832e72a21bc15ffd1a6e7195bba1cbdfa62c5175d4674",
-          "size": 1169358848
+          "sha256": "c509efaa68651bbb953a578dcdb6e6642cbb19129a5994dcac4db21b7cfa13ce",
+          "size": 1145962496
         }
       ]
     },
@@ -102,7 +102,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-14",
+      "updated_at": "2026-03-18",
       "files": [
         {
           "name": "vmlinuz",
@@ -113,27 +113,27 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs-arm64/initramfs-arm64.cpio.gz",
-          "sha256": "2dffba852bc76beee2bc324957e50ce87713bce9bb21d6584ba5aff2e5ee2e4d",
-          "size": 1558700
+          "sha256": "1186665a628232258404f71aada8ea2a5a2978d5609a547112ee654479f202e7",
+          "size": 2941643
         },
         {
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium-arm64/rootfs-chromium-arm64.qcow2",
-          "sha256": "1c0437947894940d72812c05714263cbe756071382fe8503c35f7ce0738d8b03",
-          "size": 1119158272
+          "sha256": "036ed0a82f18552e6ad6d2f87960f5dc493c1fde66d4177aeeaf2723fd0c01a7",
+          "size": 1091279872
         }
       ]
     },
     {
       "id": "copaw-arm64",
-      "version": "0.0.7",
-      "name": "CoPaw 0.0.7 (ARM64)",
+      "version": "0.1.0b3",
+      "name": "CoPaw 0.1.0b3 (ARM64)",
       "description": "一个基于 Debian 12 xfce4 的桌面环境，预装了 CoPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-14",
+      "updated_at": "2026-03-18",
       "files": [
         {
           "name": "vmlinuz",
@@ -144,14 +144,14 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs-arm64/initramfs-arm64.cpio.gz",
-          "sha256": "2dffba852bc76beee2bc324957e50ce87713bce9bb21d6584ba5aff2e5ee2e4d",
-          "size": 1558700
+          "sha256": "1186665a628232258404f71aada8ea2a5a2978d5609a547112ee654479f202e7",
+          "size": 2941643
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/rootfs-copaw-arm64-0.0.7.qcow2",
-          "sha256": "d061123b64fbc1dbe1f414a3d06c467ef3b67254e973a8699d67dfda8cf05620",
-          "size": 1525669888
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/rootfs-copaw-0.1.0b3-arm64.qcow2",
+          "sha256": "a6bd8d6b5808ae0ea13332f1bcd38d0db34695d997a82de9c29360290350f9fd",
+          "size": 1546074112
         }
       ]
     },
@@ -164,7 +164,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-14",
+      "updated_at": "2026-03-18",
       "files": [
         {
           "name": "vmlinuz",
@@ -175,14 +175,14 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs-arm64/initramfs-arm64.cpio.gz",
-          "sha256": "2dffba852bc76beee2bc324957e50ce87713bce9bb21d6584ba5aff2e5ee2e4d",
-          "size": 1558700
+          "sha256": "1186665a628232258404f71aada8ea2a5a2978d5609a547112ee654479f202e7",
+          "size": 2941643
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-arm64-2026.3.13.qcow2",
-          "sha256": "4234c329d746a9eb3702957996ce76a8834faacacb0dd21965ef5ed9855615eb",
-          "size": 1650262016
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-2026.3.13-arm64.qcow2",
+          "sha256": "e79525878b80c215376bddee06d0b718a3d97d7fc0062131b606d85b6839f698",
+          "size": 1688545792
         }
       ]
     }

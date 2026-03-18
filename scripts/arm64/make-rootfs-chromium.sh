@@ -97,6 +97,7 @@ STEPS=(
     "install_audio"
     "install_ibus"
     "install_usertools"
+    "install_ntp"
     "config_locale"
     "config_services"
     "config_virtio_gpu"
@@ -124,6 +125,7 @@ STEP_DESCRIPTIONS=(
     "Install audio (PulseAudio + ALSA)"
     "Install IBus Chinese input method"
     "Install user tools (Chromium, etc.)"
+    "Install NTP time sync"
     "Configure locale"
     "Configure systemd services"
     "Configure virtio-gpu resize"
@@ -429,6 +431,26 @@ su - $USER_NAME -c 'echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/ch
 EOF
 }
 
+do_install_ntp() {
+    sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
+if dpkg -s systemd-timesyncd &>/dev/null; then
+    echo "  NTP time sync already installed"
+    exit 0
+fi
+DEBIAN_FRONTEND=noninteractive apt-get install -y systemd-timesyncd
+
+mkdir -p /etc/systemd/timesyncd.conf.d
+cat > /etc/systemd/timesyncd.conf.d/tenbox.conf << 'NTP'
+[Time]
+NTP=ntp.aliyun.com
+FallbackNTP=cn.pool.ntp.org pool.ntp.org
+NTP
+
+systemctl enable systemd-timesyncd.service 2>/dev/null || true
+timedatectl set-ntp true 2>/dev/null || true
+EOF
+}
+
 do_config_locale() {
     sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
 if locale -a 2>/dev/null | grep -q "zh_CN.utf8"; then
@@ -581,6 +603,7 @@ check "chromium"          dpkg -s chromium
 check "spice-vdagent"     dpkg -s spice-vdagent
 check "qemu-guest-agent"  dpkg -s qemu-guest-agent
 check "pulseaudio"        dpkg -s pulseaudio
+check "ntp"               dpkg -s systemd-timesyncd
 check "curl"              command -v curl
 check "wget"              command -v wget
 check "vim"               command -v vim
@@ -631,6 +654,7 @@ run_step "install_devtools" "Installing dev tools"       do_install_devtools
 run_step "install_audio"  "Installing audio"             do_install_audio
 run_step "install_ibus"   "Installing IBus"              do_install_ibus
 run_step "install_usertools" "Installing user tools"     do_install_usertools
+run_step "install_ntp"    "Installing NTP time sync"     do_install_ntp
 run_step "config_locale"  "Configuring locale"           do_config_locale
 run_step "config_services" "Configuring services"        do_config_services
 run_step "config_virtio_gpu" "Configuring virtio-gpu"    do_config_virtio_gpu
