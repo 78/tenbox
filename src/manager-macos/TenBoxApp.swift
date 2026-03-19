@@ -156,12 +156,10 @@ class AppState: ObservableObject {
             guard let self = self else { return }
             self.refreshVmList()
             self.updateSleepAssertion()
-            if let vmId = note.object as? String {
+                if let vmId = note.object as? String {
                 let newState = self.vms.first(where: { $0.id == vmId })?.state ?? .stopped
-                if newState == .rebooting {
+                if newState == .rebooting || newState == .stopped || newState == .crashed {
                     self.removeSession(for: vmId)
-                } else if newState == .stopped || newState == .crashed {
-                    self.activeSessions[vmId]?.disconnect()
                 } else if newState == .running {
                     let session = self.getOrCreateSession(for: vmId)
                     session.consoleText = ""

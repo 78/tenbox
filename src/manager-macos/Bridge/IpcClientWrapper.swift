@@ -42,6 +42,7 @@ class IpcClientWrapper: ObservableObject {
     }
 
     func attach(fd: Int32) -> Bool {
+        disconnecting = false
         let result = client.attach(toFd: fd)
         if result {
             isConnected = true
@@ -56,8 +57,9 @@ class IpcClientWrapper: ObservableObject {
         guard !disconnecting else { return }
         disconnecting = true
         isConnected = false
+        let gen = client.generation
         DispatchQueue.global(qos: .userInitiated).async { [client] in
-            client.disconnect()
+            client.disconnectIfGeneration(gen)
         }
     }
 

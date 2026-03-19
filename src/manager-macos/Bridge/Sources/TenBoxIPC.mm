@@ -56,6 +56,10 @@ static std::string HexDecode(const std::string& hex) {
     std::mutex _disconnectLock;
     std::atomic<bool> _running;
     std::thread _recvThread;
+    // Monotonic counter incremented on each attachToFd: call.
+    // Used to discard stale async disconnect() calls that would otherwise
+    // tear down a newer connection established after the disconnect was queued.
+    std::atomic<uint64_t> _generation;
     // Console batching: accumulate text, flush on a coalesced timer
     std::mutex _consoleLock;
     NSMutableString* _consoleBatch;
@@ -75,20 +79,31 @@ static std::string HexDecode(const std::string& hex) {
 
 - (BOOL)attachToFd:(int)fd {
     if (fd < 0) return NO;
+    // Clean up any existing receive loop and connection before attaching.
+    // This prevents startReceiveLoop from accidentally closing the new fd
+    // when it tries to join the old thread, and prevents a stale async
+    // disconnect() from racing with the new connection.
+    [self stopReceiveLoop];
+    _connection.reset();
+    _shmFb.Close();
+    _generation++;
     _connection = std::make_unique<ipc::UnixSocketConnection>(fd);
     return YES;
 }
 
 - (void)disconnect {
+    [self disconnectIfGeneration:_generation];
+}
+
+- (void)disconnectIfGeneration:(uint64_t)gen {
     std::lock_guard<std::mutex> lock(_disconnectLock);
+    if (_generation != gen) return;
     _running = false;
     if (_connection) {
         _connection->Close();
     }
     if (_recvThread.joinable()) {
         if (_recvThread.get_id() == std::this_thread::get_id()) {
-            // Called from within the recv thread (e.g. via disconnect handler callback).
-            // Cannot join ourselves; detach and defer SHM cleanup to dealloc.
             _recvThread.detach();
             _connection.reset();
             return;
@@ -98,6 +113,10 @@ static std::string HexDecode(const std::string& hex) {
     }
     _connection.reset();
     _shmFb.Close();
+}
+
+- (uint64_t)generation {
+    return _generation;
 }
 
 - (BOOL)isConnected {

@@ -11,6 +11,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)connectToVm:(NSString *)vmId;
 - (BOOL)attachToFd:(int)fd;
 - (void)disconnect;
+- (void)disconnectIfGeneration:(uint64_t)gen;
+@property (nonatomic, readonly) uint64_t generation;
 - (BOOL)isConnected;
 
 // Control commands: "stop", "shutdown", "reboot"

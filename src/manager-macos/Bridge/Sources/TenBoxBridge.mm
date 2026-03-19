@@ -9,7 +9,7 @@
 #include <thread>
 
 static std::mutex g_server_mutex;
-static std::unordered_map<std::string, std::unique_ptr<ipc::UnixSocketServer>> g_servers;
+static std::unordered_map<std::string, std::shared_ptr<ipc::UnixSocketServer>> g_servers;
 static std::unordered_map<std::string, std::unique_ptr<ipc::UnixSocketConnection>> g_accepted;
 static std::unordered_map<std::string, std::thread> g_accept_threads;
 static std::unordered_map<std::string, NSTask*> g_tasks;
@@ -416,21 +416,21 @@ static NSString* GetVmsDir() {
     // Create the IPC socket server BEFORE launching the runtime so the
     // runtime process can connect immediately.
     {
-        auto server = std::make_unique<ipc::UnixSocketServer>();
+        auto server = std::make_shared<ipc::UnixSocketServer>();
         if (!server->Listen(sockPath)) {
             NSLog(@"Failed to listen on IPC socket: %s", sockPath.c_str());
             return NO;
         }
         std::string vmIdStr = vmId.UTF8String;
-        ipc::UnixSocketServer* rawServer = server.get();
 
         std::lock_guard<std::mutex> lock(g_server_mutex);
-        g_servers[vmIdStr] = std::move(server);
+        g_servers[vmIdStr] = server;
 
         // Accept the runtime connection in a background thread so the
-        // Display page can later attach to it.
-        g_accept_threads[vmIdStr] = std::thread([rawServer, vmIdStr]() {
-            auto conn = rawServer->Accept();
+        // Display page can later attach to it.  Capture shared_ptr to
+        // keep the server alive until Accept() returns.
+        g_accept_threads[vmIdStr] = std::thread([server, vmIdStr]() {
+            auto conn = server->Accept();
             if (conn.IsValid()) {
                 std::lock_guard<std::mutex> lock(g_server_mutex);
                 g_accepted[vmIdStr] = std::make_unique<ipc::UnixSocketConnection>(std::move(conn));
@@ -469,7 +469,11 @@ static NSString* GetVmsDir() {
             [url stopAccessingSecurityScopedResource];
         }
         std::lock_guard<std::mutex> lock(g_server_mutex);
-        g_servers.erase(vmId.UTF8String);
+        auto si = g_servers.find(vmId.UTF8String);
+        if (si != g_servers.end()) {
+            si->second->Close();
+            g_servers.erase(si);
+        }
         return NO;
     }
 
@@ -500,7 +504,12 @@ static NSString* GetVmsDir() {
             std::lock_guard<std::mutex> lock(g_server_mutex);
             g_tasks.erase(vmIdStr);
             g_accepted.erase(vmIdStr);
-            g_servers.erase(vmIdStr);
+            // Close the listen socket so any blocked Accept() returns.
+            auto si = g_servers.find(vmIdStr);
+            if (si != g_servers.end()) {
+                si->second->Close();
+                g_servers.erase(si);
+            }
             auto sit = g_scoped_urls.find(vmIdStr);
             if (sit != g_scoped_urls.end()) {
                 urlsToRelease = sit->second;
@@ -579,7 +588,11 @@ static NSString* GetVmsDir() {
 
         std::lock_guard<std::mutex> lock(g_server_mutex);
         g_accepted.erase(vmIdStr);
-        g_servers.erase(vmIdStr);
+        auto si = g_servers.find(vmIdStr);
+        if (si != g_servers.end()) {
+            si->second->Close();
+            g_servers.erase(si);
+        }
         auto sit = g_scoped_urls.find(vmIdStr);
         if (sit != g_scoped_urls.end()) {
             urlsToRelease = sit->second;
@@ -1008,6 +1021,9 @@ static NSDictionary* GuestForwardToJson(TBGuestForward* gf) {
     }
     g_tasks.clear();
     g_accepted.clear();
+    for (auto& [_, srv] : g_servers) {
+        srv->Close();
+    }
     g_servers.clear();
     for (auto& [_, urls] : g_scoped_urls) {
         for (NSURL* url in urls) {

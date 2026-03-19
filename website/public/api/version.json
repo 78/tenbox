@@ -16,12 +16,12 @@
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.5.2",
-      "release_notes": "支持LLM代理日志",
+      "latest_version": "0.5.4",
+      "release_notes": "修复磁盘损坏的问题\n兼容macOS 12~14版本",
       "release_date": "2026-03-19",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.2.dmg",
-      "sha256": "dfc7b1fc05543efd0d5e3516cb234c6a99bf852f341c73a40f4c623ed3c7f87e",
-      "size": 4517265,
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.4.dmg",
+      "sha256": "4ae714ceebc87c028f1e1bf47f41e1a1e6f433803b40991ee94da826b29abd5d",
+      "size": 4539480,
       "min_os": "macOS 12"
     }
   }
