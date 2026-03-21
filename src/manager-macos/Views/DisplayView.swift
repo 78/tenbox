@@ -274,11 +274,20 @@ class InputMTKView: MTKView {
             NotificationCenter.default.addObserver(
                 self, selector: #selector(windowDidResignKey),
                 name: NSWindow.didResignKeyNotification, object: win)
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(windowDidBecomeKey),
+                name: NSWindow.didBecomeKeyNotification, object: win)
         }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(appDidResignActive),
             name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
     }
@@ -287,8 +296,16 @@ class InputMTKView: MTKView {
         releaseCapturedInputs()
     }
 
+    @objc private func windowDidBecomeKey(_ note: Notification) {
+        needsDisplay = true
+    }
+
     @objc private func appDidResignActive(_ note: Notification) {
         releaseCapturedInputs()
+    }
+
+    @objc private func appDidBecomeActive(_ note: Notification) {
+        needsDisplay = true
     }
 
     deinit {
