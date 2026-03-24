@@ -16,12 +16,12 @@
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.5.7",
-      "release_notes": "- 修复磁盘损坏问题\n- 请在升级前确保已备份虚拟机内的重要数据",
-      "release_date": "2026-03-21",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.7.dmg",
-      "sha256": "957bca3b5aead972696725b4adac41698a43dddb22c96caee6ce67b1a15e03d1",
-      "size": 4551780,
+      "latest_version": "0.5.8",
+      "release_notes": "- 增加 VM 菜单\n- 增加克隆功能\n- 0.5.7之前版本，请在升级前确保已备份虚拟机内的重要数据",
+      "release_date": "2026-03-24",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.5.8.dmg",
+      "sha256": "5c570ebf547bfa3c3c9c769ba64e8927ab30ed2474b8dc5101a5d495b44b86e5",
+      "size": 4600063,
       "min_os": "macOS 12"
     }
   }
