@@ -61,6 +61,12 @@ bool Qcow2DiskImage::Open(const std::string& path) {
         return false;
     }
 
+    if (!AcquireExclusiveLock(file_, path)) {
+        fclose(file_);
+        file_ = nullptr;
+        return false;
+    }
+
     if (!ReadHeader()) {
         fclose(file_);
         file_ = nullptr;

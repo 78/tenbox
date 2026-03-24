@@ -38,7 +38,16 @@ class VmConfigStore {
     func readConfig(vmId: String) -> VmConfig? {
         let url = configURL(for: vmId)
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? decoder.decode(VmConfig.self, from: data)
+        guard var config = try? decoder.decode(VmConfig.self, from: data) else { return nil }
+        let vmDir = vmDirectory(for: vmId).path
+        func resolve(_ path: String) -> String {
+            guard !path.isEmpty, !path.hasPrefix("/") else { return path }
+            return (vmDir as NSString).appendingPathComponent(path)
+        }
+        config.kernelPath = resolve(config.kernelPath)
+        config.initrdPath = resolve(config.initrdPath)
+        config.diskPath = resolve(config.diskPath)
+        return config
     }
 
     @discardableResult
@@ -78,7 +87,7 @@ class VmConfigStore {
             let dest = vmDir.appendingPathComponent(fileName).path
             do {
                 try fm.copyItem(atPath: srcPath, toPath: dest)
-                return dest
+                return fileName
             } catch {
                 NSLog("Failed to copy %@ -> %@: %@", srcPath, dest, error.localizedDescription)
                 return srcPath
@@ -118,6 +127,80 @@ class VmConfigStore {
         config.netEnabled = netEnabled
         config.debugMode = debugMode
         return writeConfig(vmId: id, config: config)
+    }
+
+    // MARK: - Clone
+
+    /// Clones a stopped VM: copies the entire directory, generates a unique name, and clears port forwards.
+    /// Returns the new VM id on success, nil on failure.
+    @discardableResult
+    func cloneVm(id: String) -> String? {
+        guard let srcConfig = readConfig(vmId: id) else { return nil }
+
+        let newId = UUID().uuidString
+        let srcDir = vmDirectory(for: id)
+        let destDir = vmDirectory(for: newId)
+
+        do {
+            try FileManager.default.copyItem(at: srcDir, to: destDir)
+        } catch {
+            NSLog("Failed to clone VM directory: %@", error.localizedDescription)
+            return nil
+        }
+
+        guard var newConfig = readConfig(vmId: newId) else {
+            try? FileManager.default.removeItem(at: destDir)
+            return nil
+        }
+
+        newConfig.name = generateCloneName(baseName: srcConfig.name)
+        newConfig.state = "stopped"
+        newConfig.portForwards = []
+
+        let srcPrefix = srcDir.path + "/"
+        let destPrefix = destDir.path + "/"
+        func toRelative(_ path: String) -> String {
+            guard !path.isEmpty else { return path }
+            if path.hasPrefix(srcPrefix) {
+                return String(path.dropFirst(srcPrefix.count))
+            }
+            if path.hasPrefix(destPrefix) {
+                return String(path.dropFirst(destPrefix.count))
+            }
+            if !path.hasPrefix("/") {
+                return path
+            }
+            return path
+        }
+        newConfig.kernelPath = toRelative(newConfig.kernelPath)
+        newConfig.initrdPath = toRelative(newConfig.initrdPath)
+        newConfig.diskPath = toRelative(newConfig.diskPath)
+
+        guard writeConfig(vmId: newId, config: newConfig) else {
+            try? FileManager.default.removeItem(at: destDir)
+            return nil
+        }
+        return newId
+    }
+
+    private func generateCloneName(baseName: String) -> String {
+        var stem = baseName
+        var startNum = 2
+
+        if let range = stem.range(of: #"\s+\d+$"#, options: .regularExpression) {
+            let numStr = stem[range].trimmingCharacters(in: .whitespaces)
+            if let existing = Int(numStr), existing > 0 {
+                stem = String(stem[..<range.lowerBound])
+                startNum = existing + 1
+            }
+        }
+
+        let existingNames = Set(listVms().map(\.config.name))
+        for n in startNum... {
+            let candidate = "\(stem) \(n)"
+            if !existingNames.contains(candidate) { return candidate }
+        }
+        return "\(stem) \(startNum)"
     }
 
     // MARK: - Delete

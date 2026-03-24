@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <cstdio>
 
 class DiskImage {
 public:
@@ -30,6 +31,12 @@ public:
 
     // Auto-detect format by reading magic bytes and return the right backend.
     static std::unique_ptr<DiskImage> Create(const std::string& path);
+
+protected:
+    // Acquire an exclusive (non-blocking) lock on the opened FILE* to prevent
+    // multiple processes from writing to the same disk image concurrently.
+    // Returns false if the file is already locked by another process.
+    static bool AcquireExclusiveLock(FILE* f, const std::string& path);
 
 private:
     DiskWorker worker_;

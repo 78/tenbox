@@ -19,6 +19,12 @@ bool RawDiskImage::Open(const std::string& path) {
         return false;
     }
 
+    if (!AcquireExclusiveLock(file_, path)) {
+        fclose(file_);
+        file_ = nullptr;
+        return false;
+    }
+
     _fseeki64(file_, 0, SEEK_END);
     disk_size_ = static_cast<uint64_t>(_ftelli64(file_));
     _fseeki64(file_, 0, SEEK_SET);

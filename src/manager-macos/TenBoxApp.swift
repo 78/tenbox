@@ -8,6 +8,7 @@ let kTenBoxVersion: String = {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
 }()
 let kTenBoxCopyright = "Copyright \u{00A9} 2026 terrence@tenclass.com"
+let kTenBoxWebsiteURL = URL(string: "https://tenbox.ai/")!
 
 final class CheckForUpdatesViewModel: ObservableObject {
     @Published var canCheckForUpdates = false
@@ -114,8 +115,16 @@ struct TenBoxApp: App {
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
             }
+            CommandMenu("VM") {
+                VmCommandMenuContent(appState: appDelegate.appState)
+            }
             CommandGroup(replacing: .toolbar) { }
             CommandGroup(replacing: .sidebar) { }
+            CommandGroup(after: .help) {
+                Button("TenBox Website...") {
+                    NSWorkspace.shared.open(kTenBoxWebsiteURL)
+                }
+            }
         }
     }
 }
@@ -127,6 +136,10 @@ class AppState: ObservableObject {
     @Published var showEditVmDialog = false
     @Published var showKeyboardCapturePermissionAlert = false
     @Published var showLlmProxySheet = false
+    @Published var showDeleteConfirm = false
+    @Published var showForceStopConfirm = false
+    @Published var showSharedFoldersSheet = false
+    @Published var showPortForwardsSheet = false
     @Published var startVmError: String?
     @Published var portForwardError: String?
     @Published var llmMappings: [LlmModelMapping] = []
@@ -307,6 +320,13 @@ class AppState: ObservableObject {
     func editVm(id: String, name: String, memoryMb: Int, cpuCount: Int, netEnabled: Bool, debugMode: Bool) {
         bridge.editVm(id: id, name: name, memoryMb: memoryMb, cpuCount: cpuCount, netEnabled: netEnabled, debugMode: debugMode)
         refreshVmList()
+    }
+
+    func cloneVm(id: String) {
+        if let newId = bridge.cloneVm(id: id) {
+            refreshVmList()
+            selectedVmId = newId
+        }
     }
 
     func deleteVm(id: String) {
@@ -577,5 +597,81 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         appState.llmProxy.stop()
         bridge.stopAllVms()
+    }
+}
+
+private struct VmCommandMenuContent: View {
+    @ObservedObject var appState: AppState
+
+    private var selectedVm: VmInfo? {
+        guard let vmId = appState.selectedVmId else { return nil }
+        return appState.vms.first { $0.id == vmId }
+    }
+
+    var body: some View {
+        let vm = selectedVm
+        let isRunning = vm?.state == .running
+        let isStopped = vm?.state == .stopped || vm?.state == .crashed
+
+        Button("Start") {
+            if let vm = vm { appState.requestStartVm(id: vm.id) }
+        }
+        .keyboardShortcut("r")
+        .disabled(vm == nil || !isStopped)
+
+        Button("Force Stop...") {
+            appState.showForceStopConfirm = true
+        }
+        .disabled(vm == nil || !isRunning)
+
+        Button("Reboot") {
+            if let vm = vm { appState.rebootVm(id: vm.id) }
+        }
+        .disabled(vm == nil || !isRunning)
+
+        Button("Shutdown") {
+            if let vm = vm { appState.shutdownVm(id: vm.id) }
+        }
+        .disabled(vm == nil || !isRunning)
+
+        Divider()
+
+        Button(vm.map { $0.displayScale == 2 ? "Display 1x" : "Display 2x" } ?? "Display Scale") {
+            if let vm = vm {
+                appState.setDisplayScale(vm.displayScale == 1 ? 2 : 1, forVm: vm.id)
+            }
+        }
+        .disabled(vm == nil || !isRunning)
+
+        Divider()
+
+        Button("Edit...") {
+            appState.showEditVmDialog = true
+        }
+        .keyboardShortcut("e")
+        .disabled(vm == nil || isRunning)
+
+        Button("Clone") {
+            if let vm = vm { appState.cloneVm(id: vm.id) }
+        }
+        .disabled(vm == nil || isRunning)
+
+        Button("Delete...") {
+            appState.showDeleteConfirm = true
+        }
+        .keyboardShortcut(.delete, modifiers: .command)
+        .disabled(vm == nil || isRunning)
+
+        Divider()
+
+        Button("Shared Folders...") {
+            appState.showSharedFoldersSheet = true
+        }
+        .disabled(vm == nil)
+
+        Button("Port Forwards...") {
+            appState.showPortForwardsSheet = true
+        }
+        .disabled(vm == nil)
     }
 }

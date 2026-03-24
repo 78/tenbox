@@ -3,7 +3,40 @@
 #include "core/disk/qcow2.h"
 #include <cstdio>
 
+#ifdef _WIN32
+#include <io.h>
+#include <sys/locking.h>
+#else
+#include <sys/file.h>
+#endif
+
 static constexpr uint32_t kQcow2Magic = 0x514649FB;
+
+bool DiskImage::AcquireExclusiveLock(FILE* f, const std::string& path) {
+#ifdef _WIN32
+    int fd = _fileno(f);
+    if (fd < 0) {
+        LOG_ERROR("DiskImage: _fileno failed for %s", path.c_str());
+        return false;
+    }
+    _lseek(fd, 0, SEEK_SET);
+    if (_locking(fd, _LK_NBLCK, 1) != 0) {
+        LOG_ERROR("DiskImage: disk image is already in use: %s", path.c_str());
+        return false;
+    }
+#else
+    int fd = fileno(f);
+    if (fd < 0) {
+        LOG_ERROR("DiskImage: fileno failed for %s", path.c_str());
+        return false;
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        LOG_ERROR("DiskImage: disk image is already in use: %s", path.c_str());
+        return false;
+    }
+#endif
+    return true;
+}
 
 std::unique_ptr<DiskImage> DiskImage::Create(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");

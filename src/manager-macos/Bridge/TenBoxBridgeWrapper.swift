@@ -26,6 +26,11 @@ class TenBoxBridgeWrapper {
                            netEnabled: netEnabled, debugMode: debugMode)
     }
 
+    @discardableResult
+    func cloneVm(id: String) -> String? {
+        configStore.cloneVm(id: id)
+    }
+
     func deleteVm(id: String) {
         configStore.deleteVm(id: id)
     }

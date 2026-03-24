@@ -2,10 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @State private var showDeleteConfirm = false
-    @State private var showForceStopConfirm = false
-    @State private var showSharedFoldersSheet = false
-    @State private var showPortForwardsSheet = false
 
     private var selectedVm: VmInfo? {
         guard let vmId = appState.selectedVmId else { return nil }
@@ -33,8 +29,14 @@ struct ContentView: View {
                     .disabled(vm.state == .running)
                     .help("Edit VM settings")
 
+                    Button(action: { appState.cloneVm(id: vm.id) }) {
+                        Label("Clone", systemImage: "doc.on.doc")
+                    }
+                    .disabled(vm.state == .running)
+                    .help("Clone this VM")
+
                     Button(role: .destructive, action: {
-                        showDeleteConfirm = true
+                        appState.showDeleteConfirm = true
                     }) {
                         Label("Delete", systemImage: "trash")
                     }
@@ -55,7 +57,7 @@ struct ContentView: View {
                     }
 
                     if vm.state == .running {
-                        Button(action: { showForceStopConfirm = true }) {
+                        Button(action: { appState.showForceStopConfirm = true }) {
                             Label("Force Stop", systemImage: "stop.fill")
                         }
                         .help("Force stop VM immediately")
@@ -83,7 +85,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    Button(action: { showSharedFoldersSheet = true }) {
+                    Button(action: { appState.showSharedFoldersSheet = true }) {
                         ToolbarBadgeLabel(
                             title: "Shared Folders",
                             systemImage: "folder",
@@ -92,7 +94,7 @@ struct ContentView: View {
                     }
                     .help("Manage shared folders")
 
-                    Button(action: { showPortForwardsSheet = true }) {
+                    Button(action: { appState.showPortForwardsSheet = true }) {
                         ToolbarBadgeLabel(
                             title: "Port Forwards",
                             systemImage: "network.badge.shield.half.filled",
@@ -129,12 +131,12 @@ struct ContentView: View {
                 EditVmDialog(vm: vm)
             }
         }
-        .sheet(isPresented: $showSharedFoldersSheet) {
+        .sheet(isPresented: $appState.showSharedFoldersSheet) {
             if let vm = selectedVm {
                 SharedFoldersSheet(vmId: vm.id)
             }
         }
-        .sheet(isPresented: $showPortForwardsSheet) {
+        .sheet(isPresented: $appState.showPortForwardsSheet) {
             if let vm = selectedVm {
                 PortForwardsSheet(vmId: vm.id)
             }
@@ -142,7 +144,7 @@ struct ContentView: View {
         .sheet(isPresented: $appState.showLlmProxySheet) {
             LlmProxySheet()
         }
-        .alert("Delete VM", isPresented: $showDeleteConfirm) {
+        .alert("Delete VM", isPresented: $appState.showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 if let vm = selectedVm {
@@ -152,7 +154,7 @@ struct ContentView: View {
         } message: {
             Text("Are you sure you want to delete \"\(selectedVm?.name ?? "")\"? This action cannot be undone.")
         }
-        .alert("Force Stop VM", isPresented: $showForceStopConfirm) {
+        .alert("Force Stop VM", isPresented: $appState.showForceStopConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Force Stop", role: .destructive) {
                 if let vm = selectedVm {
