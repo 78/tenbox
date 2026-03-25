@@ -13,9 +13,9 @@
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/vmlinuz",
+          "url": "https://files.xiaozhi.me/tenbox/images/kernel/vmlinuz",
           "sha256": "",
-          "size": 8206272
+          "size": 12109760
         },
         {
           "name": "initrd.gz",
@@ -44,9 +44,9 @@
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw/vmlinuz",
+          "url": "https://files.xiaozhi.me/tenbox/images/kernel/vmlinuz",
           "sha256": "",
-          "size": 8206272
+          "size": 12109760
         },
         {
           "name": "initrd.gz",
@@ -75,9 +75,9 @@
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/images/chromium/vmlinuz",
+          "url": "https://files.xiaozhi.me/tenbox/images/kernel/vmlinuz",
           "sha256": "",
-          "size": 8206272
+          "size": 12109760
         },
         {
           "name": "initrd.gz",
@@ -106,9 +106,9 @@
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/images/chromium-arm64/Image-arm64",
+          "url": "https://files.xiaozhi.me/tenbox/images/kernel-arm64/Image-arm64",
           "sha256": "",
-          "size": 32888768
+          "size": 37660608
         },
         {
           "name": "initrd.gz",
@@ -137,9 +137,9 @@
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/Image-arm64",
+          "url": "https://files.xiaozhi.me/tenbox/images/kernel-arm64/Image-arm64",
           "sha256": "",
-          "size": 32888768
+          "size": 37660608
         },
         {
           "name": "initrd.gz",
@@ -168,9 +168,9 @@
       "files": [
         {
           "name": "vmlinuz",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/Image-arm64",
+          "url": "https://files.xiaozhi.me/tenbox/images/kernel-arm64/Image-arm64",
           "sha256": "",
-          "size": 32888768
+          "size": 37660608
         },
         {
           "name": "initrd.gz",
