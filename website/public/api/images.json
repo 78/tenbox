@@ -20,8 +20,8 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs/initramfs-x86_64.cpio.gz",
-          "sha256": "d9d16f504d8187e9244a32046e72175fa16ae25d8e36e1d7c10cc08e29361731",
-          "size": 4735196
+          "sha256": "",
+          "size": 3314128
         },
         {
           "name": "rootfs.qcow2",
@@ -51,8 +51,8 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs/initramfs-x86_64.cpio.gz",
-          "sha256": "d9d16f504d8187e9244a32046e72175fa16ae25d8e36e1d7c10cc08e29361731",
-          "size": 4735196
+          "sha256": "",
+          "size": 3314128
         },
         {
           "name": "rootfs.qcow2",
@@ -82,8 +82,8 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs/initramfs-x86_64.cpio.gz",
-          "sha256": "d9d16f504d8187e9244a32046e72175fa16ae25d8e36e1d7c10cc08e29361731",
-          "size": 4735196
+          "sha256": "",
+          "size": 3314128
         },
         {
           "name": "rootfs.qcow2",
@@ -113,8 +113,8 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs-arm64/initramfs-arm64.cpio.gz",
-          "sha256": "a8f43e6a61f68cd2ddc754f14037896e3bf8d8672b97615c82acd38d1b14d812",
-          "size": 4521225
+          "sha256": "",
+          "size": 4006106
         },
         {
           "name": "rootfs.qcow2",
@@ -144,8 +144,8 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs-arm64/initramfs-arm64.cpio.gz",
-          "sha256": "a8f43e6a61f68cd2ddc754f14037896e3bf8d8672b97615c82acd38d1b14d812",
-          "size": 4521225
+          "sha256": "",
+          "size": 4006106
         },
         {
           "name": "rootfs.qcow2",
@@ -175,8 +175,8 @@
         {
           "name": "initrd.gz",
           "url": "https://files.xiaozhi.me/tenbox/images/initramfs-arm64/initramfs-arm64.cpio.gz",
-          "sha256": "a8f43e6a61f68cd2ddc754f14037896e3bf8d8672b97615c82acd38d1b14d812",
-          "size": 4521225
+          "sha256": "",
+          "size": 4006106
         },
         {
           "name": "rootfs.qcow2",
