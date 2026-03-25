@@ -2,14 +2,14 @@
   "images": [
     {
       "id": "openclaw",
-      "version": "2026.3.23-2",
-      "name": "OpenClaw 2026.3.23-2",
+      "version": "2026.3.24",
+      "name": "OpenClaw 2026.3.24",
       "description": "一个基于 Debian 12 的环境，预装了 OpenClaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-24",
+      "updated_at": "2026-03-25",
       "files": [
         {
           "name": "vmlinuz",
@@ -25,9 +25,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.23-2-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.3.24-x86_64.qcow2",
           "sha256": "",
-          "size": 1634598912
+          "size": 1749811712
         }
       ]
     },
