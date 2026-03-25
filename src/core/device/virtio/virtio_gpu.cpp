@@ -474,7 +474,8 @@ void VirtioGpuDevice::CmdResourceFlush(const uint8_t* req, uint32_t req_len,
         bool full_frame = (dx == 0 && dy == 0 &&
                            dw == res.width && dh == res.height);
         if (full_frame) {
-            frame.pixels = res.host_pixels;
+            frame.pixel_ref = res.host_pixels.data();
+            frame.pixel_ref_size = res.host_pixels.size();
         } else {
             frame.pixels.resize(static_cast<size_t>(dw) * dh * bpp);
             for (uint32_t row = 0; row < dh; ++row) {

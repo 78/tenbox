@@ -227,10 +227,10 @@ static void BlitFrameToState(VmUiState& state, const DisplayFrame& frame) {
     for (uint32_t row = 0; row < dh; ++row) {
         uint32_t src_off = row * src_stride;
         uint32_t dst_off = (dy + row) * dst_stride + dx * 4;
-        if (src_off + src_stride > frame.pixels.size()) break;
+        if (src_off + src_stride > frame.data_size()) break;
         if (dst_off + dw * 4 > state.framebuffer.size()) break;
         std::memcpy(state.framebuffer.data() + dst_off,
-                    frame.pixels.data() + src_off, dw * 4);
+                    frame.data() + src_off, dw * 4);
     }
 }
 

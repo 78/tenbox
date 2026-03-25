@@ -20,7 +20,7 @@ ARCH="amd64"
 
 cd "$WORKDIR"
 
-echo "[1/5] Resolving kernel package from $SUITE ..."
+echo "[1/6] Resolving kernel package from $SUITE ..."
 curl -fsSL "$MIRROR/dists/$SUITE/main/binary-$ARCH/Packages.gz" | gunzip > Packages
 
 META_BLOCK=$(awk '/^Package: linux-image-amd64$/,/^$/' Packages)
@@ -32,7 +32,7 @@ if [ -z "$KPKG" ] || [ -z "$KVER" ]; then
 fi
 echo "  -> kernel package: $KPKG  (version: $KVER)"
 
-echo "[2/5] Downloading BusyBox & kernel package ..."
+echo "[2/6] Downloading BusyBox & kernel package ..."
 # BusyBox
 BB_DEB_PATH=$(awk '/^Package: busybox-static$/,/^$/' Packages | grep -oP '^Filename: \K.*')
 if [ -z "$BB_DEB_PATH" ]; then
@@ -57,7 +57,7 @@ curl -fsSL -o kernel.deb "$MIRROR/$KERN_DEB_PATH"
 mkdir -p kmod_extract
 dpkg-deb -x kernel.deb kmod_extract/
 
-echo "[3/5] Creating initramfs layout & extracting modules ..."
+echo "[3/6] Creating initramfs layout & extracting modules ..."
 mkdir -p "$WORKDIR/initramfs"/{bin,sbin,dev,proc,sys,etc,tmp,lib/modules}
 cp "$WORKDIR/busybox" "$WORKDIR/initramfs/bin/"
 
@@ -152,6 +152,9 @@ for relmod in "${VIRTIO_MODS[@]}"; do
         fi
     fi
 done
+
+echo "[4/6] Patching & rebuilding virtio-gpu.ko (damage-clip fix) ..."
+source "$SCRIPT_DIR/../patch-virtio-gpu.sh"
 
 cat > "$WORKDIR/initramfs/init" << 'EOF'
 #!/bin/busybox sh
@@ -251,7 +254,7 @@ poweroff -f
 EOF
 chmod +x "$WORKDIR/initramfs/init"
 
-echo "[4/5] Packing initramfs..."
+echo "[5/6] Packing initramfs..."
 cd "$WORKDIR/initramfs"
 find . | cpio -o -H newc --quiet | gzip -9 > "$WORKDIR/initramfs-x86_64.cpio.gz"
 
@@ -261,6 +264,6 @@ if [ "$PACKED_SIZE" -le 20 ]; then
     exit 1
 fi
 
-echo "[5/5] Copying output..."
+echo "[6/6] Copying output..."
 cp "$WORKDIR/initramfs-x86_64.cpio.gz" "$OUTDIR/initramfs-x86_64.cpio.gz"
 echo "Done: $OUTDIR/initramfs-x86_64.cpio.gz ($(ls -lh "$OUTDIR/initramfs-x86_64.cpio.gz" | awk '{print $5}'))"

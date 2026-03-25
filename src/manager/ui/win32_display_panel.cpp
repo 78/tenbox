@@ -60,43 +60,6 @@ void DisplayPanel::SetWheelCallback(WheelEventCallback cb) {
     wheel_cb_ = std::move(cb);
 }
 
-void DisplayPanel::UpdateFrame(const DisplayFrame& frame) {
-    std::lock_guard<std::mutex> lock(fb_mutex_);
-
-    uint32_t rw = frame.resource_width;
-    uint32_t rh = frame.resource_height;
-    if (rw == 0) rw = frame.width;
-    if (rh == 0) rh = frame.height;
-
-    // Resize framebuffer if resource dimensions changed
-    if (fb_width_ != rw || fb_height_ != rh) {
-        fb_width_ = rw;
-        fb_height_ = rh;
-        framebuffer_.resize(static_cast<size_t>(rw) * rh * 4, 0);
-    }
-
-    // Blit dirty rectangle into framebuffer
-    uint32_t dx = frame.dirty_x;
-    uint32_t dy = frame.dirty_y;
-    uint32_t dw = frame.width;
-    uint32_t dh = frame.height;
-    uint32_t src_stride = dw * 4;
-    uint32_t dst_stride = fb_width_ * 4;
-
-    for (uint32_t row = 0; row < dh; ++row) {
-        uint32_t src_off = row * src_stride;
-        uint32_t dst_off = (dy + row) * dst_stride + dx * 4;
-        if (src_off + src_stride > frame.pixels.size()) break;
-        if (dst_off + dw * 4 > framebuffer_.size()) break;
-        std::memcpy(framebuffer_.data() + dst_off,
-                    frame.pixels.data() + src_off, dw * 4);
-    }
-
-    if (hwnd_) {
-        InvalidateRect(hwnd_, nullptr, FALSE);
-    }
-}
-
 void DisplayPanel::AdoptFramebuffer(uint32_t w, uint32_t h, const uint8_t* src, size_t len) {
     std::lock_guard<std::mutex> lock(fb_mutex_);
     size_t expected = static_cast<size_t>(w) * h * 4;

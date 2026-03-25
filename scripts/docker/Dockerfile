@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     libglib2.0-0t64 libzstd1 libpixman-1-0 \
     build-essential bc kmod file \
+    flex bison libelf-dev libssl-dev dwarves \
     && rm -rf /var/lib/apt/lists/*
 
 RUN qemu-img --version

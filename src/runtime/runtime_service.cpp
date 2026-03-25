@@ -298,14 +298,14 @@ RuntimeControlService::RuntimeControlService(std::string vm_id, std::string pipe
         uint32_t dh = frame.height;
         uint32_t src_stride = frame.stride;
         uint32_t dst_stride = shm_fb_.stride();
-        const uint8_t* src = frame.pixels.data();
+        const uint8_t* src = frame.data();
         uint8_t* dst = shm_fb_.data();
 
         for (uint32_t row = 0; row < dh; ++row) {
             size_t src_off = static_cast<size_t>(row) * src_stride;
             size_t dst_off = static_cast<size_t>(dy + row) * dst_stride +
                              static_cast<size_t>(dx) * 4;
-            if (src_off + dw * 4 > frame.pixels.size()) break;
+            if (src_off + dw * 4 > frame.data_size()) break;
             if (dst_off + dw * 4 > shm_fb_.size()) break;
             std::memcpy(dst + dst_off, src + src_off, dw * 4);
         }

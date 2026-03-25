@@ -42,6 +42,16 @@ struct DisplayFrame {
     // Dirty rectangle origin within the resource
     uint32_t dirty_x = 0;
     uint32_t dirty_y = 0;
+
+    // Zero-copy pixel access.  When pixel_ref is set it points to
+    // externally-owned memory that is valid for the duration of the
+    // synchronous frame callback chain.  Consumers should always use
+    // data() / data_size() instead of accessing `pixels` directly.
+    const uint8_t* data() const { return pixel_ref ? pixel_ref : pixels.data(); }
+    size_t data_size() const { return pixel_ref ? pixel_ref_size : pixels.size(); }
+
+    const uint8_t* pixel_ref = nullptr;
+    size_t pixel_ref_size = 0;
     std::vector<uint8_t> pixels;
 };
 

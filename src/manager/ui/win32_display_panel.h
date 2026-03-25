@@ -29,10 +29,6 @@ public:
     void SetPointerCallback(PointerEventCallback cb);
     void SetWheelCallback(WheelEventCallback cb);
 
-    // Update the internal framebuffer with a dirty-rect frame.
-    // Thread-safe; triggers InvalidateRect.
-    void UpdateFrame(const DisplayFrame& frame);
-
     // Adopt a pre-composited framebuffer (avoids redundant dirty-rect blit
     // when the caller already maintains a full framebuffer).
     void AdoptFramebuffer(uint32_t w, uint32_t h, const uint8_t* src, size_t len);
