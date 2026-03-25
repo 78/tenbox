@@ -26,15 +26,15 @@ static std::unique_ptr<MachineModel> CreateMachineModel() {
 static std::string GetDefaultCmdline(bool debug_mode) {
 #ifdef __aarch64__
     if (debug_mode) {
-        return "console=ttyAMA0 earlycon root=/dev/vda1 rw";
+        return "console=ttyAMA0 earlycon root=/dev/vda1 rw random.trust_bootloader=on";
     } else {
-        return "console=ttyAMA0 quiet loglevel=4 earlycon root=/dev/vda1 rw";
+        return "console=ttyAMA0 quiet loglevel=4 earlycon root=/dev/vda1 rw random.trust_bootloader=on";
     }
 #else
     if (debug_mode) {
-        return "console=ttyS0 earlyprintk=serial lapic tsc=reliable clocksource=kvm-clock no_timer_check i8042.noprobe";
+        return "console=ttyS0 earlyprintk=serial lapic tsc=reliable clocksource=kvm-clock no_timer_check i8042.noprobe random.trust_cpu=on";
     } else {
-        return "console=ttyS0 quiet loglevel=4 lapic tsc=reliable clocksource=kvm-clock no_timer_check i8042.noprobe";
+        return "console=ttyS0 quiet loglevel=4 lapic tsc=reliable clocksource=kvm-clock no_timer_check i8042.noprobe random.trust_cpu=on";
     }
 #endif
 }

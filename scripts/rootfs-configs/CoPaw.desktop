@@ -3,5 +3,5 @@ Version=1.0
 Type=Link
 Name=CoPaw 控制台
 Comment=
-Icon=starred
+Icon=/usr/share/icons/AdwaitaLegacy/48x48/legacy/starred.png
 URL=http://127.0.0.1:8088/

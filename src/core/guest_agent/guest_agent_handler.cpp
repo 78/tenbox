@@ -161,7 +161,11 @@ void GuestAgentHandler::ProcessLine(const std::string& line) {
         }
 
         if (JsonHasKey(line, "error")) {
-            LOG_WARN("GuestAgent: error response: %s", line.c_str());
+            if (sync_pending_) {
+                LOG_DEBUG("GuestAgent: error during sync (expected): %s", line.c_str());
+            } else {
+                LOG_WARN("GuestAgent: error response: %s", line.c_str());
+            }
         }
     }
 

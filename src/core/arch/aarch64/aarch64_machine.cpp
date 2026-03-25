@@ -4,6 +4,7 @@
 #include "core/vmm/vm.h"
 #include <cstring>
 #include <cstdio>
+#include <random>
 
 #ifdef __APPLE__
 #include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
@@ -164,6 +165,19 @@ bool Aarch64Machine::LoadKernel(
     snprintf(stdout_path, sizeof(stdout_path), "/pl011@%llx",
              (unsigned long long)kUartBase);
     fdt.AddPropertyString("stdout-path", stdout_path);
+
+    // Provide host entropy so the guest kernel can initialize CRNG
+    // immediately at boot (requires random.trust_bootloader=on in cmdline).
+    {
+        uint8_t rng_seed[64];
+        std::random_device rd;
+        for (size_t i = 0; i < sizeof(rng_seed); i += 4) {
+            uint32_t val = rd();
+            std::memcpy(rng_seed + i, &val, 4);
+        }
+        fdt.AddPropertyBytes("rng-seed", rng_seed, sizeof(rng_seed));
+    }
+
     fdt.EndNode();
 
     // /memory

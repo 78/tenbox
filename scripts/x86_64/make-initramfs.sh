@@ -6,12 +6,12 @@
 # Usage:
 #   ./make-initramfs.sh [output_dir] [suite]
 #     output_dir - where to place initramfs-x86_64.cpio.gz (default: ../build/share)
-#     suite      - Debian suite: bookworm(6.x), bullseye(5.x), etc. Default: bookworm
+#     suite      - Debian suite: trixie(6.12.x), bookworm(6.1.x), etc. Default: trixie
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../../build/share}" && cd "${1:-$SCRIPT_DIR/../../build/share}" && pwd)"
-SUITE="${2:-bookworm}"
+SUITE="${2:-trixie}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 
@@ -41,11 +41,13 @@ if [ -z "$BB_DEB_PATH" ]; then
 fi
 curl -fsSL -o busybox-static.deb "$MIRROR/$BB_DEB_PATH"
 dpkg-deb -x busybox-static.deb bb_extract/
-cp bb_extract/bin/busybox "$WORKDIR/busybox"
+BB_BIN=$(find bb_extract/ -name busybox -type f | head -1)
+if [ -z "$BB_BIN" ]; then echo "Error: busybox binary not found in deb" >&2; exit 1; fi
+cp "$BB_BIN" "$WORKDIR/busybox"
 chmod +x "$WORKDIR/busybox"
 
 # Kernel (for modules)
-KERN_DEB_PATH=$(awk "/^Package: ${KPKG}$/,/^$/" Packages | grep -oP '^Filename: \K.*')
+KERN_DEB_PATH=$(awk -v pkg="$KPKG" '$0 == "Package: " pkg, /^$/' Packages | grep -oP '^Filename: \K.*')
 if [ -z "$KERN_DEB_PATH" ]; then
     echo "Error: could not find .deb path for $KPKG." >&2
     exit 1
@@ -79,19 +81,22 @@ else
     echo "  WARNING: e2fsck not found on host; install e2fsprogs in Docker image"
 fi
 
-MODDIR="kmod_extract/lib/modules/$KVER/kernel"
+if [ -d "kmod_extract/usr/lib/modules/$KVER/kernel" ]; then
+    MODDIR="kmod_extract/usr/lib/modules/$KVER/kernel"
+else
+    MODDIR="kmod_extract/lib/modules/$KVER/kernel"
+fi
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
 # Modules needed for virtio block/net/input/gpu/fs devices + ext4 filesystem support
 VIRTIO_MODS=(
-    "drivers/virtio/virtio.ko"
-    "drivers/virtio/virtio_ring.ko"
+    # virtio core (virtio, virtio_ring, virtio_pci) is built-in (=y) in trixie
     "drivers/virtio/virtio_mmio.ko"
     "drivers/block/virtio_blk.ko"
     "net/core/failover.ko"
     "drivers/net/net_failover.ko"
     "drivers/net/virtio_net.ko"
-    "drivers/char/virtio_console.ko"
+    # virtio_console is built-in (=y) in trixie
     "drivers/virtio/virtio_input.ko"
     "drivers/input/evdev.ko"
     "drivers/media/rc/rc-core.ko"
@@ -101,15 +106,13 @@ VIRTIO_MODS=(
     "drivers/gpu/drm/drm_shmem_helper.ko"
     "drivers/virtio/virtio_dma_buf.ko"
     "drivers/gpu/drm/virtio/virtio-gpu.ko"
-    "fs/fuse/fuse.ko"
-    "fs/fuse/virtiofs.ko"
+    # fuse + virtiofs are built-in (=y) in trixie
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
     "crypto/crc32c_generic.ko"
     "lib/libcrc32c.ko"
     "fs/ext4/ext4.ko"
-    # ALSA / virtio-snd modules for audio playback
     "sound/soundcore.ko"
     "sound/core/snd.ko"
     "sound/core/snd-timer.ko"
@@ -137,20 +140,13 @@ copy_module() {
     return 1
 }
 
-EXTRA_MODDIR="$SCRIPT_DIR/extra-modules"
-
 for relmod in "${VIRTIO_MODS[@]}"; do
     modname="$(basename "$relmod")"
     if ! copy_module "$relmod"; then
-        # Some modules have different paths across kernel versions;
-        # fall back to a find-based search.
         found=$(find "$MODDIR" -name "$modname" -o -name "${modname}.xz" -o -name "${modname}.zst" 2>/dev/null | head -1)
         if [ -n "$found" ]; then
             rel="${found#$MODDIR/}"
             copy_module "$rel" || echo "  WARNING: $modname found but copy failed"
-        elif [ -f "$EXTRA_MODDIR/$modname" ]; then
-            cp "$EXTRA_MODDIR/$modname" "$DESTDIR/"
-            echo "  Copied: $modname (from extra-modules/)"
         else
             echo "  WARNING: $modname not found in $KPKG"
         fi
@@ -166,9 +162,9 @@ cat > "$WORKDIR/initramfs/init" << 'EOF'
 
 /bin/busybox --install -s /bin
 
-# Load virtio modules — device discovery is handled by ACPI DSDT
+# virtio core (virtio, virtio_ring, virtio_pci) is built-in since trixie
 MODDIR=/lib/modules
-for mod in virtio virtio_ring virtio_mmio virtio_blk failover net_failover virtio_net virtio_console virtio_input evdev; do
+for mod in virtio_mmio virtio_blk failover net_failover virtio_net virtio_input evdev; do
     if [ -f "$MODDIR/$mod.ko" ]; then
         insmod "$MODDIR/$mod.ko" 2>/dev/null && \
             echo "Loaded: $mod" || echo "Failed: $mod"
@@ -192,13 +188,7 @@ for mod in crc16 crc32c_generic libcrc32c mbcache jbd2 ext4; do
     fi
 done
 
-# Load virtio-fs / fuse modules for shared folder support
-for mod in fuse virtiofs; do
-    if [ -f "$MODDIR/$mod.ko" ]; then
-        insmod "$MODDIR/$mod.ko" 2>/dev/null && \
-            echo "Loaded: $mod" || echo "Failed: $mod"
-    fi
-done
+# fuse + virtiofs are built-in since trixie
 
 # Load ALSA / virtio sound modules for audio playback
 for mod in soundcore snd snd-timer snd-pcm virtio_snd; do

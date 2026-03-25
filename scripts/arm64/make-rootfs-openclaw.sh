@@ -20,7 +20,7 @@
 set -e
 
 ROOTFS_SIZE="20G"
-SUITE="bookworm"
+SUITE="trixie"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ARCH="arm64"
@@ -28,16 +28,16 @@ ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
 USER_NAME="${USER_NAME:-tenbox}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
-iproute2,iputils-ping,ifupdown,isc-dhcp-client,\
+iproute2,iputils-ping,ifupdown,dhcpcd-base,\
 ca-certificates,curl,wget,\
 procps,psmisc,\
-netcat-openbsd,net-tools,traceroute,dnsutils,\
+netcat-openbsd,net-tools,traceroute,bind9-dnsutils,\
 less,vim,bash-completion,\
 openssh-client,gnupg,apt-transport-https,\
 lsof,strace,sysstat,\
 kmod,pciutils,usbutils,\
 coreutils,findutils,grep,gawk,sed,tar,gzip,bzip2,xz-utils,\
-linux-image-arm64,iptables"
+linux-image-arm64,iptables,util-linux,util-linux-extra"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$(mkdir -p "$SCRIPT_DIR/../../build" && cd "$SCRIPT_DIR/../../build" && pwd)"
@@ -382,9 +382,10 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     lightdm \
     xserver-xorg-core xserver-xorg-input-libinput \
     xfonts-base fonts-dejavu-core fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
+    adwaita-icon-theme-legacy \
     locales \
     dbus-x11 at-spi2-core \
-    policykit-1 policykit-1-gnome \
+    polkitd pkexec lxpolkit \
     mousepad ristretto \
     thunar thunar-archive-plugin engrampa \
     tumbler xfce4-taskmanager
@@ -463,9 +464,10 @@ if dpkg -s chromium &>/dev/null; then
     exit 0
 fi
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    chromium
+    chromium \
+    ffmpeg jq
 
-su - $USER_NAME -c 'echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium" >> ~/.bashrc'
+echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium" >> /home/$USER_NAME/.bashrc
 EOF
 }
 
@@ -491,7 +493,7 @@ fi
 # Global npm registry: Alibaba npmmirror (runs on fresh install and resume)
 if command -v npm &>/dev/null; then
     npm config set registry https://registry.npmmirror.com --global
-    su - $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
+    runuser -l $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
 fi
 EOF
 }
@@ -526,12 +528,12 @@ do_install_openclaw() {
     sudo cp "$CACHE_OPENCLAW" "$MOUNT_DIR/tmp/openclaw_install.sh"
 
     sudo chroot "$MOUNT_DIR" /bin/bash -e << EOF
-if su - $USER_NAME -c 'command -v openclaw' &>/dev/null; then
+if runuser -l $USER_NAME -c 'command -v openclaw' &>/dev/null; then
     echo "  OpenClaw already installed"
     exit 0
 fi
 echo "Installing OpenClaw..."
-su - $USER_NAME -c 'bash /tmp/openclaw_install.sh --no-onboard'
+runuser -l $USER_NAME -c 'bash /tmp/openclaw_install.sh --no-onboard'
 rm -f /tmp/openclaw_install.sh
 
 if ! grep -q 'npm-global/bin' /home/$USER_NAME/.bashrc 2>/dev/null; then
@@ -543,7 +545,7 @@ BASHRC
 fi
 EOF
 
-    OPENCLAW_VERSION=$(sudo chroot "$MOUNT_DIR" su - "$USER_NAME" -c \
+    OPENCLAW_VERSION=$(sudo chroot "$MOUNT_DIR" runuser -l "$USER_NAME" -c \
         'PATH="$HOME/.npm-global/bin:$PATH" npm ls -g openclaw 2>/dev/null' \
         | grep 'openclaw@' | sed 's/.*openclaw@//' || true)
     if [ -n "$OPENCLAW_VERSION" ]; then
@@ -573,7 +575,7 @@ if [ -f /home/$USER_NAME/.openclaw/openclaw.json ] && \
     echo "  OpenClaw config already set"
 else
     echo "Configuring OpenClaw..."
-    su - $USER_NAME -c 'bash /tmp/openclaw_config.sh'
+    runuser -l $USER_NAME -c 'bash /tmp/openclaw_config.sh'
 fi
 rm -f /tmp/openclaw_config.sh
 
@@ -698,6 +700,12 @@ LDM
 systemctl enable networking.service 2>/dev/null || true
 systemctl set-default graphical.target
 systemctl enable lightdm.service 2>/dev/null || true
+
+systemctl mask systemd-binfmt.service 2>/dev/null || true
+
+USER_HOME=/home/$USER_NAME
+install -D -m 644 -o $USER_NAME -g $USER_NAME /tmp/rootfs-configs/xfce4-panel.xml \$USER_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+chown -R $USER_NAME:$USER_NAME \$USER_HOME/.config
 EOF
 }
 
@@ -725,9 +733,23 @@ mkdir -p /etc/network
 cat > /etc/network/interfaces << 'NET'
 auto lo
 iface lo inet loopback
-auto eth0
+allow-hotplug eth0
 iface eth0 inet dhcp
 NET
+
+cat >> /etc/dhcpcd.conf << 'DHCPCD'
+
+background
+noarp
+noipv6rs
+ipv4only
+DHCPCD
+
+mkdir -p /etc/modprobe.d
+cat > /etc/modprobe.d/no-wireless.conf << 'MODPROBE'
+blacklist cfg80211
+blacklist mac80211
+MODPROBE
 EOF
 }
 
@@ -821,7 +843,7 @@ EOF
 
 do_cleanup_chroot() {
     if [ -z "$OPENCLAW_VERSION" ]; then
-        OPENCLAW_VERSION=$(sudo chroot "$MOUNT_DIR" su - "$USER_NAME" -c \
+        OPENCLAW_VERSION=$(sudo chroot "$MOUNT_DIR" runuser -l "$USER_NAME" -c \
             'PATH="$HOME/.npm-global/bin:$PATH" npm ls -g openclaw 2>/dev/null' \
             | grep 'openclaw@' | sed 's/.*openclaw@//' || true)
         [ -n "$OPENCLAW_VERSION" ] && echo "  Detected OpenClaw version: $OPENCLAW_VERSION"

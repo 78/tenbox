@@ -64,11 +64,8 @@ resolve_script() {
         kernel)
             echo "scripts/${arch}/get-kernel.sh"
             ;;
-        virtio-snd)
-            echo "scripts/${arch}/build-virtio-snd.sh"
-            ;;
         *)
-            echo "Error: unknown target '$target' (use: rootfs-chromium, rootfs-copaw, rootfs-openclaw, initramfs, kernel, virtio-snd)" >&2
+            echo "Error: unknown target '$target' (use: rootfs-chromium, rootfs-copaw, rootfs-openclaw, initramfs, kernel)" >&2
             exit 1
             ;;
     esac

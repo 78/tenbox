@@ -8,13 +8,13 @@
 # Usage:
 #   ./get-kernel.sh [output_dir] [suite]
 #     output_dir  - where to place Image (default: ../build/share)
-#     suite       - Debian suite: bookworm(6.x), trixie, etc.
-#                   Default: bookworm
+#     suite       - Debian suite: trixie(6.12.x), bookworm(6.1.x), etc.
+#                   Default: trixie
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../../build/share}" && cd "${1:-$SCRIPT_DIR/../../build/share}" && pwd)"
-SUITE="${2:-bookworm}"
+SUITE="${2:-trixie}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 
@@ -36,7 +36,7 @@ if [ -z "$REAL_PKG" ]; then
 fi
 
 # Find the .deb path for the resolved package
-DEB_PATH=$(awk "/^Package: ${REAL_PKG}$/,/^$/" Packages | sed -n 's/^Filename: //p')
+DEB_PATH=$(awk -v pkg="$REAL_PKG" '$0 == "Package: " pkg, /^$/' Packages | sed -n 's/^Filename: //p')
 if [ -z "$DEB_PATH" ]; then
     echo "Error: could not find .deb path for $REAL_PKG." >&2
     exit 1

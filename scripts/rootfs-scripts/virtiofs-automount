@@ -7,9 +7,6 @@ MOUNT_USER="tenbox"
 USER_HOME="/home/$MOUNT_USER"
 DESKTOP_DIR="$USER_HOME/Desktop"
 
-# Wait for devices to be ready
-sleep 1
-
 # Check if already mounted
 if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
     echo "virtiofs: $MOUNT_TAG already mounted at $MOUNT_POINT"

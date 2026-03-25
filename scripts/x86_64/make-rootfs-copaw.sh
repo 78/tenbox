@@ -16,23 +16,23 @@
 set -e
 
 ROOTFS_SIZE="20G"
-SUITE="bookworm"
+SUITE="trixie"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
 USER_NAME="${USER_NAME:-tenbox}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
-iproute2,iputils-ping,ifupdown,isc-dhcp-client,\
+iproute2,iputils-ping,ifupdown,dhcpcd-base,\
 ca-certificates,curl,wget,\
 procps,psmisc,\
-netcat-openbsd,net-tools,traceroute,dnsutils,\
+netcat-openbsd,net-tools,traceroute,bind9-dnsutils,\
 less,vim,bash-completion,\
 openssh-client,gnupg,apt-transport-https,\
 lsof,strace,sysstat,\
 kmod,pciutils,usbutils,\
 coreutils,findutils,grep,gawk,sed,tar,gzip,bzip2,xz-utils,\
-linux-image-amd64,iptables"
+linux-image-amd64,iptables,util-linux,util-linux-extra"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$(mkdir -p "$SCRIPT_DIR/../../build" && cd "$SCRIPT_DIR/../../build" && pwd)"
@@ -435,9 +435,10 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     lightdm \
     xserver-xorg-core xserver-xorg-input-libinput \
     xfonts-base fonts-dejavu-core fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
+    adwaita-icon-theme-legacy \
     locales \
     dbus-x11 at-spi2-core \
-    policykit-1 policykit-1-gnome \
+    polkitd pkexec lxpolkit \
     mousepad ristretto \
     thunar thunar-archive-plugin engrampa \
     tumbler xfce4-taskmanager
@@ -511,10 +512,11 @@ if dpkg -s chromium &>/dev/null; then
 fi
 echo "Installing user tools (browser, etc.)..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    chromium
+    chromium \
+    ffmpeg jq
 
 echo "Setting PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH in .bashrc..."
-su - $USER_NAME -c 'echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium" >> ~/.bashrc'
+echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium" >> /home/$USER_NAME/.bashrc
 EOF
 }
 
@@ -575,7 +577,7 @@ fi
 # Global npm registry: Alibaba npmmirror (runs on fresh install and resume)
 if command -v npm &>/dev/null; then
     npm config set registry https://registry.npmmirror.com --global
-    su - $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
+    runuser -l $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
 fi
 EOF
 }
@@ -608,13 +610,13 @@ if [ -d /home/$USER_NAME/.copaw ]; then
 fi
 
 echo "Installing Copaw..."
-su - $USER_NAME -c 'curl -fsSL https://copaw.agentscope.io/install.sh | bash'
+runuser -l $USER_NAME -c 'curl -fsSL https://copaw.agentscope.io/install.sh | bash'
 
 echo "Initializing Copaw..."
-su - $USER_NAME -c '~/.copaw/bin/copaw init --defaults --accept-security'
+runuser -l $USER_NAME -c '~/.copaw/bin/copaw init --defaults --accept-security'
 
 echo "Disabling Copaw security (Tool Guard)..."
-su - $USER_NAME -c 'python3 -c "
+runuser -l $USER_NAME -c 'python3 -c "
 import json, os
 cfg_path = os.path.expanduser(\"~/.copaw/config.json\")
 with open(cfg_path) as f:
@@ -634,7 +636,7 @@ chown -R $USER_NAME:$USER_NAME /home/$USER_NAME/.copaw.secret
 EOF
 
     # Extract version for output filename
-    COPAW_VERSION=$(sudo chroot "$MOUNT_DIR" su - "$USER_NAME" -c \
+    COPAW_VERSION=$(sudo chroot "$MOUNT_DIR" runuser -l "$USER_NAME" -c \
         '~/.copaw/venv/bin/python -c "from copaw.__version__ import __version__; print(__version__)"' 2>/dev/null || true)
     if [ -n "$COPAW_VERSION" ]; then
         echo "  Copaw version: $COPAW_VERSION"
@@ -659,7 +661,7 @@ chown -R $USER_NAME:$USER_NAME /home/$USER_NAME/.config
 loginctl enable-linger $USER_NAME 2>/dev/null || mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/$USER_NAME
 
 # Enable the service
-su - $USER_NAME -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable copaw.service' 2>/dev/null || true
+runuser -l $USER_NAME -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable copaw.service' 2>/dev/null || true
 EOF
 }
 
@@ -729,6 +731,12 @@ LDM
 systemctl enable networking.service 2>/dev/null || true
 systemctl set-default graphical.target
 systemctl enable lightdm.service 2>/dev/null || true
+
+systemctl mask systemd-binfmt.service 2>/dev/null || true
+
+USER_HOME=/home/$USER_NAME
+install -D -m 644 -o $USER_NAME -g $USER_NAME /tmp/rootfs-configs/xfce4-panel.xml \$USER_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+chown -R $USER_NAME:$USER_NAME \$USER_HOME/.config
 EOF
 }
 
@@ -760,9 +768,23 @@ mkdir -p /etc/network
 cat > /etc/network/interfaces << 'NET'
 auto lo
 iface lo inet loopback
-auto eth0
+allow-hotplug eth0
 iface eth0 inet dhcp
 NET
+
+cat >> /etc/dhcpcd.conf << 'DHCPCD'
+
+background
+noarp
+noipv6rs
+ipv4only
+DHCPCD
+
+mkdir -p /etc/modprobe.d
+cat > /etc/modprobe.d/no-wireless.conf << 'MODPROBE'
+blacklist cfg80211
+blacklist mac80211
+MODPROBE
 EOF
 }
 
@@ -847,7 +869,7 @@ EOF
 do_cleanup_chroot() {
     # Detect version from chroot if not already known (e.g. on resume)
     if [ -z "$COPAW_VERSION" ]; then
-        COPAW_VERSION=$(sudo chroot "$MOUNT_DIR" su - "$USER_NAME" -c \
+        COPAW_VERSION=$(sudo chroot "$MOUNT_DIR" runuser -l "$USER_NAME" -c \
             '~/.copaw/venv/bin/python -c "from copaw.__version__ import __version__; print(__version__)"' 2>/dev/null || true)
         [ -n "$COPAW_VERSION" ] && echo "  Detected Copaw version: $COPAW_VERSION"
     fi

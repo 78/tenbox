@@ -13,7 +13,7 @@
 #       /workspace/scripts/arm64/make-rootfs-chromium.sh
 
 # --- Stage 1: build qemu-img with zstd ---
-FROM debian:bookworm-slim AS qemu-build
+FROM debian:trixie-slim AS qemu-build
 
 ARG QEMU_VERSION=9.2.2
 
@@ -37,7 +37,7 @@ RUN curl -fSL "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" \
     && strip build/qemu-img
 
 # --- Stage 2: runtime ---
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 COPY --from=qemu-build /tmp/qemu-src/build/qemu-img /usr/local/bin/qemu-img
 
@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     coreutils \
     binutils \
     sudo \
-    libglib2.0-0 libzstd1 libpixman-1-0 \
+    libglib2.0-0t64 libzstd1 libpixman-1-0 \
     build-essential bc kmod file \
     && rm -rf /var/lib/apt/lists/*
 

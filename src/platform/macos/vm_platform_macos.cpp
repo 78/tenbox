@@ -22,7 +22,7 @@ std::unique_ptr<HypervisorVm> VmPlatform::CreateHypervisor(uint32_t cpu_count) {
     auto vm = hvf::HvfVm::Create(cpu_count);
 #ifdef __aarch64__
     if (vm) {
-        hvf::HvfVCpu::EnableExitStats(vm->UsesSoftGic());
+        hvf::HvfVCpu::EnableExitStats(false);
     }
 #endif
     return vm;

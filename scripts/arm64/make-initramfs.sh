@@ -1,17 +1,16 @@
 #!/bin/bash
 # Build a minimal BusyBox initramfs for TenBox arm64 testing.
 # Runs on macOS — only requires: curl, gzip, ar, tar, python3.
-# Does NOT use extra-modules/ (those are x86_64 only).
 #
 # Usage:
 #   ./make-initramfs.sh [output_dir] [suite]
 #     output_dir - where to place initramfs-arm64.cpio.gz (default: ../build/share)
-#     suite      - Debian suite (default: bookworm)
+#     suite      - Debian suite (default: trixie)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../../build/share}" && cd "${1:-$SCRIPT_DIR/../../build/share}" && pwd)"
-SUITE="${2:-bookworm}"
+SUITE="${2:-trixie}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 
@@ -62,11 +61,13 @@ fi
 echo "  -> busybox: $MIRROR/$BB_DEB_PATH"
 curl -fsSL -o busybox-static.deb "$MIRROR/$BB_DEB_PATH"
 extract_deb busybox-static.deb bb_extract/
-cp bb_extract/bin/busybox "$WORKDIR/busybox"
+BB_BIN=$(find bb_extract/ -name busybox -type f | head -1)
+if [ -z "$BB_BIN" ]; then echo "Error: busybox binary not found in deb" >&2; exit 1; fi
+cp "$BB_BIN" "$WORKDIR/busybox"
 chmod +x "$WORKDIR/busybox"
 
 # Kernel package (for modules)
-KERN_DEB_PATH=$(awk "/^Package: ${KPKG}$/,/^$/" Packages | sed -n 's/^Filename: //p')
+KERN_DEB_PATH=$(awk -v pkg="$KPKG" '$0 == "Package: " pkg, /^$/' Packages | sed -n 's/^Filename: //p')
 if [ -z "$KERN_DEB_PATH" ]; then
     echo "Error: could not find .deb path for $KPKG." >&2
     exit 1
@@ -99,16 +100,21 @@ else
     echo "  WARNING: e2fsck not found on host; install e2fsprogs in Docker image"
 fi
 
-MODDIR="kmod_extract/lib/modules/$KVER/kernel"
+if [ -d "kmod_extract/usr/lib/modules/$KVER/kernel" ]; then
+    MODDIR="kmod_extract/usr/lib/modules/$KVER/kernel"
+else
+    MODDIR="kmod_extract/lib/modules/$KVER/kernel"
+fi
 DESTDIR="$WORKDIR/initramfs/lib/modules"
 
 VIRTIO_MODS=(
+    # virtio core (virtio, virtio_ring, virtio_pci) is built-in (=y) in trixie
     "drivers/virtio/virtio_mmio.ko"
     "drivers/block/virtio_blk.ko"
     "net/core/failover.ko"
     "drivers/net/net_failover.ko"
     "drivers/net/virtio_net.ko"
-    "drivers/char/virtio_console.ko"
+    # virtio_console is built-in (=y) in trixie
     "drivers/virtio/virtio_input.ko"
     "drivers/input/evdev.ko"
     "drivers/media/rc/rc-core.ko"
@@ -117,8 +123,7 @@ VIRTIO_MODS=(
     "drivers/gpu/drm/drm_shmem_helper.ko"
     "drivers/virtio/virtio_dma_buf.ko"
     "drivers/gpu/drm/virtio/virtio-gpu.ko"
-    "fs/fuse/fuse.ko"
-    "fs/fuse/virtiofs.ko"
+    # fuse + virtiofs are built-in (=y) in trixie
     "fs/mbcache.ko"
     "fs/jbd2/jbd2.ko"
     "lib/crc16.ko"
@@ -152,8 +157,6 @@ copy_module() {
     return 1
 }
 
-EXTRA_MODDIR="$SCRIPT_DIR/extra-modules"
-
 for relmod in "${VIRTIO_MODS[@]}"; do
     modname="$(basename "$relmod")"
     if ! copy_module "$relmod"; then
@@ -161,9 +164,6 @@ for relmod in "${VIRTIO_MODS[@]}"; do
         if [ -n "$found" ]; then
             rel="${found#$MODDIR/}"
             copy_module "$rel" || echo "  WARNING: $modname found but copy failed"
-        elif [ -f "$EXTRA_MODDIR/$modname" ]; then
-            cp "$EXTRA_MODDIR/$modname" "$DESTDIR/"
-            echo "  Copied: $modname (from extra-modules/)"
         else
             echo "  WARNING: $modname not found in $KPKG"
         fi
@@ -189,23 +189,14 @@ echo ""
 echo "===== Loading VirtIO modules ====="
 
 MODDIR=/lib/modules
-for mod in virtio virtio_ring virtio_mmio; do
-    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
-done
-
-for mod in virtio_blk failover net_failover virtio_net virtio_console virtio_input evdev; do
+# virtio core (virtio, virtio_ring, virtio_pci) is built-in since trixie
+for mod in virtio_mmio virtio_blk failover net_failover virtio_net virtio_input evdev; do
     [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
 done
 
 echo ""
 echo "===== Loading DRM / virtio-gpu ====="
 for mod in rc-core cec drm drm_kms_helper drm_shmem_helper virtio_dma_buf virtio-gpu; do
-    [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
-done
-
-echo ""
-echo "===== Loading virtiofs / fuse ====="
-for mod in fuse virtiofs; do
     [ -f "$MODDIR/$mod.ko" ] && insmod "$MODDIR/$mod.ko" 2>/dev/null && echo "  [OK] $mod" || true
 done
 
