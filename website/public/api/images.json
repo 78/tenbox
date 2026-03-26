@@ -40,7 +40,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-25",
+      "updated_at": "2026-03-26",
       "files": [
         {
           "name": "vmlinuz",
@@ -58,7 +58,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/copaw/rootfs-copaw-0.2.0.post1-x86_64.qcow2",
           "sha256": "",
-          "size": 1633615872
+          "size": 1670905856
         }
       ]
     },
@@ -133,7 +133,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-25",
+      "updated_at": "2026-03-26",
       "files": [
         {
           "name": "vmlinuz",
@@ -151,7 +151,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/rootfs-copaw-0.2.0.post1-arm64.qcow2",
           "sha256": "",
-          "size": 1589706752
+          "size": 1638203392
         }
       ]
     },
