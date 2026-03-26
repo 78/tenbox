@@ -71,7 +71,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-25",
+      "updated_at": "2026-03-26",
       "files": [
         {
           "name": "vmlinuz",
@@ -89,7 +89,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium/rootfs-chromium-x86_64.qcow2",
           "sha256": "",
-          "size": 1162251776
+          "size": 1196883968
         }
       ]
     },
@@ -102,7 +102,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-25",
+      "updated_at": "2026-03-26",
       "files": [
         {
           "name": "vmlinuz",
@@ -120,7 +120,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium-arm64/rootfs-chromium-arm64.qcow2",
           "sha256": "",
-          "size": 1172635648
+          "size": 1208942592
         }
       ]
     },
