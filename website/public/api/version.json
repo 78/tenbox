@@ -1,17 +1,17 @@
 {
-  "latest_version": "0.5.9",
+  "latest_version": "0.6.0",
   "min_supported_version": "0.1.0",
-  "release_notes": "- 支持 Debian 13 镜像\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
-  "release_date": "2026-03-26",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.9.msi",
-  "sha256": "2607e6224a3c70fa1920207c923d2a5d1c7ccf78efd6692f84f4c2bee32a2821",
+  "release_notes": "- 修复 vCPU 数量不生效的问题\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+  "release_date": "2026-04-02",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.6.0.msi",
+  "sha256": "e7ec21a8bd01579e11cb91a9963e007072203d6bbc8f1a3db20db16274c62a7e",
   "platforms": {
     "windows": {
-      "latest_version": "0.5.9",
-      "release_notes": "- 支持 Debian 13 镜像\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
-      "release_date": "2026-03-26",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.9.msi",
-      "sha256": "2607e6224a3c70fa1920207c923d2a5d1c7ccf78efd6692f84f4c2bee32a2821",
+      "latest_version": "0.6.0",
+      "release_notes": "- 修复 vCPU 数量不生效的问题\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+      "release_date": "2026-04-02",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.6.0.msi",
+      "sha256": "e7ec21a8bd01579e11cb91a9963e007072203d6bbc8f1a3db20db16274c62a7e",
       "size": 3231744,
       "min_os": "Windows 10"
     },

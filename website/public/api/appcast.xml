@@ -6,20 +6,20 @@
     <description>TenBox Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.5.9</title>
+      <title>Version 0.6.0</title>
       <description><![CDATA[
         <ul>
-          <li>- 支持 Debian 13 镜像</li>
+          <li>- 修复 vCPU 数量不生效的问题</li>
           <li>- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据</li>
         </ul>
       ]]></description>
-      <pubDate>Thu, 26 Mar 2026 00:00:00 -0000</pubDate>
+      <pubDate>Thu, 02 Apr 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>10</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.5.9.msi"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.6.0.msi"
         sparkle:os="windows"
-        sparkle:version="0.5.9"
-        sparkle:shortVersionString="0.5.9"
+        sparkle:version="0.6.0"
+        sparkle:shortVersionString="0.6.0"
         sparkle:installerArguments="/passive"
         length="3231744"
         type="application/octet-stream"
