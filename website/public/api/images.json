@@ -33,14 +33,14 @@
     },
     {
       "id": "copaw",
-      "version": "1.0.0.post1",
-      "name": "CoPaw 1.0.0.post1",
+      "version": "1.0.0.post2",
+      "name": "CoPaw 1.0.0.post2",
       "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 CoPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-31",
+      "updated_at": "2026-04-01",
       "files": [
         {
           "name": "vmlinuz",
@@ -56,9 +56,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw/rootfs-copaw-1.0.0.post1-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw/rootfs-copaw-1.0.0.post2-x86_64.qcow2",
           "sha256": "",
-          "size": 1671102464
+          "size": 1677066240
         }
       ]
     },
@@ -126,14 +126,14 @@
     },
     {
       "id": "copaw-arm64",
-      "version": "1.0.0.post1",
-      "name": "CoPaw 1.0.0.post1 (ARM64)",
+      "version": "1.0.0.post2",
+      "name": "CoPaw 1.0.0.post2 (ARM64)",
       "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 CoPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-31",
+      "updated_at": "2026-04-01",
       "files": [
         {
           "name": "vmlinuz",
@@ -149,9 +149,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/rootfs-copaw-1.0.0.post1-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/rootfs-copaw-1.0.0.post2-arm64.qcow2",
           "sha256": "",
-          "size": 1635319808
+          "size": 1629224960
         }
       ]
     },
