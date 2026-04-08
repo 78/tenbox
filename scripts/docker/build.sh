@@ -5,7 +5,7 @@
 #   ./scripts/docker/build.sh <arch> <target> [extra-args...]
 #
 # arch:   arm64 | x86_64
-# target: rootfs-chromium | rootfs-copaw | rootfs-openclaw | initramfs | kernel
+# target: rootfs-chromium | rootfs-copaw | rootfs-openclaw | rootfs-hermes | initramfs | kernel
 #
 # Examples:
 #   ./scripts/docker/build.sh arm64 rootfs-chromium
@@ -72,6 +72,13 @@ resolve_script() {
                 echo "scripts/x86_64/make-rootfs-openclaw.sh"
             fi
             ;;
+        rootfs-hermes)
+            if [ "$arch" = "arm64" ]; then
+                echo "scripts/arm64/make-rootfs-hermes.sh"
+            else
+                echo "scripts/x86_64/make-rootfs-hermes.sh"
+            fi
+            ;;
         initramfs)
             echo "scripts/${arch}/make-initramfs.sh"
             ;;
@@ -79,7 +86,7 @@ resolve_script() {
             echo "scripts/${arch}/get-kernel.sh"
             ;;
         *)
-            echo "Error: unknown target '$target' (use: rootfs-chromium, rootfs-copaw, rootfs-openclaw, initramfs, kernel)" >&2
+            echo "Error: unknown target '$target' (use: rootfs-chromium, rootfs-copaw, rootfs-openclaw, rootfs-hermes, initramfs, kernel)" >&2
             exit 1
             ;;
     esac
@@ -112,6 +119,12 @@ exec docker run --rm --privileged \
     -e ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}" \
     -e USER_NAME="${USER_NAME:-tenbox}" \
     -e USER_PASSWORD="${USER_PASSWORD:-tenbox}" \
+    -e HERMES_VERSION="${HERMES_VERSION:-}" \
+    -e HERMES_INSTALL_BROWSER_TOOLS="${HERMES_INSTALL_BROWSER_TOOLS:-}" \
+    -e TENBOX_DEBIAN_SUITE="${TENBOX_DEBIAN_SUITE:-}" \
+    -e TENBOX_DEBIAN_MIRROR="${TENBOX_DEBIAN_MIRROR:-}" \
+    -e TENBOX_DEBIAN_SECURITY_MIRROR="${TENBOX_DEBIAN_SECURITY_MIRROR:-}" \
+    -e TENBOX_DEBOOTSTRAP_RETRIES="${TENBOX_DEBOOTSTRAP_RETRIES:-}" \
     -e TENBOX_WORK_DIR="$WORK_DIR" \
     "$IMAGE_NAME" \
     -c "/workspace/$SCRIPT_PATH $*"
