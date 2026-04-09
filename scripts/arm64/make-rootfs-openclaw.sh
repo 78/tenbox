@@ -562,11 +562,12 @@ set -e
 export PATH="$HOME/.npm-global/bin:$PATH"
 openclaw config set tools.profile full
 openclaw config set tools.exec.security full
-openclaw config set gateway '{"mode":"local","bind":"lan","auth":{"mode":"token","token":"tenbox"},"controlUi":{"allowInsecureAuth":true,"dangerouslyDisableDeviceAuth":true,"allowedOrigins":["*"]}}'
+openclaw config set gateway '{"mode":"local","bind":"lan","auth":{"mode":"token","token":"tenbox"},"controlUi":{"allowInsecureAuth":true,"dangerouslyDisableDeviceAuth":true,"allowedOrigins":["*"]},"port":18789,"tailscale":{"mode":"off","resetOnExit":false}}'
 
 # TenBox LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
-openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":65536}]}'
-openclaw config set agents.defaults.model.primary "tenbox/default"
+openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":65536,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}'
+openclaw config set models.mode merge
+openclaw config set agents.defaults '{"model":{"primary":"tenbox/default"},"compaction":{"mode":"safeguard"},"workspace":"'"$HOME"'/.openclaw/workspace","models":{"tenbox/default":{}}}'
 SCRIPT
     sudo chmod +x "$MOUNT_DIR/tmp/openclaw_config.sh"
 
