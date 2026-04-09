@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Hermes Agent
+Comment=The self-improving AI agent
+Icon=utilities-terminal
+Exec=xfce4-terminal --title=Hermes-Agent --command=/usr/local/bin/hermes
+Terminal=false
+Categories=Development;
