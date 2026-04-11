@@ -26,7 +26,7 @@ ARCH="arm64"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
 USER_NAME="${USER_NAME:-tenbox}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
-HERMES_VERSION="${HERMES_VERSION:-v2026.4.3}"
+HERMES_VERSION="${HERMES_VERSION-}"
 HERMES_INSTALL_BROWSER_TOOLS="${HERMES_INSTALL_BROWSER_TOOLS:-0}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,dhcpcd-base,\
@@ -42,13 +42,104 @@ linux-image-arm64,iptables,util-linux,util-linux-extra"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$(mkdir -p "$SCRIPT_DIR/../../build" && cd "$SCRIPT_DIR/../../build" && pwd)"
+CACHE_DIR="$BUILD_DIR/.rootfs-cache"
+mkdir -p "$CACHE_DIR"
+
+# Parse arguments
+FORCE_REBUILD=false
+FROM_STEP=0
+LIST_STEPS=false
+SHOW_STATUS=false
+SHOW_HELP=false
+OUTPUT_ARG=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h) SHOW_HELP=true; shift ;;
+        --force) FORCE_REBUILD=true; shift ;;
+        --from-step) FROM_STEP="$2"; shift 2 ;;
+        --list-steps) LIST_STEPS=true; shift ;;
+        --status) SHOW_STATUS=true; shift ;;
+        *) OUTPUT_ARG="$1"; shift ;;
+    esac
+done
+
+LATEST_HINT_KEY="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "$SUITE" "$MIRROR" "$MIRROR_SECURITY" "$ROOT_PASSWORD" "$USER_NAME" "$USER_PASSWORD" \
+    "$HERMES_INSTALL_BROWSER_TOOLS" \
+    | cksum | awk '{print $1}')"
+LATEST_VERSION_HINT="$CACHE_DIR/hermes-latest-arm64-${LATEST_HINT_KEY}.txt"
+
+resolve_latest_hermes_version() {
+    local api_url latest_url resolved_version
+
+    api_url="https://api.github.com/repos/NousResearch/hermes-agent/releases/latest"
+    resolved_version="$(
+        curl -fsSL "$api_url" \
+        | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | head -n 1
+    )"
+    if [ -n "$resolved_version" ]; then
+        printf '%s\n' "$resolved_version"
+        return 0
+    fi
+
+    latest_url="$(
+        curl -fsSLI -o /dev/null -w '%{url_effective}' \
+        "https://github.com/NousResearch/hermes-agent/releases/latest"
+    )"
+    resolved_version="${latest_url##*/}"
+    if [[ "$resolved_version" == v* ]]; then
+        printf '%s\n' "$resolved_version"
+        return 0
+    fi
+
+    echo "Failed to resolve latest Hermes Agent release version" >&2
+    return 1
+}
+
+load_cached_latest_hermes_version() {
+    if [ -f "$LATEST_VERSION_HINT" ]; then
+        local hinted_version
+        hinted_version="$(head -n 1 "$LATEST_VERSION_HINT" 2>/dev/null || true)"
+        if [[ "$hinted_version" == v* ]]; then
+            printf '%s\n' "$hinted_version"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+resolve_effective_hermes_version() {
+    if [ -n "$HERMES_VERSION" ]; then
+        return 0
+    fi
+
+    if [ "$SHOW_STATUS" = true ] || [ "$LIST_STEPS" = true ] || [ "$SHOW_HELP" = true ]; then
+        local cached_version
+        cached_version="$(load_cached_latest_hermes_version || true)"
+        if [ -n "$cached_version" ]; then
+            HERMES_VERSION="$cached_version"
+            return 0
+        fi
+        HERMES_VERSION="latest"
+        return 0
+    fi
+
+    # 真正执行构建时始终联网解析官方最新 release，避免被旧缓存误导。
+    HERMES_VERSION="$(resolve_latest_hermes_version)"
+    printf '%s\n' "$HERMES_VERSION" > "$LATEST_VERSION_HINT"
+}
+
+resolve_effective_hermes_version
+
 STATE_KEY="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
     "$SUITE" "$MIRROR" "$MIRROR_SECURITY" "$ROOT_PASSWORD" "$USER_NAME" "$USER_PASSWORD" \
     "$HERMES_VERSION" "$HERMES_INSTALL_BROWSER_TOOLS" \
     | cksum | awk '{print $1}')"
 STATE_SUFFIX="${SUITE}-${STATE_KEY}"
 
-CACHE_DIR="$BUILD_DIR/.rootfs-cache"
 CHECKPOINT_DIR="$CACHE_DIR/checkpoints-hermes-arm64-$STATE_SUFFIX"
 APT_CACHE_DIR="$CACHE_DIR/apt-archives-arm64-$STATE_SUFFIX"
 SCRIPTS_CACHE_DIR="$CACHE_DIR/scripts"
@@ -63,13 +154,6 @@ CACHE_HERMES_SRC="$CACHE_DIR/hermes-agent-${HERMES_VERSION}.tar.gz"
 
 WORK_ROOT="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-hermes-arm64}"
 WORK_DIR="${WORK_ROOT}-${STATE_SUFFIX}"
-
-# Parse arguments
-FORCE_REBUILD=false
-FROM_STEP=0
-LIST_STEPS=false
-SHOW_STATUS=false
-OUTPUT_ARG=""
 
 show_help() {
     cat << 'HELP'
@@ -89,16 +173,7 @@ HELP
     exit 0
 }
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --help|-h) show_help ;;
-        --force) FORCE_REBUILD=true; shift ;;
-        --from-step) FROM_STEP="$2"; shift 2 ;;
-        --list-steps) LIST_STEPS=true; shift ;;
-        --status) SHOW_STATUS=true; shift ;;
-        *) OUTPUT_ARG="$1"; shift ;;
-    esac
-done
+[ "$SHOW_HELP" = true ] && show_help
 
 if [ -n "$OUTPUT_ARG" ]; then
     OUTPUT="$(realpath -m "$OUTPUT_ARG")"
