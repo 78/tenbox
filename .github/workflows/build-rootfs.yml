@@ -10,6 +10,7 @@ on:
         options:
           - rootfs-chromium
           - rootfs-copaw
+          - rootfs-hermes
           - rootfs-openclaw
         default: rootfs-chromium
       arch:

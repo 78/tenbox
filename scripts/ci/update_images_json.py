@@ -9,7 +9,7 @@ objects are updated before images.json is merged (users would otherwise download
 SHA checks). Pass --enable-sha256 when you want checksums in the manifest.
 
 Supported targets:
-    rootfs-chromium, rootfs-copaw, rootfs-openclaw  — updates rootfs.qcow2 for a specific image
+    rootfs-chromium, rootfs-copaw, rootfs-hermes, rootfs-openclaw  — updates rootfs.qcow2 for a specific image
     initramfs                                       — updates initrd.gz for ALL images of matching platform
     kernel                                          — updates vmlinuz for ALL images of matching platform
 
@@ -31,6 +31,7 @@ IMAGES_JSON_PATH = Path(__file__).resolve().parent.parent.parent / "website" / "
 DISPLAY_NAMES = {
     "chromium": "Chromium",
     "copaw": "CoPaw",
+    "hermes": "Hermes",
     "openclaw": "OpenClaw",
 }
 
