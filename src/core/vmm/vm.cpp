@@ -8,6 +8,7 @@
 #elif defined(__APPLE__) && defined(__aarch64__)
 #include "core/arch/aarch64/aarch64_machine.h"
 #include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
+#include "platform/macos/hypervisor/aarch64/hvf_vm.h"
 #elif defined(_WIN32)
 #include "core/arch/x86_64/x86_machine.h"
 #endif
@@ -181,6 +182,24 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (vm->boot_config_.cmdline.empty()) {
         vm->boot_config_.cmdline = GetDefaultCmdline(config.debug_mode);
     }
+
+#if defined(__APPLE__) && defined(__aarch64__)
+    // macOS < 15 Hypervisor.framework doesn't properly virtualise PAC
+    // instructions and exposes inconsistent ID registers across vCPUs.
+    // arm64.nopauth tells the Linux kernel to disable pointer authentication
+    // regardless of what the ID registers advertise.
+    {
+        auto* hvf = dynamic_cast<hvf::HvfVm*>(vm->hv_vm_.get());
+        if (hvf && hvf->UsesSoftGic()) {
+            auto& cl = vm->boot_config_.cmdline;
+            if (cl.find("arm64.nopauth") == std::string::npos) {
+                cl += " arm64.nopauth";
+                LOG_INFO("Software GIC active (macOS < 15): "
+                         "appended arm64.nopauth to kernel cmdline");
+            }
+        }
+    }
+#endif
 
     LOG_INFO("VM created successfully (%u vCPUs)", config.cpu_count);
     return vm;
