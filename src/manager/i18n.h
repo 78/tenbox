@@ -154,6 +154,7 @@ enum class S {
     // Help menu
     kMenuHelp,
     kMenuWebsite,
+    kMenuHelpDoc,
     kMenuCheckUpdate,
     kMenuAbout,
     kAboutTitle,
