@@ -5,6 +5,7 @@
 #include "core/vmm/types.h"
 #include <chrono>
 #include <cstdio>
+#include <thread>
 
 namespace hvf {
 
@@ -178,6 +179,16 @@ VCpuExitAction HvfVCpu::RunOnce() {
 
 void HvfVCpu::CancelRun() {
     hv_vcpus_exit(&vcpu_, 1);
+    WakeFromHalt();
+}
+
+bool HvfVCpu::WaitForInterrupt(uint32_t timeout_ms) {
+    if (irq_pending_.load(std::memory_order_acquire))
+        return true;
+    std::unique_lock<std::mutex> lock(halt_mutex_);
+    halt_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                      [this]() { return irq_pending_.load(std::memory_order_acquire); });
+    return irq_pending_.load(std::memory_order_acquire);
 }
 
 void HvfVCpu::OnStartup(const VCpuStartupState& state) {
@@ -235,8 +246,19 @@ VCpuExitAction HvfVCpu::HandleException() {
 
     switch (ec) {
     case kEcWfiWfe:
+    {
         s_stats_.ec_wfi_wfe.fetch_add(1, std::memory_order_relaxed);
+        // ISS bit [0] (TI): 0 = WFI, 1 = WFE
+        bool is_wfe = (syndrome & 1) != 0;
+        if (is_wfe) {
+            // WFE is used in spinlock wait loops. Yield the host thread
+            // so other vCPUs holding the lock can make progress.
+            std::this_thread::yield();
+            return VCpuExitAction::kContinue;
+        }
+        // WFI — block until an interrupt is pending.
         return VCpuExitAction::kHalt;
+    }
 
     case kEcDabtLower:
         s_stats_.ec_dabt_lower.fetch_add(1, std::memory_order_relaxed);
@@ -378,7 +400,33 @@ VCpuExitAction HvfVCpu::HandleSysReg(uint64_t syndrome) {
         }
     }
 
-    // Unhandled system register — skip instruction
+    // Unhandled system register access.
+    // Decode the ISS to extract the register encoding for diagnostics.
+    {
+        uint32_t iss = static_cast<uint32_t>(syndrome & 0x1FFFFFF);
+        bool is_read = (iss & 1) != 0;
+        uint8_t rt = (iss >> 5) & 0x1F;
+        uint8_t CRm = (iss >> 1) & 0xF;
+        uint8_t CRn = (iss >> 10) & 0xF;
+        uint8_t Op0_raw = (iss >> 20) & 0x3;
+        uint8_t Op1 = (iss >> 14) & 0x7;
+        uint8_t Op2 = (iss >> 17) & 0x7;
+        uint32_t Op0 = Op0_raw + 2; // ESR encoding: Op0 is stored as (Op0-2)
+
+        if (is_read) {
+            // For reads, return 0 instead of leaving the register untouched
+            // to avoid leaking stale values that could confuse guest software.
+            if (rt < 31) {
+                hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + rt), 0);
+            }
+        }
+
+        LOG_WARN("hvf: vCPU %u unhandled sysreg %s S%u_%u_C%u_C%u_%u (Xt=x%u) at PC=0x%llx",
+                 index_, is_read ? "MRS" : "MSR",
+                 Op0, Op1, CRn, CRm, Op2, rt,
+                 (unsigned long long)pc);
+    }
+
     hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
     return VCpuExitAction::kContinue;
 }
