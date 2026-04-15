@@ -213,7 +213,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/hermes/rootfs-hermes-0.9.0-x86_64.qcow2",
           "sha256": "",
-          "size": 1577385984
+          "size": 1776287744
         }
       ]
     },
@@ -244,7 +244,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/hermes-arm64/rootfs-hermes-0.9.0-arm64.qcow2",
           "sha256": "",
-          "size": 1578893312
+          "size": 1707802624
         }
       ]
     }
