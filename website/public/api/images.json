@@ -195,7 +195,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-04-14",
+      "updated_at": "2026-04-15",
       "files": [
         {
           "name": "vmlinuz",
@@ -213,7 +213,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/hermes/rootfs-hermes-0.9.0-x86_64.qcow2",
           "sha256": "",
-          "size": 1541079040
+          "size": 1577385984
         }
       ]
     },
@@ -226,7 +226,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-04-14",
+      "updated_at": "2026-04-15",
       "files": [
         {
           "name": "vmlinuz",
@@ -244,7 +244,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/hermes-arm64/rootfs-hermes-0.9.0-arm64.qcow2",
           "sha256": "",
-          "size": 1495924736
+          "size": 1578893312
         }
       ]
     }
