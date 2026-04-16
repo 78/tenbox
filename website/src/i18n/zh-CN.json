@@ -12,7 +12,7 @@
       "养虾不用海，只要一个 Box",
       "本地养虾，数据不出门"
     ],
-    "description": "让你的\"龙虾\"在安全隔离的虚拟机中运行，保护你的隐私和数据。支持 OpenClaw、CoPaw 等主流项目，像装 App 一样简单。",
+    "description": "让你的\"龙虾\"在安全隔离的虚拟机中运行，保护你的隐私和数据。支持 OpenClaw、QwenPaw 等主流项目，像装 App 一样简单。",
     "cta": "立即下载",
     "cta_win": "Windows 下载",
     "cta_mac": "macOS 下载",
@@ -25,7 +25,7 @@
     "title": "核心特性",
     "oneclick": {
       "title": "一键创建",
-      "desc": "支持 OpenClaw、CoPaw 等主流 AI Agent 项目，点一下就能创建，不需要任何技术背景。"
+      "desc": "支持 OpenClaw、QwenPaw 等主流 AI Agent 项目，点一下就能创建，不需要任何技术背景。"
     },
     "gui": {
       "title": "可视化操作",
@@ -56,7 +56,7 @@
     },
     "step2": {
       "title": "选择 Agent",
-      "desc": "挑选你需要的 AI Agent（OpenClaw / CoPaw 等），点一下即可创建。"
+      "desc": "挑选你需要的 AI Agent（OpenClaw / QwenPaw 等），点一下即可创建。"
     },
     "step3": {
       "title": "开始使用",

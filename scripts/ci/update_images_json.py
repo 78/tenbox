@@ -9,7 +9,7 @@ objects are updated before images.json is merged (users would otherwise download
 SHA checks). Pass --enable-sha256 when you want checksums in the manifest.
 
 Supported targets:
-    rootfs-chromium, rootfs-copaw, rootfs-hermes, rootfs-openclaw  — updates rootfs.qcow2 for a specific image
+    rootfs-chromium, rootfs-qwenpaw, rootfs-hermes, rootfs-openclaw  — updates rootfs.qcow2 for a specific image
     initramfs                                       — updates initrd.gz for ALL images of matching platform
     kernel                                          — updates vmlinuz for ALL images of matching platform
 
@@ -30,7 +30,7 @@ IMAGES_JSON_PATH = Path(__file__).resolve().parent.parent.parent / "website" / "
 
 DISPLAY_NAMES = {
     "chromium": "Chromium",
-    "copaw": "CoPaw",
+    "qwenpaw": "QwenPaw",
     "hermes": "Hermes",
     "openclaw": "OpenClaw",
 }
@@ -68,8 +68,8 @@ def extract_version(filename: str, target: str, arch: str) -> str:
     Filename format: rootfs-<name>[-<version>]-<arch>.qcow2
 
     Examples:
-        rootfs-copaw-0.0.7-x86_64.qcow2 -> 0.0.7
-        rootfs-copaw-0.0.7-arm64.qcow2 -> 0.0.7
+        rootfs-qwenpaw-0.0.7-x86_64.qcow2 -> 0.0.7
+        rootfs-qwenpaw-0.0.7-arm64.qcow2 -> 0.0.7
         rootfs-openclaw-2026.3.11-x86_64.qcow2 -> 2026.3.11
         rootfs-chromium-x86_64.qcow2 -> ""
     """
@@ -186,7 +186,7 @@ def update_initramfs_entries(images: list[dict], meta: dict, *, use_sha256: bool
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", required=True, help="Build target (e.g. rootfs-copaw, initramfs)")
+    parser.add_argument("--target", required=True, help="Build target (e.g. rootfs-qwenpaw, initramfs)")
     parser.add_argument("--meta-dir", required=True, help="Directory containing per-arch JSON metadata files")
     parser.add_argument(
         "--enable-sha256",

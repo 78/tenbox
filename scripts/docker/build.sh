@@ -5,7 +5,7 @@
 #   ./scripts/docker/build.sh <arch> <target> [extra-args...]
 #
 # arch:   arm64 | x86_64
-# target: rootfs-chromium | rootfs-copaw | rootfs-openclaw | rootfs-hermes | initramfs | kernel
+# target: rootfs-chromium | rootfs-qwenpaw | rootfs-openclaw | rootfs-hermes | initramfs | kernel
 #
 # Examples:
 #   ./scripts/docker/build.sh arm64 rootfs-chromium
@@ -15,7 +15,7 @@
 #   ./scripts/docker/build.sh arm64 kernel
 #   ./scripts/docker/build.sh x86_64 rootfs-chromium
 #   ./scripts/docker/build.sh x86_64 rootfs-chromium --force
-#   ./scripts/docker/build.sh x86_64 rootfs-copaw
+#   ./scripts/docker/build.sh x86_64 rootfs-qwenpaw
 #   ./scripts/docker/build.sh x86_64 rootfs-openclaw
 #   ./scripts/docker/build.sh x86_64 initramfs
 #   ./scripts/docker/build.sh x86_64 kernel
@@ -58,11 +58,11 @@ resolve_script() {
                 echo "scripts/x86_64/make-rootfs-chromium.sh"
             fi
             ;;
-        rootfs-copaw)
+        rootfs-qwenpaw)
             if [ "$arch" = "arm64" ]; then
-                echo "scripts/arm64/make-rootfs-copaw.sh"
+                echo "scripts/arm64/make-rootfs-qwenpaw.sh"
             else
-                echo "scripts/x86_64/make-rootfs-copaw.sh"
+                echo "scripts/x86_64/make-rootfs-qwenpaw.sh"
             fi
             ;;
         rootfs-openclaw)
@@ -86,7 +86,7 @@ resolve_script() {
             echo "scripts/${arch}/get-kernel.sh"
             ;;
         *)
-            echo "Error: unknown target '$target' (use: rootfs-chromium, rootfs-copaw, rootfs-openclaw, rootfs-hermes, initramfs, kernel)" >&2
+            echo "Error: unknown target '$target' (use: rootfs-chromium, rootfs-qwenpaw, rootfs-openclaw, rootfs-hermes, initramfs, kernel)" >&2
             exit 1
             ;;
     esac

@@ -32,10 +32,10 @@
       ]
     },
     {
-      "id": "copaw",
+      "id": "qwenpaw",
       "version": "1.0.2",
-      "name": "CoPaw 1.0.2",
-      "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 CoPaw 和 Chromium 浏览器。",
+      "name": "QwenPaw 1.0.2",
+      "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 QwenPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
@@ -56,7 +56,7 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw/rootfs-copaw-1.0.2-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw/rootfs-qwenpaw-1.0.2-x86_64.qcow2",
           "sha256": "",
           "size": 1691266048
         }
@@ -125,10 +125,10 @@
       ]
     },
     {
-      "id": "copaw-arm64",
+      "id": "qwenpaw-arm64",
       "version": "1.0.2",
-      "name": "CoPaw 1.0.2 (ARM64)",
-      "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 CoPaw 和 Chromium 浏览器。",
+      "name": "QwenPaw 1.0.2 (ARM64)",
+      "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 QwenPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
@@ -149,7 +149,7 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/copaw-arm64/rootfs-copaw-1.0.2-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw-arm64/rootfs-qwenpaw-1.0.2-arm64.qcow2",
           "sha256": "",
           "size": 1634533376
         }

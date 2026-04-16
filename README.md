@@ -126,7 +126,7 @@ To create a VM through the GUI, click **New VM** and point to the kernel, initra
 
 Usage documentation (Chinese): **[养虾教程](https://my.feishu.cn/wiki/Q96KwUH1Di3cAik2W7kcQsWKncb)** (Feishu Wiki).
 
-Guest images built with the Chromium, Copaw, and OpenClaw rootfs scripts also install a desktop shortcut **`Help.desktop`** that opens the same page (source: [`scripts/rootfs-configs/Help.desktop`](scripts/rootfs-configs/Help.desktop)).
+Guest images built with the Chromium, QwenPaw, and OpenClaw rootfs scripts also install a desktop shortcut **`Help.desktop`** that opens the same page (source: [`scripts/rootfs-configs/Help.desktop`](scripts/rootfs-configs/Help.desktop)).
 
 ## Architecture
 

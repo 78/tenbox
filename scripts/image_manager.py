@@ -172,9 +172,9 @@ def add_image(data: dict) -> dict:
     print("\n=== Add New Image ===")
     
     image = {}
-    image["id"] = input("ID (e.g., 'copaw'): ").strip()
+    image["id"] = input("ID (e.g., 'qwenpaw'): ").strip()
     image["version"] = input("Version (e.g., '0.0.4'): ").strip()
-    image["name"] = input("Display Name (e.g., 'XFCE + CoPaw 0.0.4'): ").strip()
+    image["name"] = input("Display Name (e.g., 'XFCE + QwenPaw 0.0.4'): ").strip()
     image["description"] = input("Description (optional): ").strip()
     image["min_app_version"] = input("Min App Version (e.g., '0.1.0'): ").strip() or "0.0.0"
     image["os"] = input("OS (linux/windows/macos) [linux]: ").strip() or "linux"

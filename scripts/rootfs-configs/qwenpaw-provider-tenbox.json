@@ -1,6 +1,6 @@
 {
   "id": "tenbox",
-  "name": "TenBox",
+  "name": "TenBoxProxy",
   "base_url": "http://10.0.2.3/v1",
   "api_key": "tenbox",
   "chat_model": "OpenAIChatModel",
@@ -8,7 +8,12 @@
   "extra_models": [
     {
       "id": "default",
-      "name": "Default"
+      "name": "Default",
+      "supports_multimodal": true,
+      "supports_image": true,
+      "supports_video": false,
+      "probe_source": "probed",
+      "generate_kwargs": {}
     }
   ],
   "api_key_prefix": "",
@@ -16,7 +21,8 @@
   "freeze_url": false,
   "require_api_key": true,
   "is_custom": true,
-  "support_model_discovery": true,
+  "support_model_discovery": false,
   "support_connection_check": false,
-  "generate_kwargs": {}
+  "generate_kwargs": {},
+  "meta": {}
 }

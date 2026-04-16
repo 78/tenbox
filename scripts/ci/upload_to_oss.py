@@ -31,8 +31,8 @@ def get_oss_dir(target: str, arch: str) -> str:
     x86_64 omits arch suffix for backward compatibility.
 
     Examples:
-        rootfs-copaw + x86_64    -> copaw
-        rootfs-copaw + arm64     -> copaw-arm64
+        rootfs-qwenpaw + x86_64  -> qwenpaw
+        rootfs-qwenpaw + arm64   -> qwenpaw-arm64
         rootfs-chromium + x86_64 -> chromium
         rootfs-chromium + arm64  -> chromium-arm64
         initramfs + x86_64       -> initramfs

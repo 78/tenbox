@@ -1,0 +1,12 @@
+[Unit]
+Description=QwenPaw App
+After=network.target
+
+[Service]
+Environment=DISPLAY=:0
+ExecStart=/home/tenbox/.qwenpaw/venv/bin/qwenpaw app --host 0.0.0.0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

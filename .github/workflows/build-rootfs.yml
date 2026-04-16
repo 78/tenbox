@@ -9,7 +9,7 @@ on:
         type: choice
         options:
           - rootfs-chromium
-          - rootfs-copaw
+          - rootfs-qwenpaw
           - rootfs-hermes
           - rootfs-openclaw
         default: rootfs-chromium
