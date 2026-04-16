@@ -120,9 +120,12 @@ struct TenBoxApp: App {
             }
             CommandGroup(replacing: .toolbar) { }
             CommandGroup(replacing: .sidebar) { }
-            CommandGroup(after: .help) {
+            CommandGroup(replacing: .help) {
                 Button("TenBox Website...") {
                     NSWorkspace.shared.open(kTenBoxWebsiteURL)
+                }
+                Button("Help Documentation...") {
+                    NSWorkspace.shared.open(URL(string: "https://my.feishu.cn/wiki/Q96KwUH1Di3cAik2W7kcQsWKncb")!)
                 }
             }
         }

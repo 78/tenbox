@@ -59,6 +59,7 @@ enum CmdId : UINT {
     IDM_SETTINGS      = 1025,
     IDM_DPI_ZOOM      = 1026,
     IDM_LLM_PROXY     = 1027,
+    IDM_HELP_DOC      = 1028,
 };
 
 // ── Control IDs ──
@@ -293,6 +294,7 @@ static HMENU BuildMenuBar(bool show_toolbar) {
 
     HMENU help_menu = CreatePopupMenu();
     AppendMenuW(help_menu, MF_STRING, IDM_WEBSITE,      i18n::tr_w(S::kMenuWebsite).c_str());
+    AppendMenuW(help_menu, MF_STRING, IDM_HELP_DOC,     i18n::tr_w(S::kMenuHelpDoc).c_str());
     AppendMenuW(help_menu, MF_STRING, IDM_CHECK_UPDATE,  i18n::tr_w(S::kMenuCheckUpdate).c_str());
     AppendMenuW(help_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(help_menu, MF_STRING, IDM_ABOUT,        i18n::tr_w(S::kMenuAbout).c_str());
@@ -828,6 +830,15 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             sei.hwnd = hwnd;
             sei.lpVerb = L"open";
             sei.lpFile = L"https://tenbox.ai/";
+            sei.nShow = SW_SHOWNORMAL;
+            ShellExecuteExW(&sei);
+            return 0;
+        }
+        case IDM_HELP_DOC: {
+            SHELLEXECUTEINFOW sei{sizeof(sei)};
+            sei.hwnd = hwnd;
+            sei.lpVerb = L"open";
+            sei.lpFile = L"https://my.feishu.cn/wiki/Q96KwUH1Di3cAik2W7kcQsWKncb";
             sei.nShow = SW_SHOWNORMAL;
             ShellExecuteExW(&sei);
             return 0;

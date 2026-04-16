@@ -190,6 +190,7 @@ std::unique_ptr<HypervisorVCpu> HvfVm::CreateVCpu(
         soft_gic_->RegisterVCpuKick(index, [handle, raw_vcpu](bool assert) {
             raw_vcpu->SetIrqPending(assert);
             if (assert) {
+                raw_vcpu->WakeFromHalt();
                 hv_vcpu_t h = handle;
                 hv_vcpus_exit(&h, 1);
             }

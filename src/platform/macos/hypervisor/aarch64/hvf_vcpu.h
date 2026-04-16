@@ -3,6 +3,7 @@
 #include "core/vmm/hypervisor_vcpu.h"
 #include "core/vmm/address_space.h"
 #include <cstdint>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <atomic>
@@ -43,6 +44,7 @@ public:
     void CancelRun() override;
     uint32_t Index() const override { return index_; }
     bool SetupBootRegisters(uint8_t* ram) override;
+    bool WaitForInterrupt(uint32_t timeout_ms) override;
 
     void OnStartup(const VCpuStartupState& state) override;
 
@@ -58,6 +60,7 @@ public:
 
     void SetIrqPending(bool pending) { irq_pending_.store(pending, std::memory_order_release); }
     bool IsIrqPending() const { return irq_pending_.load(std::memory_order_acquire); }
+    void WakeFromHalt() { halt_cv_.notify_one(); }
 
     static void EnableExitStats(bool on) { s_stats_enabled_.store(on, std::memory_order_relaxed); }
 
@@ -118,6 +121,8 @@ private:
     PsciRebootCallback psci_reboot_cb_;
     gicv3::SoftGic* soft_gic_ = nullptr;
     std::atomic<bool> irq_pending_{false};
+    std::mutex halt_mutex_;
+    std::condition_variable halt_cv_;
 };
 
 } // namespace hvf

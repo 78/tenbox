@@ -5,11 +5,55 @@
 #include "core/vmm/types.h"
 #include <chrono>
 #include <cstdio>
+#include <thread>
 
 namespace hvf {
 
 HvfVCpu::ExitStats HvfVCpu::s_stats_;
 std::atomic<bool> HvfVCpu::s_stats_enabled_{false};
+
+// On macOS < 15 (software GIC path), the Hypervisor.framework exposes the
+// host's raw CPU feature ID registers but doesn't properly virtualise the
+// corresponding instructions (PAC / pointer authentication in particular).
+// This causes two failures:
+//   1. Cross-vCPU ID register inconsistency → Linux refuses to boot
+//      secondary CPUs ("Detected conflict for capability …").
+//   2. PAC instructions trap as undefined at EL0 → SIGILL kills init.
+//
+// Fix: zero out PAC-related fields so the guest never tries to use PAC.
+static void SanitizeIdRegistersForSoftGic(hv_vcpu_t vcpu, uint32_t index) {
+    // ID_AA64ISAR1_EL1 — APA[7:4], API[11:8], GPA[27:24], GPI[31:28]
+    uint64_t isar1 = 0;
+    hv_return_t ret = hv_vcpu_get_sys_reg(vcpu, HV_SYS_REG_ID_AA64ISAR1_EL1, &isar1);
+    if (ret == HV_SUCCESS) {
+        constexpr uint64_t kPacMask1 = (0xFULL << 4) | (0xFULL << 8) |
+                                        (0xFULL << 24) | (0xFULL << 28);
+        uint64_t masked = isar1 & ~kPacMask1;
+        if (masked != isar1) {
+            ret = hv_vcpu_set_sys_reg(vcpu, HV_SYS_REG_ID_AA64ISAR1_EL1, masked);
+            LOG_INFO("hvf: vCPU %u ID_AA64ISAR1_EL1: 0x%llx -> 0x%llx (PAC masked, ret=%d)",
+                     index, (unsigned long long)isar1,
+                     (unsigned long long)masked, (int)ret);
+        }
+    }
+
+    // ID_AA64ISAR2_EL1 — APA3[15:12], GPA3[11:8]
+    // Not present in older SDK headers; raw encoding follows the same
+    // scheme as ISAR0 (0xc030) / ISAR1 (0xc031).
+    constexpr auto kIdAa64Isar2El1 = static_cast<hv_sys_reg_t>(0xc032);
+    uint64_t isar2 = 0;
+    ret = hv_vcpu_get_sys_reg(vcpu, kIdAa64Isar2El1, &isar2);
+    if (ret == HV_SUCCESS) {
+        constexpr uint64_t kPacMask2 = (0xFULL << 8) | (0xFULL << 12);
+        uint64_t masked = isar2 & ~kPacMask2;
+        if (masked != isar2) {
+            ret = hv_vcpu_set_sys_reg(vcpu, kIdAa64Isar2El1, masked);
+            LOG_INFO("hvf: vCPU %u ID_AA64ISAR2_EL1: 0x%llx -> 0x%llx (PAC masked, ret=%d)",
+                     index, (unsigned long long)isar2,
+                     (unsigned long long)masked, (int)ret);
+        }
+    }
+}
 
 // Exception Class values from ARM Architecture Reference Manual
 static constexpr uint8_t kEcWfiWfe    = 0x01;
@@ -44,6 +88,10 @@ std::unique_ptr<HvfVCpu> HvfVCpu::Create(uint32_t index, AddressSpace* addr_spac
     hv_vcpu_set_sys_reg(vcpu->vcpu_, HV_SYS_REG_MPIDR_EL1, mpidr);
 
     hv_vcpu_set_trap_debug_exceptions(vcpu->vcpu_, true);
+
+    if (use_soft_gic) {
+        SanitizeIdRegistersForSoftGic(vcpu->vcpu_, index);
+    }
 
     vcpu->vtimer_intid_ = 27;
     if (!use_soft_gic) {
@@ -131,6 +179,16 @@ VCpuExitAction HvfVCpu::RunOnce() {
 
 void HvfVCpu::CancelRun() {
     hv_vcpus_exit(&vcpu_, 1);
+    WakeFromHalt();
+}
+
+bool HvfVCpu::WaitForInterrupt(uint32_t timeout_ms) {
+    if (irq_pending_.load(std::memory_order_acquire))
+        return true;
+    std::unique_lock<std::mutex> lock(halt_mutex_);
+    halt_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                      [this]() { return irq_pending_.load(std::memory_order_acquire); });
+    return irq_pending_.load(std::memory_order_acquire);
 }
 
 void HvfVCpu::OnStartup(const VCpuStartupState& state) {
@@ -188,8 +246,19 @@ VCpuExitAction HvfVCpu::HandleException() {
 
     switch (ec) {
     case kEcWfiWfe:
+    {
         s_stats_.ec_wfi_wfe.fetch_add(1, std::memory_order_relaxed);
+        // ISS bit [0] (TI): 0 = WFI, 1 = WFE
+        bool is_wfe = (syndrome & 1) != 0;
+        if (is_wfe) {
+            // WFE is used in spinlock wait loops. Yield the host thread
+            // so other vCPUs holding the lock can make progress.
+            std::this_thread::yield();
+            return VCpuExitAction::kContinue;
+        }
+        // WFI — block until an interrupt is pending.
         return VCpuExitAction::kHalt;
+    }
 
     case kEcDabtLower:
         s_stats_.ec_dabt_lower.fetch_add(1, std::memory_order_relaxed);
@@ -331,7 +400,33 @@ VCpuExitAction HvfVCpu::HandleSysReg(uint64_t syndrome) {
         }
     }
 
-    // Unhandled system register — skip instruction
+    // Unhandled system register access.
+    // Decode the ISS to extract the register encoding for diagnostics.
+    {
+        uint32_t iss = static_cast<uint32_t>(syndrome & 0x1FFFFFF);
+        bool is_read = (iss & 1) != 0;
+        uint8_t rt = (iss >> 5) & 0x1F;
+        uint8_t CRm = (iss >> 1) & 0xF;
+        uint8_t CRn = (iss >> 10) & 0xF;
+        uint8_t Op0_raw = (iss >> 20) & 0x3;
+        uint8_t Op1 = (iss >> 14) & 0x7;
+        uint8_t Op2 = (iss >> 17) & 0x7;
+        uint32_t Op0 = Op0_raw + 2; // ESR encoding: Op0 is stored as (Op0-2)
+
+        if (is_read) {
+            // For reads, return 0 instead of leaving the register untouched
+            // to avoid leaking stale values that could confuse guest software.
+            if (rt < 31) {
+                hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + rt), 0);
+            }
+        }
+
+        LOG_WARN("hvf: vCPU %u unhandled sysreg %s S%u_%u_C%u_C%u_%u (Xt=x%u) at PC=0x%llx",
+                 index_, is_read ? "MRS" : "MSR",
+                 Op0, Op1, CRn, CRm, Op2, rt,
+                 (unsigned long long)pc);
+    }
+
     hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
     return VCpuExitAction::kContinue;
 }
