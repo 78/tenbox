@@ -37,15 +37,36 @@ private:
                       const std::string& content_type, const std::string& body,
                       bool keep_alive);
 
+    // Describes how an SSE stream ended. Populated by ForwardToUpstream and
+    // consumed by WriteLogEntry so we can explain why a stream stopped.
+    struct StreamEndInfo {
+        // One of: "upstream_done", "upstream_error", "client_disconnect",
+        // "proxy_shutdown", "handshake_error", "n/a" (non-streaming).
+        std::string reason = "n/a";
+        // Human-readable description, may include API error codes.
+        std::string detail;
+        // WinHTTP error code from GetLastError() on upstream read failure, 0 otherwise.
+        uint32_t winhttp_error = 0;
+        // WSA error code from WSAGetLastError() on client send failure, 0 otherwise.
+        uint32_t wsa_error = 0;
+        uint64_t duration_ms = 0;
+        uint64_t upstream_bytes = 0;
+        uint64_t chunk_count = 0;
+        // True if we ever saw an SSE "data: [DONE]" marker from upstream.
+        bool saw_done_marker = false;
+    };
+
     bool ForwardToUpstream(uintptr_t client_sock, const settings::LlmModelMapping& mapping,
                            const std::string& modified_body, bool is_streaming, bool keep_alive,
-                           int& out_status, std::string& out_response_body);
+                           int& out_status, std::string& out_response_body,
+                           StreamEndInfo& out_stream_end);
 
     const settings::LlmModelMapping* FindMapping(const std::string& model_name) const;
 
     void WriteLogEntry(const std::string& request_body, const std::string& response_body,
                        const std::string& alias, const std::string& model,
-                       bool is_streaming, int status_code);
+                       bool is_streaming, int status_code,
+                       const StreamEndInfo& stream_end);
 
     std::string GetLogDir() const;
     void OpenLogFile();

@@ -828,6 +828,27 @@ model:
   default: "default"
   provider: "custom"
   base_url: "http://10.0.2.3/v1"
+
+# Stream tokens from the provider so upstream nginx proxies (default
+# proxy_read_timeout = 60s) don't return 504 while the model is
+# generating a long non-streaming response.
+display:
+  streaming: true
+
+# Gateway streaming: progressively edit the bot reply as tokens arrive.
+# Applies to messaging platforms that support message editing
+# (Feishu, Telegram, Discord, Slack, WeCom, DingTalk, ...).
+# Signal / Email / Home Assistant are auto-detected and skipped.
+#
+# Note: Feishu currently goes through im.v1.message.update (edit API),
+# so every streamed chunk adds an "[Edited]" marker in the client.
+# Native CardKit streaming (PR #6365 / #6432 / #10311) is NOT merged
+# in v0.10.0 yet. To avoid the edited-marker clutter, either:
+#   - set transport: off  (single final message, no typewriter effect)
+#   - raise edit_interval (e.g. 1.5-2.0) so chunks merge into fewer edits
+streaming:
+  enabled: true
+  transport: edit
 CFGEOF
 chown $USER_NAME:$USER_NAME "\$HERMES_DIR/config.yaml"
 

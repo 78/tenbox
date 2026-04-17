@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <share.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 extern FILE* GetManagerLogFile();
@@ -110,6 +111,48 @@ static std::string ToHex(size_t v) {
     char buf[20];
     snprintf(buf, sizeof(buf), "%zx", v);
     return buf;
+}
+
+// Translate WinHTTP / WinInet error codes into short diagnostic strings.
+// Only covers codes that are realistic during an SSE stream.
+static const char* WinHttpErrorName(DWORD err) {
+    switch (err) {
+        case 0:                                    return "OK";
+        case 12002: /* ERROR_WINHTTP_TIMEOUT */    return "WINHTTP_TIMEOUT";
+        case 12004: /* ERROR_WINHTTP_INTERNAL_ERROR */ return "WINHTTP_INTERNAL_ERROR";
+        case 12005: /* ERROR_WINHTTP_INVALID_URL */ return "WINHTTP_INVALID_URL";
+        case 12007: /* ERROR_WINHTTP_NAME_NOT_RESOLVED */ return "NAME_NOT_RESOLVED";
+        case 12029: /* ERROR_WINHTTP_CANNOT_CONNECT */ return "CANNOT_CONNECT";
+        case 12030: /* ERROR_WINHTTP_CONNECTION_ERROR */ return "CONNECTION_ERROR";
+        case 12031: /* ERROR_WINHTTP_RESET */      return "CONNECTION_RESET";
+        case 12032: /* ERROR_WINHTTP_REDIRECT_FAILED */ return "REDIRECT_FAILED";
+        case 12152: /* ERROR_WINHTTP_INVALID_SERVER_RESPONSE */ return "INVALID_SERVER_RESPONSE";
+        case 12175: /* ERROR_WINHTTP_SECURE_FAILURE */ return "SECURE_FAILURE";
+        case 12178: /* ERROR_WINHTTP_AUTODETECTION_FAILED */ return "AUTODETECTION_FAILED";
+        default:                                   return "WINHTTP_UNKNOWN";
+    }
+}
+
+// Translate common Winsock error codes encountered while writing back to
+// the VM-side HTTP client.
+static const char* WsaErrorName(int err) {
+    switch (err) {
+        case 0:                     return "OK";
+        case WSAEINTR:              return "WSAEINTR";
+        case WSAECONNRESET:         return "WSAECONNRESET";
+        case WSAECONNABORTED:       return "WSAECONNABORTED";
+        case WSAESHUTDOWN:          return "WSAESHUTDOWN";
+        case WSAENETRESET:          return "WSAENETRESET";
+        case WSAETIMEDOUT:          return "WSAETIMEDOUT";
+        case WSAENOTCONN:           return "WSAENOTCONN";
+        case WSAENOTSOCK:           return "WSAENOTSOCK";
+        default:                    return "WSA_UNKNOWN";
+    }
+}
+
+static uint64_t NowMonotonicMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 // ── LlmProxyService ─────────────────────────────────────────────────
@@ -354,11 +397,12 @@ void LlmProxyService::HandleChatCompletions(uintptr_t sock, const std::string& b
 
     int upstream_status = 0;
     std::string upstream_response;
+    StreamEndInfo stream_end;
     ForwardToUpstream(sock, *mapping, modified_body, is_streaming, keep_alive,
-                      upstream_status, upstream_response);
+                      upstream_status, upstream_response, stream_end);
 
     WriteLogEntry(body, upstream_response, alias, target_model,
-                  is_streaming, upstream_status);
+                  is_streaming, upstream_status, stream_end);
 }
 
 void LlmProxyService::HandleModels(uintptr_t sock, bool keep_alive) {
@@ -419,8 +463,21 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                                           const settings::LlmModelMapping& mapping,
                                           const std::string& modified_body,
                                           bool is_streaming, bool keep_alive,
-                                          int& out_status, std::string& out_response_body) {
+                                          int& out_status, std::string& out_response_body,
+                                          StreamEndInfo& out_stream_end) {
     SOCKET client = static_cast<SOCKET>(client_sock);
+    const uint64_t t_start = NowMonotonicMs();
+
+    // Default classification: becomes "n/a" for non-streaming, otherwise
+    // overwritten by the SSE loop below.
+    out_stream_end.reason = is_streaming ? "unknown" : "n/a";
+
+    auto set_handshake_error = [&](const std::string& msg, uint32_t err = 0) {
+        out_stream_end.reason = "handshake_error";
+        out_stream_end.detail = msg;
+        out_stream_end.winhttp_error = err;
+        out_stream_end.duration_ms = NowMonotonicMs() - t_start;
+    };
 
     // Build upstream URL: target_url + /chat/completions
     std::string upstream_url = mapping.target_url;
@@ -431,6 +488,7 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
 
     UrlParts parts;
     if (!ParseUrl(upstream_url, parts)) {
+        set_handshake_error("invalid_upstream_url");
         SendErrorResponse(client_sock, 502, "Bad Gateway",
                           "Invalid upstream URL: " + mapping.target_url, keep_alive);
         return false;
@@ -441,6 +499,7 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                                      WINHTTP_NO_PROXY_NAME,
                                      WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) {
+        set_handshake_error("WinHttpOpen failed", GetLastError());
         SendErrorResponse(client_sock, 502, "Bad Gateway",
                           "WinHttpOpen failed", keep_alive);
         return false;
@@ -455,6 +514,8 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
     // Enable HTTP/1.1 keep-alive (default in WinHTTP)
     HINTERNET conn = WinHttpConnect(session, parts.host.c_str(), parts.port, 0);
     if (!conn) {
+        DWORD err = GetLastError();
+        set_handshake_error("WinHttpConnect failed", err);
         WinHttpCloseHandle(session);
         SendErrorResponse(client_sock, 502, "Bad Gateway",
                           "WinHttpConnect failed", keep_alive);
@@ -466,6 +527,8 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                                         nullptr, WINHTTP_NO_REFERER,
                                         WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!req) {
+        DWORD err = GetLastError();
+        set_handshake_error("WinHttpOpenRequest failed", err);
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
         SendErrorResponse(client_sock, 502, "Bad Gateway",
@@ -486,6 +549,7 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                                     static_cast<DWORD>(modified_body.size()), 0);
     if (!sent) {
         DWORD err = GetLastError();
+        set_handshake_error("WinHttpSendRequest failed", err);
         WinHttpCloseHandle(req);
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
@@ -496,6 +560,7 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
 
     if (!WinHttpReceiveResponse(req, nullptr)) {
         DWORD err = GetLastError();
+        set_handshake_error("WinHttpReceiveResponse failed", err);
         WinHttpCloseHandle(req);
         WinHttpCloseHandle(conn);
         WinHttpCloseHandle(session);
@@ -535,35 +600,111 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
             "Transfer-Encoding: chunked\r\n"
             "Connection: " + std::string(keep_alive ? "keep-alive" : "close") + "\r\n"
             "\r\n";
-        if (!SendStr(client, resp_header)) goto cleanup;
+        if (!SendStr(client, resp_header)) {
+            out_stream_end.reason = "client_disconnect";
+            out_stream_end.detail = "send headers failed";
+            out_stream_end.wsa_error = static_cast<uint32_t>(WSAGetLastError());
+            out_stream_end.duration_ms = NowMonotonicMs() - t_start;
+            goto cleanup;
+        }
 
-        // Read SSE data from WinHTTP and forward as chunked encoding
+        // Read SSE data from WinHTTP and forward as chunked encoding.
+        // We track who closes first (upstream vs VM-side client) plus a few
+        // stats so the jsonl log can explain 60s-style disconnects.
         {
             std::string sse_raw;
             char buf[kReadBufSize];
             DWORD bytes_read = 0;
             BOOL read_result = TRUE;
+            uint64_t chunk_count = 0;
+            uint64_t bytes_total = 0;
+            uint64_t last_chunk_ms = t_start;
+            bool saw_done = false;
+            bool client_broke = false;
+            uint32_t client_err = 0;
+
             while ((read_result = WinHttpReadData(req, buf, kReadBufSize, &bytes_read)) && bytes_read > 0) {
                 sse_raw.append(buf, bytes_read);
+                bytes_total += bytes_read;
+                ++chunk_count;
+                last_chunk_ms = NowMonotonicMs();
+
+                // Cheap scan for [DONE] marker so we can tell "upstream finished
+                // gracefully" from "upstream hung up mid-stream".
+                if (!saw_done && std::string_view(buf, bytes_read).find("[DONE]") != std::string_view::npos)
+                    saw_done = true;
+
                 std::string chunk_header = ToHex(bytes_read) + "\r\n";
-                if (!SendStr(client, chunk_header)) break;
-                if (!SendAll(client, buf, static_cast<int>(bytes_read))) break;
-                if (!SendStr(client, "\r\n")) break;
+                if (!SendStr(client, chunk_header) ||
+                    !SendAll(client, buf, static_cast<int>(bytes_read)) ||
+                    !SendStr(client, "\r\n")) {
+                    client_broke = true;
+                    client_err = static_cast<uint32_t>(WSAGetLastError());
+                    break;
+                }
                 bytes_read = 0;
             }
             DWORD last_err = read_result ? 0 : GetLastError();
+            uint64_t elapsed_ms = NowMonotonicMs() - t_start;
+            uint64_t gap_ms = NowMonotonicMs() - last_chunk_ms;
 
-            if (read_result) {
-                // Normal end: upstream closed the connection after sending data: [DONE].
-                // Send chunked terminator so the client sees a clean HTTP response.
+            out_stream_end.duration_ms = elapsed_ms;
+            out_stream_end.upstream_bytes = bytes_total;
+            out_stream_end.chunk_count = chunk_count;
+            out_stream_end.saw_done_marker = saw_done;
+
+            if (client_broke) {
+                // VM-side client closed/reset before upstream finished.
+                out_stream_end.reason = "client_disconnect";
+                out_stream_end.wsa_error = client_err;
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "VM client closed after %llu ms (%llu bytes, %llu chunks); wsa=%d %s",
+                         static_cast<unsigned long long>(elapsed_ms),
+                         static_cast<unsigned long long>(bytes_total),
+                         static_cast<unsigned long long>(chunk_count),
+                         static_cast<int>(client_err),
+                         WsaErrorName(static_cast<int>(client_err)));
+                out_stream_end.detail = detail;
+                LOG_ERROR("%s", detail);
+                keep_alive = false;
+                // No chunked terminator: upstream may still be streaming.
+            } else if (read_result) {
+                // Normal end: upstream closed the connection, usually after [DONE].
+                out_stream_end.reason = saw_done ? "upstream_done" : "upstream_closed_no_done";
+                char detail[256];
+                snprintf(detail, sizeof(detail),
+                         "upstream %s after %llu ms (%llu bytes, %llu chunks)",
+                         saw_done ? "sent [DONE]" : "closed without [DONE]",
+                         static_cast<unsigned long long>(elapsed_ms),
+                         static_cast<unsigned long long>(bytes_total),
+                         static_cast<unsigned long long>(chunk_count));
+                out_stream_end.detail = detail;
+                // "Closed without [DONE]" is abnormal; surface it as error.
+                // The happy path ([DONE]) is intentionally not logged.
+                if (!saw_done) {
+                    LOG_ERROR("%s", detail);
+                }
                 SendStr(client, "0\r\n\r\n");
             } else {
-                // Abnormal end (timeout, network error, etc.).
-                // Do NOT send the chunked terminator — just close the socket.
-                // This mimics OpenAI's own behavior: the client won't receive
-                // data: [DONE], so it can detect the stream was interrupted.
-                LOG_ERROR("SSE upstream read failed: WinHTTP error %lu", last_err);
+                // Abnormal upstream read (timeout, reset, etc.).
+                out_stream_end.reason = "upstream_error";
+                out_stream_end.winhttp_error = last_err;
+                char detail[320];
+                snprintf(detail, sizeof(detail),
+                         "upstream read failed after %llu ms (%llu bytes, %llu chunks, "
+                         "gap=%llu ms, done=%s); winhttp=%lu %s",
+                         static_cast<unsigned long long>(elapsed_ms),
+                         static_cast<unsigned long long>(bytes_total),
+                         static_cast<unsigned long long>(chunk_count),
+                         static_cast<unsigned long long>(gap_ms),
+                         saw_done ? "true" : "false",
+                         static_cast<unsigned long>(last_err),
+                         WinHttpErrorName(last_err));
+                out_stream_end.detail = detail;
+                LOG_ERROR("%s", detail);
                 keep_alive = false;
+                // Propagate the abrupt end to VM-side client.
                 shutdown(client, SD_SEND);
             }
             out_response_body = std::move(sse_raw);
@@ -695,7 +836,8 @@ void LlmProxyService::WriteLogEntry(const std::string& request_body,
                                      const std::string& response_body,
                                      const std::string& alias,
                                      const std::string& model,
-                                     bool is_streaming, int status_code) {
+                                     bool is_streaming, int status_code,
+                                     const StreamEndInfo& stream_end) {
     std::lock_guard<std::mutex> lock(log_mutex_);
     if (!log_file_) return;
 
@@ -714,6 +856,22 @@ void LlmProxyService::WriteLogEntry(const std::string& request_body,
     entry["model"] = model;
     entry["stream"] = is_streaming;
     entry["status"] = status_code;
+
+    // Diagnostics: who closed the connection and why. Always present so log
+    // readers can filter on stream_end.reason != "upstream_done".
+    json end = {
+        {"reason", stream_end.reason},
+        {"duration_ms", stream_end.duration_ms},
+    };
+    if (!stream_end.detail.empty())       end["detail"]         = stream_end.detail;
+    if (stream_end.winhttp_error)         end["winhttp_error"]  = stream_end.winhttp_error;
+    if (stream_end.wsa_error)             end["wsa_error"]      = stream_end.wsa_error;
+    if (is_streaming) {
+        end["upstream_bytes"]   = stream_end.upstream_bytes;
+        end["chunk_count"]      = stream_end.chunk_count;
+        end["saw_done_marker"]  = stream_end.saw_done_marker;
+    }
+    entry["stream_end"] = std::move(end);
 
     // Parse request to extract messages and params
     try {
