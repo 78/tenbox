@@ -188,14 +188,14 @@
     },
     {
       "id": "hermes",
-      "version": "0.9.0",
-      "name": "Hermes 0.9.0",
+      "version": "0.10.0",
+      "name": "Hermes 0.10.0",
       "description": "一个基于 Debian 13 的环境，预装了 Hermes Agent。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-04-15",
+      "updated_at": "2026-04-17",
       "files": [
         {
           "name": "vmlinuz",
@@ -211,22 +211,22 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/hermes/rootfs-hermes-0.9.0-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/hermes/rootfs-hermes-0.10.0-x86_64.qcow2",
           "sha256": "",
-          "size": 1776287744
+          "size": 1794703360
         }
       ]
     },
     {
       "id": "hermes-arm64",
-      "version": "0.9.0",
-      "name": "Hermes 0.9.0 (ARM64)",
+      "version": "0.10.0",
+      "name": "Hermes 0.10.0 (ARM64)",
       "description": "一个基于 Debian 13 的环境，预装了 Hermes Agent。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-04-15",
+      "updated_at": "2026-04-17",
       "files": [
         {
           "name": "vmlinuz",
@@ -242,9 +242,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/hermes-arm64/rootfs-hermes-0.9.0-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/hermes-arm64/rootfs-hermes-0.10.0-arm64.qcow2",
           "sha256": "",
-          "size": 1707802624
+          "size": 1698168832
         }
       ]
     }
