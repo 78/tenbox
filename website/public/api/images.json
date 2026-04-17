@@ -33,14 +33,14 @@
     },
     {
       "id": "qwenpaw",
-      "version": "1.1.2b2",
-      "name": "QwenPaw 1.1.2b2",
+      "version": "1.1.2",
+      "name": "QwenPaw 1.1.2",
       "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 QwenPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-04-16",
+      "updated_at": "2026-04-17",
       "files": [
         {
           "name": "vmlinuz",
@@ -56,9 +56,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw/rootfs-qwenpaw-1.1.2b2-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw/rootfs-qwenpaw-1.1.2-x86_64.qcow2",
           "sha256": "",
-          "size": 1765212160
+          "size": 1747845120
         }
       ]
     },
@@ -126,14 +126,14 @@
     },
     {
       "id": "qwenpaw-arm64",
-      "version": "1.1.2b2",
-      "name": "QwenPaw 1.1.2b2 (ARM64)",
+      "version": "1.1.2",
+      "name": "QwenPaw 1.1.2 (ARM64)",
       "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 QwenPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-04-16",
+      "updated_at": "2026-04-17",
       "files": [
         {
           "name": "vmlinuz",
@@ -149,9 +149,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw-arm64/rootfs-qwenpaw-1.1.2b2-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw-arm64/rootfs-qwenpaw-1.1.2-arm64.qcow2",
           "sha256": "",
-          "size": 1704722432
+          "size": 1692794880
         }
       ]
     },
