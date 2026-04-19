@@ -170,7 +170,8 @@ static uint64_t ReadBe64(const std::string& path, long offset) {
     if (!f) return 0;
     uint64_t val = 0;
     fseek(f, offset, SEEK_SET);
-    fread(&val, sizeof(val), 1, f);
+    size_t n = fread(&val, sizeof(val), 1, f);
+    (void)n;
     fclose(f);
     return be64(val);
 }
