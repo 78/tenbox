@@ -11,10 +11,12 @@
 #include "platform/macos/hypervisor/aarch64/hvf_vm.h"
 #elif defined(_WIN32)
 #include "core/arch/x86_64/x86_machine.h"
+#elif defined(__linux__) && defined(__x86_64__)
+#include "core/arch/x86_64/x86_machine.h"
 #endif
 
 static std::unique_ptr<MachineModel> CreateMachineModel() {
-#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__)) || (defined(__linux__) && defined(__x86_64__))
     return std::make_unique<X86Machine>();
 #elif defined(__APPLE__) && defined(__aarch64__)
     return std::make_unique<Aarch64Machine>();
@@ -42,6 +44,9 @@ static std::string GetDefaultCmdline(bool debug_mode) {
 
 Vm::~Vm() {
     running_ = false;
+    if (console_input_thread_.joinable()) {
+        console_input_thread_.join();
+    }
     for (auto& t : vcpu_threads_) {
         if (t.joinable()) t.join();
     }
@@ -84,6 +89,9 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     vm->audio_port_ = config.audio_port;
     if (!vm->console_port_ && config.interactive) {
         vm->console_port_ = VmPlatform::CreateConsolePort();
+        // We own the console port: no external IPC controller will pump stdin
+        // for us, so we need to run our own input thread.
+        vm->owned_console_input_ = true;
     }
 
     vm->machine_ = CreateMachineModel();
@@ -111,7 +119,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
         vm->vcpu_startup_[i] = std::make_unique<VCpuStartupState>();
     }
 
-#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__)) || (defined(__linux__) && defined(__x86_64__))
     {
         auto* x86m = dynamic_cast<X86Machine*>(vm->machine_.get());
         if (x86m) {
@@ -229,7 +237,7 @@ void Vm::SetupVCpuCallbacks(uint32_t vcpu_index) {
 }
 
 void Vm::FinalizeBoot(const VmConfig& config) {
-#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__)) || (defined(__linux__) && defined(__x86_64__))
     {
         auto* x86m = dynamic_cast<X86Machine*>(machine_.get());
         if (x86m) {
@@ -258,8 +266,8 @@ bool Vm::AllocateMemory(uint64_t size) {
 
     uint8_t* base = VmPlatform::AllocateRam(alloc);
     if (!base) {
-        LOG_ERROR("Failed to allocate %llu MB guest RAM",
-                  (unsigned long long)(alloc / (1024 * 1024)));
+        LOG_ERROR("Failed to allocate %" PRIu64 " MB guest RAM",
+                  alloc / (1024 * 1024));
         return false;
     }
 
@@ -284,15 +292,16 @@ bool Vm::AllocateMemory(uint64_t size) {
             if (!hv_vm_->MapMemory(mmio_gap_end, base + mem_.low_size,
                                     mem_.high_size, true))
                 return false;
-            LOG_INFO("Guest RAM: %llu MB  [0-0x%llX] + [0x%llX-0x%llX] at HVA %p",
-                     (unsigned long long)(alloc / (1024 * 1024)),
-                     (unsigned long long)(mem_.low_size - 1),
-                     (unsigned long long)mmio_gap_end,
-                     (unsigned long long)(mmio_gap_end + mem_.high_size - 1),
+            LOG_INFO("Guest RAM: %" PRIu64 " MB  [0-0x%" PRIX64 "] + "
+                     "[0x%" PRIX64 "-0x%" PRIX64 "] at HVA %p",
+                     alloc / (1024 * 1024),
+                     mem_.low_size - 1,
+                     mmio_gap_end,
+                     mmio_gap_end + mem_.high_size - 1,
                      base);
         } else {
-            LOG_INFO("Guest RAM: %llu MB at HVA %p",
-                     (unsigned long long)(alloc / (1024 * 1024)), base);
+            LOG_INFO("Guest RAM: %" PRIu64 " MB at HVA %p",
+                     alloc / (1024 * 1024), base);
         }
     } else {
         // ARM-style layout: RAM starts at a high base, MMIO below
@@ -303,9 +312,8 @@ bool Vm::AllocateMemory(uint64_t size) {
         if (!hv_vm_->MapMemory(ram_base, base, alloc, true))
             return false;
 
-        LOG_INFO("Guest RAM: %llu MB at GPA 0x%llX, HVA %p",
-                 (unsigned long long)(alloc / (1024 * 1024)),
-                 (unsigned long long)ram_base, base);
+        LOG_INFO("Guest RAM: %" PRIu64 " MB at GPA 0x%" PRIX64 ", HVA %p",
+                 alloc / (1024 * 1024), ram_base, base);
     }
     return true;
 }
@@ -569,27 +577,39 @@ void Vm::VCpuThreadFunc(uint32_t vcpu_index) {
             break;
 
         case VCpuExitAction::kShutdown:
-            LOG_INFO("vCPU %u: shutdown (after %llu exits)",
-                     vcpu_index, (unsigned long long)exit_count);
+            LOG_INFO("vCPU %u: shutdown (after %" PRIu64 " exits)",
+                     vcpu_index, exit_count);
             RequestStop();
             return;
 
         case VCpuExitAction::kError:
-            LOG_ERROR("vCPU %u: error (after %llu exits)",
-                      vcpu_index, (unsigned long long)exit_count);
+            LOG_ERROR("vCPU %u: error (after %" PRIu64 " exits)",
+                      vcpu_index, exit_count);
             exit_code_.store(1);
             RequestStop();
             return;
         }
     }
 
-    LOG_INFO("vCPU %u stopped (total exits: %llu)",
-             vcpu_index, (unsigned long long)exit_count);
+    LOG_INFO("vCPU %u stopped (total exits: %" PRIu64 ")",
+             vcpu_index, exit_count);
 }
 
 int Vm::Run() {
     running_ = true;
     LOG_INFO("Starting VM execution...");
+
+    if (owned_console_input_ && console_port_) {
+        console_input_thread_ = std::thread([this]() {
+            uint8_t buf[64];
+            while (running_.load()) {
+                size_t n = console_port_->Read(buf, sizeof(buf));
+                if (n > 0) {
+                    InjectConsoleBytes(buf, n);
+                }
+            }
+        });
+    }
 
     // Phase 1: launch threads; each creates its vCPU then signals ready.
     for (uint32_t i = 0; i < cpu_count_; i++) {

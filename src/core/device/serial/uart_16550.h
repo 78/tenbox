@@ -47,6 +47,10 @@ private:
     uint8_t dll_ = 0;
     uint8_t dlh_ = 0;
     bool thre_pending_ = false;
+    // Guest has enabled the 16550A FIFO via FCR bit 0.  Reported back in
+    // IIR[7:6] so Linux's 8250 driver identifies the UART as 16550A and
+    // switches its TX path to burst up to 16 bytes per THRE IRQ roundtrip.
+    bool fifo_enabled_ = false;
 
     IrqCallback irq_callback_;
     TxCallback tx_callback_;

@@ -13,6 +13,7 @@
 #include <commctrl.h>
 #include <windowsx.h>
 
+#include <cinttypes>
 #include <atomic>
 #include <functional>
 #include <iterator>
@@ -148,8 +149,8 @@ static std::string FormatSize(uint64_t bytes) {
     }
     char buf[64];
     if (unit == 0) {
-        snprintf(buf, sizeof(buf), "%llu %s",
-            static_cast<unsigned long long>(bytes), kUnits[unit]);
+        snprintf(buf, sizeof(buf), "%" PRIu64 " %s",
+            bytes, kUnits[unit]);
     } else {
         snprintf(buf, sizeof(buf), "%.1f %s", value, kUnits[unit]);
     }

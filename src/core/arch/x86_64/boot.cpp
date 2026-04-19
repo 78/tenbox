@@ -56,8 +56,8 @@ uint64_t LoadLinuxKernel(const BootConfig& config) {
 
     // Copy protected-mode kernel to 1MB
     memcpy(ram + Layout::kKernelBase, kernel.data() + setup_size, kernel_size);
-    LOG_INFO("Kernel loaded at GPA 0x%llX (%u bytes)",
-             Layout::kKernelBase, kernel_size);
+    LOG_INFO("Kernel loaded at GPA 0x%" PRIX64 " (%u bytes)",
+             (uint64_t)Layout::kKernelBase, kernel_size);
 
     // --- Set up boot_params (zero page) ---
     uint8_t* bp = ram + Layout::kBootParams;
@@ -110,7 +110,7 @@ uint64_t LoadLinuxKernel(const BootConfig& config) {
         *reinterpret_cast<uint32_t*>(bp + BootOffset::kRamdiskSize) =
             static_cast<uint32_t>(initrd.size());
 
-        LOG_INFO("Initrd loaded at GPA 0x%llX (%zu bytes)",
+        LOG_INFO("Initrd loaded at GPA 0x%" PRIX64 " (%zu bytes)",
                  initrd_addr, initrd.size());
     }
 
@@ -126,12 +126,12 @@ uint64_t LoadLinuxKernel(const BootConfig& config) {
     // Entry 2 (optional): high memory above 4 GiB
     if (mem.high_size > 0) {
         e820[e820_count++] = {mem.high_base, mem.high_size, kE820Ram};
-        LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%llX RAM] "
-                 "[0x%llX-0x%llX RAM]",
+        LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%" PRIX64 " RAM] "
+                 "[0x%" PRIX64 "-0x%" PRIX64 " RAM]",
                  mem.low_size - 1,
                  mem.high_base, mem.high_base + mem.high_size - 1);
     } else {
-        LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%llX RAM]",
+        LOG_INFO("E820: [0-0x9FFFF RAM] [0x100000-0x%" PRIX64 " RAM]",
                  mem.low_size - 1);
     }
     bp[BootOffset::kE820Entries] = e820_count;

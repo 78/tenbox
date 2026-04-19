@@ -103,7 +103,7 @@ void GuestAgentHandler::StartSyncHandshake() {
     oss << '\n';
 
     SendRaw(oss.str());
-    LOG_INFO("GuestAgent: sent guest-sync-delimited id=%lld", (long long)id);
+    LOG_INFO("GuestAgent: sent guest-sync-delimited id=%" PRId64, id);
 }
 
 void GuestAgentHandler::OnDataReceived(const uint8_t* data, size_t len) {
@@ -192,7 +192,7 @@ void GuestAgentHandler::SendCommand(const std::string& command) {
     oss << R"({"execute":")" << JsonEscape(command)
         << R"(","id":)" << id << "}\n";
 
-    LOG_INFO("GuestAgent: sending %s (id=%llu)", command.c_str(), (unsigned long long)id);
+    LOG_INFO("GuestAgent: sending %s (id=%" PRIu64 ")", command.c_str(), id);
     SendRaw(oss.str());
 }
 
@@ -209,7 +209,7 @@ void GuestAgentHandler::SendCommand(const std::string& command,
         << R"(","arguments":)" << arguments_json
         << R"(,"id":)" << id << "}\n";
 
-    LOG_INFO("GuestAgent: sending %s (id=%llu)", command.c_str(), (unsigned long long)id);
+    LOG_INFO("GuestAgent: sending %s (id=%" PRIu64 ")", command.c_str(), id);
     SendRaw(oss.str());
 }
 

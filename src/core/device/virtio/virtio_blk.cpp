@@ -28,7 +28,7 @@ bool VirtioBlkDevice::Open(const std::string& path) {
     config_.max_write_zeroes_seg      = 1;
     config_.write_zeroes_may_unmap    = is_qcow2_ ? 1 : 0;
 
-    LOG_INFO("VirtIO block: %s, %llu sectors (%llu MB), %u queues",
+    LOG_INFO("VirtIO block: %s, %" PRIu64 " sectors (%" PRIu64 " MB), %u queues",
              path.c_str(), config_.capacity,
              disk_size / (1024 * 1024), num_queues_);
     return true;

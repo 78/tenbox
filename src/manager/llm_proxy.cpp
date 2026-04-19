@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cinttypes>
 #include <charconv>
 #include <chrono>
 #include <cstring>
@@ -659,10 +660,10 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                 out_stream_end.wsa_error = client_err;
                 char detail[256];
                 snprintf(detail, sizeof(detail),
-                         "VM client closed after %llu ms (%llu bytes, %llu chunks); wsa=%d %s",
-                         static_cast<unsigned long long>(elapsed_ms),
-                         static_cast<unsigned long long>(bytes_total),
-                         static_cast<unsigned long long>(chunk_count),
+                         "VM client closed after %" PRIu64 " ms (%" PRIu64 " bytes, %" PRIu64 " chunks); wsa=%d %s",
+                         elapsed_ms,
+                         bytes_total,
+                         chunk_count,
                          static_cast<int>(client_err),
                          WsaErrorName(static_cast<int>(client_err)));
                 out_stream_end.detail = detail;
@@ -674,11 +675,11 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                 out_stream_end.reason = saw_done ? "upstream_done" : "upstream_closed_no_done";
                 char detail[256];
                 snprintf(detail, sizeof(detail),
-                         "upstream %s after %llu ms (%llu bytes, %llu chunks)",
+                         "upstream %s after %" PRIu64 " ms (%" PRIu64 " bytes, %" PRIu64 " chunks)",
                          saw_done ? "sent [DONE]" : "closed without [DONE]",
-                         static_cast<unsigned long long>(elapsed_ms),
-                         static_cast<unsigned long long>(bytes_total),
-                         static_cast<unsigned long long>(chunk_count));
+                         elapsed_ms,
+                         bytes_total,
+                         chunk_count);
                 out_stream_end.detail = detail;
                 // "Closed without [DONE]" is abnormal; surface it as error.
                 // The happy path ([DONE]) is intentionally not logged.
@@ -692,12 +693,12 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
                 out_stream_end.winhttp_error = last_err;
                 char detail[320];
                 snprintf(detail, sizeof(detail),
-                         "upstream read failed after %llu ms (%llu bytes, %llu chunks, "
-                         "gap=%llu ms, done=%s); winhttp=%lu %s",
-                         static_cast<unsigned long long>(elapsed_ms),
-                         static_cast<unsigned long long>(bytes_total),
-                         static_cast<unsigned long long>(chunk_count),
-                         static_cast<unsigned long long>(gap_ms),
+                         "upstream read failed after %" PRIu64 " ms (%" PRIu64 " bytes, %" PRIu64 " chunks, "
+                         "gap=%" PRIu64 " ms, done=%s); winhttp=%lu %s",
+                         elapsed_ms,
+                         bytes_total,
+                         chunk_count,
+                         gap_ms,
                          saw_done ? "true" : "false",
                          static_cast<unsigned long>(last_err),
                          WinHttpErrorName(last_err));

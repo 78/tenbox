@@ -94,8 +94,8 @@ bool DecodeMmioInstruction(uint32_t insn, uint64_t syndrome,
         return true;
     }
 
-    LOG_WARN("MMIO decode: unsupported instruction 0x%08x, syndrome 0x%llx",
-             insn, (unsigned long long)syndrome);
+    LOG_WARN("MMIO decode: unsupported instruction 0x%08x, syndrome 0x%" PRIx64,
+             insn, (uint64_t)syndrome);
     return false;
 }
 

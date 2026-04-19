@@ -91,9 +91,9 @@ bool Qcow2DiskImage::Open(const std::string& path) {
     // Align to cluster boundary
     file_end_ = (file_end_ + cluster_size_ - 1) & ~(static_cast<uint64_t>(cluster_size_) - 1);
 
-    LOG_INFO("Qcow2: %s, version %u, cluster_size %u, virtual_size %llu MB, "
-             "l1_size %u, refcount_table 0x%llX (%u clusters), "
-             "file_end 0x%llX, compression %s",
+    LOG_INFO("Qcow2: %s, version %u, cluster_size %u, virtual_size %" PRIu64
+             " MB, l1_size %u, refcount_table 0x%" PRIX64
+             " (%u clusters), file_end 0x%" PRIX64 ", compression %s",
              path.c_str(), version_, cluster_size_,
              virtual_size_ / (1024 * 1024), l1_size_,
              refcount_table_offset_, refcount_table_clusters_,
@@ -164,10 +164,9 @@ bool Qcow2DiskImage::ReadHeader() {
             (1ULL << 3);    // compression type
         uint64_t incompat = Be64(hdr.incompatible_features);
         if (incompat & ~kSupportedIncompat) {
-            LOG_ERROR("Qcow2: unsupported incompatible features 0x%llX "
-                      "(supported mask 0x%llX)",
-                      (unsigned long long)incompat,
-                      (unsigned long long)kSupportedIncompat);
+            LOG_ERROR("Qcow2: unsupported incompatible features 0x%" PRIX64
+                      " (supported mask 0x%" PRIX64 ")",
+                      incompat, kSupportedIncompat);
             return false;
         }
         if (incompat & (1ULL << 0)) {
@@ -233,7 +232,7 @@ bool Qcow2DiskImage::ReadL1Table() {
     _fseeki64(file_, l1_table_offset_, SEEK_SET);
     size_t bytes = l1_size_ * sizeof(uint64_t);
     if (fread(l1_table_.data(), 1, bytes, file_) != bytes) {
-        LOG_ERROR("Qcow2: failed to read L1 table (%u entries at 0x%llX)",
+        LOG_ERROR("Qcow2: failed to read L1 table (%u entries at 0x%" PRIX64 ")",
                   l1_size_, l1_table_offset_);
         return false;
     }
@@ -252,7 +251,7 @@ bool Qcow2DiskImage::ReadRefcountTable() {
 
     _fseeki64(file_, refcount_table_offset_, SEEK_SET);
     if (fread(refcount_table_.data(), 1, table_bytes, file_) != table_bytes) {
-        LOG_ERROR("Qcow2: failed to read refcount table at 0x%llX (%zu bytes)",
+        LOG_ERROR("Qcow2: failed to read refcount table at 0x%" PRIX64 " (%zu bytes)",
                   refcount_table_offset_, table_bytes);
         return false;
     }
@@ -291,7 +290,7 @@ uint64_t* Qcow2DiskImage::GetL2Table(uint64_t l2_offset) {
     _fseeki64(file_, l2_offset, SEEK_SET);
     size_t bytes = l2_entries_ * sizeof(uint64_t);
     if (fread(entry.data.data(), 1, bytes, file_) != bytes) {
-        LOG_ERROR("Qcow2: failed to read L2 table at 0x%llX", l2_offset);
+        LOG_ERROR("Qcow2: failed to read L2 table at 0x%" PRIX64, l2_offset);
         return nullptr;
     }
 
@@ -317,7 +316,7 @@ void Qcow2DiskImage::EvictL2Cache() {
         size_t bytes = l2_entries_ * sizeof(uint64_t);
         _fseeki64(file_, victim.l2_offset, SEEK_SET);
         if (fwrite(be_data.data(), 1, bytes, file_) != bytes) {
-            LOG_ERROR("Qcow2: failed to evict L2 table at 0x%llX", victim.l2_offset);
+            LOG_ERROR("Qcow2: failed to evict L2 table at 0x%" PRIX64, victim.l2_offset);
         }
     }
 
@@ -336,7 +335,7 @@ uint16_t* Qcow2DiskImage::GetRefcountBlock(uint64_t cluster_index,
     if (rft_index >= refcount_table_.size()) {
         if (!allocate) return nullptr;
         if (!GrowRefcountTable(cluster_index)) {
-            LOG_ERROR("Qcow2: failed to grow refcount table for cluster %llu", cluster_index);
+            LOG_ERROR("Qcow2: failed to grow refcount table for cluster %" PRIu64, cluster_index);
             return nullptr;
         }
         // rft_index is now valid after grow
@@ -356,7 +355,7 @@ uint16_t* Qcow2DiskImage::GetRefcountBlock(uint64_t cluster_index,
         std::vector<uint8_t> zeros(cluster_size_, 0);
         _fseeki64(file_, block_offset, SEEK_SET);
         if (fwrite(zeros.data(), 1, cluster_size_, file_) != cluster_size_) {
-            LOG_ERROR("Qcow2: failed to write new refcount block at 0x%llX", block_offset);
+            LOG_ERROR("Qcow2: failed to write new refcount block at 0x%" PRIX64, block_offset);
             return nullptr;
         }
 
@@ -398,7 +397,7 @@ uint16_t* Qcow2DiskImage::GetRefcountBlock(uint64_t cluster_index,
     _fseeki64(file_, block_offset, SEEK_SET);
     size_t bytes = rfb_entries_ * sizeof(uint16_t);
     if (fread(entry.data.data(), 1, bytes, file_) != bytes) {
-        LOG_ERROR("Qcow2: failed to read refcount block at 0x%llX", block_offset);
+        LOG_ERROR("Qcow2: failed to read refcount block at 0x%" PRIX64, block_offset);
         return nullptr;
     }
 
@@ -423,7 +422,7 @@ void Qcow2DiskImage::EvictRfbCache() {
         size_t bytes = rfb_entries_ * sizeof(uint16_t);
         _fseeki64(file_, victim.offset_in_file, SEEK_SET);
         if (fwrite(be_data.data(), 1, bytes, file_) != bytes) {
-            LOG_ERROR("Qcow2: failed to evict refcount block at 0x%llX",
+            LOG_ERROR("Qcow2: failed to evict refcount block at 0x%" PRIX64,
                       victim.offset_in_file);
         }
     }
@@ -494,7 +493,7 @@ bool Qcow2DiskImage::GrowRefcountTable(uint64_t min_cluster_index) {
     }
     _fseeki64(file_, new_table_offset, SEEK_SET);
     if (fwrite(be_table.data(), 1, new_byte_size, file_) != new_byte_size) {
-        LOG_ERROR("Qcow2: failed to write new refcount table at 0x%llX", new_table_offset);
+        LOG_ERROR("Qcow2: failed to write new refcount table at 0x%" PRIX64, new_table_offset);
         return false;
     }
 
@@ -594,7 +593,7 @@ bool Qcow2DiskImage::GrowRefcountTable(uint64_t min_cluster_index) {
         FreeCluster(old_table_offset + static_cast<uint64_t>(i) * cluster_size_);
     }
 
-    LOG_INFO("Qcow2: grew refcount table to %u clusters (%zu entries) at 0x%llX",
+    LOG_INFO("Qcow2: grew refcount table to %u clusters (%zu entries) at 0x%" PRIX64,
              new_clusters, new_entries, new_table_offset);
     return true;
 }
@@ -671,7 +670,7 @@ bool Qcow2DiskImage::ReadCompressedCluster(uint64_t comp_host_off,
     std::vector<uint8_t> comp_buf(comp_size);
     _fseeki64(file_, comp_host_off, SEEK_SET);
     if (fread(comp_buf.data(), 1, comp_size, file_) != comp_size) {
-        LOG_ERROR("Qcow2: failed to read compressed data at 0x%llX (%u bytes)",
+        LOG_ERROR("Qcow2: failed to read compressed data at 0x%" PRIX64 " (%u bytes)",
                   comp_host_off, comp_size);
         return false;
     }
@@ -719,7 +718,7 @@ bool Qcow2DiskImage::ReadCompressedCluster(uint64_t comp_host_off,
         inflateEnd(&strm);
 
         if (ret != Z_STREAM_END && ret != Z_OK) {
-            LOG_ERROR("Qcow2: inflate failed (%d) for cluster at 0x%llX",
+            LOG_ERROR("Qcow2: inflate failed (%d) for cluster at 0x%" PRIX64,
                       ret, comp_host_off);
             return false;
         }
@@ -751,8 +750,7 @@ bool Qcow2DiskImage::CheckMetadataOverlap(uint64_t offset, uint64_t size) {
 
     // Header cluster (cluster 0)
     if (offset < cluster_size_) {
-        LOG_ERROR("Qcow2: overlap with header at offset 0x%llX",
-                  (unsigned long long)offset);
+        LOG_ERROR("Qcow2: overlap with header at offset 0x%" PRIX64, offset);
         return false;
     }
 
@@ -760,8 +758,7 @@ bool Qcow2DiskImage::CheckMetadataOverlap(uint64_t offset, uint64_t size) {
     uint64_t l1_end = l1_table_offset_ +
         static_cast<uint64_t>(l1_size_) * sizeof(uint64_t);
     if (offset < l1_end && end > l1_table_offset_) {
-        LOG_ERROR("Qcow2: overlap with L1 table at offset 0x%llX",
-                  (unsigned long long)offset);
+        LOG_ERROR("Qcow2: overlap with L1 table at offset 0x%" PRIX64, offset);
         return false;
     }
 
@@ -769,8 +766,7 @@ bool Qcow2DiskImage::CheckMetadataOverlap(uint64_t offset, uint64_t size) {
     uint64_t rft_end = refcount_table_offset_ +
         static_cast<uint64_t>(refcount_table_clusters_) * cluster_size_;
     if (offset < rft_end && end > refcount_table_offset_) {
-        LOG_ERROR("Qcow2: overlap with refcount table at offset 0x%llX",
-                  (unsigned long long)offset);
+        LOG_ERROR("Qcow2: overlap with refcount table at offset 0x%" PRIX64, offset);
         return false;
     }
 
@@ -782,8 +778,8 @@ bool Qcow2DiskImage::CheckMetadataOverlap(uint64_t offset, uint64_t size) {
     if (rft_i < refcount_table_.size()) {
         uint64_t blk = refcount_table_[rft_i];
         if (blk != 0 && offset < blk + cluster_size_ && end > blk) {
-            LOG_ERROR("Qcow2: overlap with refcount block at offset 0x%llX",
-                      (unsigned long long)offset);
+            LOG_ERROR("Qcow2: overlap with refcount block at offset 0x%" PRIX64,
+                      offset);
             return false;
         }
     }
@@ -837,7 +833,7 @@ uint64_t Qcow2DiskImage::AllocateCluster() {
         std::vector<uint8_t> zeros(cluster_size_, 0);
         _fseeki64(file_, offset, SEEK_SET);
         if (fwrite(zeros.data(), 1, cluster_size_, file_) != cluster_size_) {
-            LOG_ERROR("Qcow2: failed to extend file at 0x%llX", offset);
+            LOG_ERROR("Qcow2: failed to extend file at 0x%" PRIX64, offset);
             return 0;
         }
         file_end_ = offset + cluster_size_;
@@ -851,13 +847,13 @@ void Qcow2DiskImage::FreeCluster(uint64_t host_offset) {
     uint32_t rfb_index;
     uint16_t* rfb = GetRefcountBlock(cluster_index, &rfb_index, false);
     if (!rfb) {
-        LOG_ERROR("Qcow2: FreeCluster: no refcount block for offset 0x%llX",
+        LOG_ERROR("Qcow2: FreeCluster: no refcount block for offset 0x%" PRIX64,
                   host_offset);
         return;
     }
 
     if (rfb[rfb_index] == 0) {
-        LOG_ERROR("Qcow2: FreeCluster: refcount already 0 for offset 0x%llX",
+        LOG_ERROR("Qcow2: FreeCluster: refcount already 0 for offset 0x%" PRIX64,
                   host_offset);
         return;
     }
@@ -918,8 +914,7 @@ uint64_t* Qcow2DiskImage::EnsureL2Table(uint32_t l1_idx) {
     std::vector<uint8_t> zeros(cluster_size_, 0);
     _fseeki64(file_, new_l2_off, SEEK_SET);
     if (fwrite(zeros.data(), 1, cluster_size_, file_) != cluster_size_) {
-        LOG_ERROR("Qcow2: failed to zero L2 table at 0x%llX",
-                  (unsigned long long)new_l2_off);
+        LOG_ERROR("Qcow2: failed to zero L2 table at 0x%" PRIX64, new_l2_off);
         return nullptr;
     }
 
@@ -1156,7 +1151,7 @@ bool Qcow2DiskImage::Flush() {
             size_t bytes = l2_entries_ * sizeof(uint64_t);
             _fseeki64(file_, entry.l2_offset, SEEK_SET);
             if (fwrite(be_data.data(), 1, bytes, file_) != bytes) {
-                LOG_ERROR("Qcow2: Flush: failed to write L2 table at 0x%llX",
+                LOG_ERROR("Qcow2: Flush: failed to write L2 table at 0x%" PRIX64,
                           entry.l2_offset);
             }
             entry.dirty = false;
@@ -1172,7 +1167,7 @@ bool Qcow2DiskImage::Flush() {
             size_t bytes = rfb_entries_ * sizeof(uint16_t);
             _fseeki64(file_, entry.offset_in_file, SEEK_SET);
             if (fwrite(be_data.data(), 1, bytes, file_) != bytes) {
-                LOG_ERROR("Qcow2: Flush: failed to write refcount block at 0x%llX",
+                LOG_ERROR("Qcow2: Flush: failed to write refcount block at 0x%" PRIX64,
                           entry.offset_in_file);
             }
             entry.dirty = false;

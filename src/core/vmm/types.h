@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cinttypes>   // PRIu64 / PRIx64 / PRIX64 / PRId64 for portable uint64_t printf
 #include <string>
 #include <memory>
 #include <functional>

@@ -400,8 +400,9 @@ GPA BuildAcpiTables(uint8_t* ram, uint32_t num_cpus,
     rsdp->checksum = AcpiChecksum(rsdp_base, 20);
     rsdp->extended_checksum = AcpiChecksum(rsdp_base, sizeof(AcpiRsdp));
 
-    LOG_INFO("ACPI tables: RSDP@0x%llX XSDT@0x%llX MADT@0x%llX "
-             "FADT@0x%llX DSDT@0x%llX (%u virtio-mmio dev%s)",
+    LOG_INFO("ACPI tables: RSDP@0x%" PRIX64 " XSDT@0x%" PRIX64
+             " MADT@0x%" PRIX64 " FADT@0x%" PRIX64 " DSDT@0x%" PRIX64
+             " (%u virtio-mmio dev%s)",
              AcpiLayout::kRsdp, AcpiLayout::kXsdt, AcpiLayout::kMadt,
              AcpiLayout::kFadt, AcpiLayout::kDsdt,
              (uint32_t)virtio_devs.size(),

@@ -1,5 +1,6 @@
 #include "platform/windows/hypervisor/whvp_vm.h"
 #include "platform/windows/hypervisor/whvp_vcpu.h"
+#include <cinttypes>
 #include <intrin.h>
 
 namespace whvp {
@@ -44,12 +45,12 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
     hr = WHvGetCapability(WHvCapabilityCodeProcessorClockFrequency,
                           &proc_freq, sizeof(proc_freq), nullptr);
     if (SUCCEEDED(hr) && proc_freq) {
-        LOG_INFO("WHVP ProcessorClockFrequency: %llu Hz", proc_freq);
+        LOG_INFO("WHVP ProcessorClockFrequency: %" PRIu64 " Hz", proc_freq);
     }
     hr = WHvGetCapability(WHvCapabilityCodeInterruptClockFrequency,
                           &intr_freq, sizeof(intr_freq), nullptr);
     if (SUCCEEDED(hr) && intr_freq) {
-        LOG_INFO("WHVP InterruptClockFrequency: %llu Hz", intr_freq);
+        LOG_INFO("WHVP InterruptClockFrequency: %" PRIu64 " Hz", intr_freq);
     }
 
     // Build CPUID override list: 0x15 (TSC freq) + 0x01 (features).
@@ -69,7 +70,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
             // Intel CPU with native CPUID 0x15 support.
             if (crystal == 0) crystal = 38400000;  // 38.4 MHz for modern Intel
             uint64_t tsc_freq = static_cast<uint64_t>(crystal) * numer / denom;
-            LOG_INFO("CPUID 0x15 (native): crystal=%u Hz, TSC=%llu Hz", crystal, tsc_freq);
+            LOG_INFO("CPUID 0x15 (native): crystal=%u Hz, TSC=%" PRIu64 " Hz", crystal, tsc_freq);
         } else {
             // AMD or older CPU without CPUID 0x15 - synthesize it from QPC measurement.
             LARGE_INTEGER qpf, qpc_start, qpc_end;
@@ -89,7 +90,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
             crystal = 1000000;
             numer = static_cast<uint32_t>(tsc_freq / 1000000);
             denom = 1;
-            LOG_INFO("CPUID 0x15 (synthesized): crystal=%u Hz, TSC=%llu Hz", crystal, tsc_freq);
+            LOG_INFO("CPUID 0x15 (synthesized): crystal=%u Hz, TSC=%" PRIu64 " Hz", crystal, tsc_freq);
         }
 
         auto& o = cpuid_overrides[num_overrides++];
@@ -167,7 +168,7 @@ bool WhvpVm::MapMemory(GPA gpa, void* hva, uint64_t size, bool writable) {
 
     HRESULT hr = WHvMapGpaRange(partition_, hva, gpa, size, flags);
     if (FAILED(hr)) {
-        LOG_ERROR("WHvMapGpaRange(gpa=0x%llX, size=0x%llX) failed: 0x%08lX",
+        LOG_ERROR("WHvMapGpaRange(gpa=0x%" PRIX64 ", size=0x%" PRIX64 ") failed: 0x%08lX",
                   gpa, size, hr);
         return false;
     }

@@ -4,6 +4,7 @@
 #include "core/device/irq/gicv3_regs.h"
 #include "core/vmm/types.h"
 #include <chrono>
+#include <cinttypes>
 #include <cstdio>
 #include <thread>
 
@@ -31,9 +32,9 @@ static void SanitizeIdRegistersForSoftGic(hv_vcpu_t vcpu, uint32_t index) {
         uint64_t masked = isar1 & ~kPacMask1;
         if (masked != isar1) {
             ret = hv_vcpu_set_sys_reg(vcpu, HV_SYS_REG_ID_AA64ISAR1_EL1, masked);
-            LOG_INFO("hvf: vCPU %u ID_AA64ISAR1_EL1: 0x%llx -> 0x%llx (PAC masked, ret=%d)",
-                     index, (unsigned long long)isar1,
-                     (unsigned long long)masked, (int)ret);
+            LOG_INFO("hvf: vCPU %u ID_AA64ISAR1_EL1: 0x%" PRIx64 " -> 0x%" PRIx64 " (PAC masked, ret=%d)",
+                     index, isar1,
+                     masked, (int)ret);
         }
     }
 
@@ -48,9 +49,9 @@ static void SanitizeIdRegistersForSoftGic(hv_vcpu_t vcpu, uint32_t index) {
         uint64_t masked = isar2 & ~kPacMask2;
         if (masked != isar2) {
             ret = hv_vcpu_set_sys_reg(vcpu, kIdAa64Isar2El1, masked);
-            LOG_INFO("hvf: vCPU %u ID_AA64ISAR2_EL1: 0x%llx -> 0x%llx (PAC masked, ret=%d)",
-                     index, (unsigned long long)isar2,
-                     (unsigned long long)masked, (int)ret);
+            LOG_INFO("hvf: vCPU %u ID_AA64ISAR2_EL1: 0x%" PRIx64 " -> 0x%" PRIx64 " (PAC masked, ret=%d)",
+                     index, isar2,
+                     masked, (int)ret);
         }
     }
 }
@@ -224,9 +225,9 @@ bool HvfVCpu::SetupAarch64Boot(uint64_t entry_pc, uint64_t fdt_addr) {
         return false;
     }
 
-    LOG_INFO("hvf: vCPU %u ARM64 boot: PC=0x%llx, X0(FDT)=0x%llx",
-             index_, (unsigned long long)entry_pc,
-             (unsigned long long)fdt_addr);
+    LOG_INFO("hvf: vCPU %u ARM64 boot: PC=0x%" PRIx64 ", X0(FDT)=0x%" PRIx64,
+             index_, entry_pc,
+             fdt_addr);
     return true;
 }
 
@@ -234,9 +235,9 @@ bool HvfVCpu::SetupSecondaryCpu(uint64_t entry_pc, uint64_t context_id) {
     hv_vcpu_set_reg(vcpu_, HV_REG_PC, entry_pc);
     hv_vcpu_set_reg(vcpu_, HV_REG_X0, context_id);
     hv_vcpu_set_reg(vcpu_, HV_REG_CPSR, 0x3C5);
-    LOG_INFO("hvf: vCPU %u secondary boot: PC=0x%llx, X0=0x%llx",
-             index_, (unsigned long long)entry_pc,
-             (unsigned long long)context_id);
+    LOG_INFO("hvf: vCPU %u secondary boot: PC=0x%" PRIx64 ", X0=0x%" PRIx64,
+             index_, entry_pc,
+             context_id);
     return true;
 }
 
@@ -284,8 +285,8 @@ VCpuExitAction HvfVCpu::HandleException() {
     {
         s_stats_.ec_brk.fetch_add(1, std::memory_order_relaxed);
         uint16_t imm = syndrome & 0xFFFF;
-        LOG_WARN("hvf: vCPU %u BRK #%u (syndrome=0x%llx) — skipping",
-                 index_, imm, (unsigned long long)syndrome);
+        LOG_WARN("hvf: vCPU %u BRK #%u (syndrome=0x%" PRIx64 ") — skipping",
+                 index_, imm, syndrome);
         uint64_t pc;
         hv_vcpu_get_reg(vcpu_, HV_REG_PC, &pc);
         hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
@@ -294,12 +295,12 @@ VCpuExitAction HvfVCpu::HandleException() {
 
     default:
         s_stats_.ec_other.fetch_add(1, std::memory_order_relaxed);
-        LOG_ERROR("hvf: vCPU %u unhandled EC=0x%02x (syndrome=0x%llx, "
-                  "VA=0x%llx, IPA=0x%llx)",
+        LOG_ERROR("hvf: vCPU %u unhandled EC=0x%02x (syndrome=0x%" PRIx64 ", "
+                  "VA=0x%" PRIx64 ", IPA=0x%" PRIx64 ")",
                   index_, ec,
-                  (unsigned long long)syndrome,
-                  (unsigned long long)vcpu_exit_->exception.virtual_address,
-                  (unsigned long long)vcpu_exit_->exception.physical_address);
+                  syndrome,
+                  vcpu_exit_->exception.virtual_address,
+                  vcpu_exit_->exception.physical_address);
         return VCpuExitAction::kError;
     }
 }
@@ -421,10 +422,10 @@ VCpuExitAction HvfVCpu::HandleSysReg(uint64_t syndrome) {
             }
         }
 
-        LOG_WARN("hvf: vCPU %u unhandled sysreg %s S%u_%u_C%u_C%u_%u (Xt=x%u) at PC=0x%llx",
+        LOG_WARN("hvf: vCPU %u unhandled sysreg %s S%u_%u_C%u_C%u_%u (Xt=x%u) at PC=0x%" PRIx64,
                  index_, is_read ? "MRS" : "MSR",
                  Op0, Op1, CRn, CRm, Op2, rt,
-                 (unsigned long long)pc);
+                 pc);
     }
 
     hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
@@ -457,9 +458,9 @@ VCpuExitAction HvfVCpu::HandleDataAbort(uint64_t syndrome) {
         uint64_t far_el2 = vcpu_exit_->exception.virtual_address;
         (void)far_el2;
 
-        LOG_WARN("hvf: vCPU %u DABT without ISV at GPA=0x%llx — "
+        LOG_WARN("hvf: vCPU %u DABT without ISV at GPA=0x%" PRIx64 " — "
                  "instruction decode not yet fully implemented",
-                 index_, (unsigned long long)gpa);
+                 index_, gpa);
 
         hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
         return VCpuExitAction::kContinue;
@@ -469,15 +470,15 @@ VCpuExitAction HvfVCpu::HandleDataAbort(uint64_t syndrome) {
         s_stats_.dabt_write.fetch_add(1, std::memory_order_relaxed);
         uint64_t value = decode.write_value;
         if (!addr_space_->HandleMmioWrite(gpa, decode.access_size, value)) {
-            LOG_WARN("hvf: unhandled MMIO write at GPA=0x%llx size=%u",
-                     (unsigned long long)gpa, decode.access_size);
+            LOG_WARN("hvf: unhandled MMIO write at GPA=0x%" PRIx64 " size=%u",
+                     gpa, decode.access_size);
         }
     } else {
         s_stats_.dabt_read.fetch_add(1, std::memory_order_relaxed);
         uint64_t value = 0;
         if (!addr_space_->HandleMmioRead(gpa, decode.access_size, &value)) {
-            LOG_WARN("hvf: unhandled MMIO read at GPA=0x%llx size=%u",
-                     (unsigned long long)gpa, decode.access_size);
+            LOG_WARN("hvf: unhandled MMIO read at GPA=0x%" PRIx64 " size=%u",
+                     gpa, decode.access_size);
         }
         if (decode.reg < 31) {
             hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + decode.reg), value);
@@ -511,44 +512,44 @@ void HvfVCpu::PrintExitStats() {
     uint64_t canceled = s_stats_.canceled.load(std::memory_order_relaxed);
 
     printf("\n========== aarch64 Exit Statistics (per second) ==========\n");
-    printf("Total exits: %llu\n", (unsigned long long)total);
-    printf("  Exception: %llu\n", (unsigned long long)exception);
-    printf("  VTimer:    %llu\n", (unsigned long long)vtimer);
-    printf("  Canceled:  %llu\n", (unsigned long long)canceled);
+    printf("Total exits: %" PRIu64 "\n", total);
+    printf("  Exception: %" PRIu64 "\n", exception);
+    printf("  VTimer:    %" PRIu64 "\n", vtimer);
+    printf("  Canceled:  %" PRIu64 "\n", canceled);
 
     printf("\n--- Exception Classes ---\n");
-    printf("  WFI/WFE:       %llu\n", (unsigned long long)s_stats_.ec_wfi_wfe.load(std::memory_order_relaxed));
-    printf("  HVC64:         %llu\n", (unsigned long long)s_stats_.ec_hvc64.load(std::memory_order_relaxed));
-    printf("  SMC64:         %llu\n", (unsigned long long)s_stats_.ec_smc64.load(std::memory_order_relaxed));
-    printf("  SysReg:        %llu\n", (unsigned long long)s_stats_.ec_sysreg.load(std::memory_order_relaxed));
-    printf("  DABT Lower:    %llu\n", (unsigned long long)s_stats_.ec_dabt_lower.load(std::memory_order_relaxed));
-    printf("  DABT Curr:     %llu\n", (unsigned long long)s_stats_.ec_dabt_curr.load(std::memory_order_relaxed));
-    printf("  BRK:           %llu\n", (unsigned long long)s_stats_.ec_brk.load(std::memory_order_relaxed));
-    printf("  Other:         %llu\n", (unsigned long long)s_stats_.ec_other.load(std::memory_order_relaxed));
+    printf("  WFI/WFE:       %" PRIu64 "\n", s_stats_.ec_wfi_wfe.load(std::memory_order_relaxed));
+    printf("  HVC64:         %" PRIu64 "\n", s_stats_.ec_hvc64.load(std::memory_order_relaxed));
+    printf("  SMC64:         %" PRIu64 "\n", s_stats_.ec_smc64.load(std::memory_order_relaxed));
+    printf("  SysReg:        %" PRIu64 "\n", s_stats_.ec_sysreg.load(std::memory_order_relaxed));
+    printf("  DABT Lower:    %" PRIu64 "\n", s_stats_.ec_dabt_lower.load(std::memory_order_relaxed));
+    printf("  DABT Curr:     %" PRIu64 "\n", s_stats_.ec_dabt_curr.load(std::memory_order_relaxed));
+    printf("  BRK:           %" PRIu64 "\n", s_stats_.ec_brk.load(std::memory_order_relaxed));
+    printf("  Other:         %" PRIu64 "\n", s_stats_.ec_other.load(std::memory_order_relaxed));
 
     uint64_t total_dabt = s_stats_.ec_dabt_lower.load(std::memory_order_relaxed) + 
                           s_stats_.ec_dabt_curr.load(std::memory_order_relaxed);
     if (total_dabt > 0) {
         printf("\n--- Data Abort Details ---\n");
-        printf("  Total DABT:    %llu\n", (unsigned long long)total_dabt);
-        printf("  Read:          %llu\n", (unsigned long long)s_stats_.dabt_read.load(std::memory_order_relaxed));
-        printf("  Write:         %llu\n", (unsigned long long)s_stats_.dabt_write.load(std::memory_order_relaxed));
-        printf("  ISV Valid:     %llu\n", (unsigned long long)s_stats_.dabt_isv_valid.load(std::memory_order_relaxed));
-        printf("  ISV Invalid:   %llu\n", (unsigned long long)s_stats_.dabt_isv_invalid.load(std::memory_order_relaxed));
+        printf("  Total DABT:    %" PRIu64 "\n", total_dabt);
+        printf("  Read:          %" PRIu64 "\n", s_stats_.dabt_read.load(std::memory_order_relaxed));
+        printf("  Write:         %" PRIu64 "\n", s_stats_.dabt_write.load(std::memory_order_relaxed));
+        printf("  ISV Valid:     %" PRIu64 "\n", s_stats_.dabt_isv_valid.load(std::memory_order_relaxed));
+        printf("  ISV Invalid:   %" PRIu64 "\n", s_stats_.dabt_isv_invalid.load(std::memory_order_relaxed));
     }
 
     uint64_t total_hvc = s_stats_.ec_hvc64.load(std::memory_order_relaxed) + 
                          s_stats_.ec_smc64.load(std::memory_order_relaxed);
     if (total_hvc > 0) {
         printf("\n--- HVC/SMC Details ---\n");
-        printf("  Total HVC/SMC: %llu\n", (unsigned long long)total_hvc);
-        printf("  PSCI Version:  %llu\n", (unsigned long long)s_stats_.hvc_version.load(std::memory_order_relaxed));
-        printf("  PSCI Features: %llu\n", (unsigned long long)s_stats_.hvc_features.load(std::memory_order_relaxed));
-        printf("  PSCI CPU_ON:   %llu\n", (unsigned long long)s_stats_.hvc_cpu_on.load(std::memory_order_relaxed));
-        printf("  PSCI CPU_OFF:  %llu\n", (unsigned long long)s_stats_.hvc_cpu_off.load(std::memory_order_relaxed));
-        printf("  PSCI SYS_OFF:  %llu\n", (unsigned long long)s_stats_.hvc_system_off.load(std::memory_order_relaxed));
-        printf("  PSCI SYS_RST:  %llu\n", (unsigned long long)s_stats_.hvc_system_reset.load(std::memory_order_relaxed));
-        printf("  Unknown:       %llu\n", (unsigned long long)s_stats_.hvc_unknown.load(std::memory_order_relaxed));
+        printf("  Total HVC/SMC: %" PRIu64 "\n", total_hvc);
+        printf("  PSCI Version:  %" PRIu64 "\n", s_stats_.hvc_version.load(std::memory_order_relaxed));
+        printf("  PSCI Features: %" PRIu64 "\n", s_stats_.hvc_features.load(std::memory_order_relaxed));
+        printf("  PSCI CPU_ON:   %" PRIu64 "\n", s_stats_.hvc_cpu_on.load(std::memory_order_relaxed));
+        printf("  PSCI CPU_OFF:  %" PRIu64 "\n", s_stats_.hvc_cpu_off.load(std::memory_order_relaxed));
+        printf("  PSCI SYS_OFF:  %" PRIu64 "\n", s_stats_.hvc_system_off.load(std::memory_order_relaxed));
+        printf("  PSCI SYS_RST:  %" PRIu64 "\n", s_stats_.hvc_system_reset.load(std::memory_order_relaxed));
+        printf("  Unknown:       %" PRIu64 "\n", s_stats_.hvc_unknown.load(std::memory_order_relaxed));
     }
 
     printf("==========================================================\n\n");

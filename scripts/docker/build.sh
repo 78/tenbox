@@ -114,7 +114,21 @@ fi
 
 WORK_DIR="/tmp/tenbox-${ARCH}-${TARGET}"
 
+# Rootfs builds require loop-mounting rootfs.raw inside the container.
+# Even with --privileged, Docker does not share the host's /dev by default,
+# so losetup inside the container may fail to create/allocate loop devices.
+# Bind-mount /dev and ensure the loop module is available on the host.
+DEV_ARGS=()
+if needs_qemu_img "$TARGET"; then
+    if [ ! -e /dev/loop-control ]; then
+        echo "Loading 'loop' kernel module on host..."
+        sudo modprobe loop || true
+    fi
+    DEV_ARGS=(-v /dev:/dev)
+fi
+
 exec docker run --rm --privileged \
+    "${DEV_ARGS[@]}" \
     -v "$PROJECT_ROOT:/workspace" \
     -e ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}" \
     -e USER_NAME="${USER_NAME:-tenbox}" \

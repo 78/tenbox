@@ -56,6 +56,11 @@ void Uart16550::PioRead(uint16_t offset, uint8_t size, uint32_t* value) {
         } else {
             val = 0x01; // No interrupt pending
         }
+        // Bits 7:6 = 11 when FIFO is enabled: 16550A identification signal.
+        // Linux 8250 autoconfig uses (IIR & 0xC0) == 0xC0 to detect 16550A.
+        if (fifo_enabled_) {
+            val |= 0xC0;
+        }
         break;
     case kLCR:
         val = lcr_;
@@ -109,6 +114,17 @@ void Uart16550::PioWrite(uint16_t offset, uint8_t size, uint32_t value) {
         break;
     }
     case kFCR:
+        // FCR bit 0: FIFO enable.  Bit 1: clear RX FIFO.  Bit 2: clear TX
+        // FIFO (TX drains synchronously through tx_callback_, so nothing to
+        // clear).  Bits 6:7 set the RX trigger level; we don't model the
+        // threshold separately since RX is a ring consumed on demand.
+        fifo_enabled_ = (val & 0x01) != 0;
+        if (val & 0x02) {
+            std::lock_guard<std::mutex> lock(rx_mutex_);
+            rx_head_ = 0;
+            rx_tail_ = 0;
+            rx_count_ = 0;
+        }
         break;
     case kLCR:
         lcr_ = val;

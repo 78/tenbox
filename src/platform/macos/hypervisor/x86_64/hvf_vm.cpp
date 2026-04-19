@@ -1,6 +1,7 @@
 #include "platform/macos/hypervisor/x86_64/hvf_vm.h"
 #include "platform/macos/hypervisor/x86_64/hvf_vcpu.h"
 #include "core/vmm/types.h"
+#include <cinttypes>
 
 #include <Hypervisor/hv.h>
 
@@ -37,19 +38,18 @@ bool HvfVm::MapMemory(GPA gpa, void* hva, uint64_t size, bool writable) {
 
     hv_return_t ret = hv_vm_map(hva, gpa, size, flags);
     if (ret != HV_SUCCESS) {
-        LOG_ERROR("hvf: hv_vm_map(GPA=0x%llx, size=0x%llx, flags=0x%llx) failed: %d",
-                  (unsigned long long)gpa, (unsigned long long)size,
-                  (unsigned long long)flags, (int)ret);
+        LOG_ERROR("hvf: hv_vm_map(GPA=0x%" PRIx64 ", size=0x%" PRIx64 ", flags=0x%" PRIx64 ") failed: %d",
+                  gpa, size, (uint64_t)flags, (int)ret);
         return false;
     }
-    LOG_INFO("hvf: mapped GPA=0x%llx size=0x%llx HVA=%p flags=0x%llx",
-             (unsigned long long)gpa, (unsigned long long)size, hva, (unsigned long long)flags);
+    LOG_INFO("hvf: mapped GPA=0x%" PRIx64 " size=0x%" PRIx64 " HVA=%p flags=0x%" PRIx64,
+             gpa, size, hva, (uint64_t)flags);
 
     // Verify the mapping by re-protecting with full RWX
     ret = hv_vm_protect(gpa, size, flags);
     if (ret != HV_SUCCESS) {
-        LOG_WARN("hvf: hv_vm_protect(GPA=0x%llx) failed: %d",
-                 (unsigned long long)gpa, (int)ret);
+        LOG_WARN("hvf: hv_vm_protect(GPA=0x%" PRIx64 ") failed: %d",
+                 gpa, (int)ret);
     }
 
     return true;
@@ -58,8 +58,8 @@ bool HvfVm::MapMemory(GPA gpa, void* hva, uint64_t size, bool writable) {
 bool HvfVm::UnmapMemory(GPA gpa, uint64_t size) {
     hv_return_t ret = hv_vm_unmap(gpa, size);
     if (ret != HV_SUCCESS) {
-        LOG_ERROR("hvf: hv_vm_unmap(GPA=0x%llx) failed: %d",
-                  (unsigned long long)gpa, (int)ret);
+        LOG_ERROR("hvf: hv_vm_unmap(GPA=0x%" PRIx64 ") failed: %d",
+                  gpa, (int)ret);
         return false;
     }
     return true;

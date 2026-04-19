@@ -23,7 +23,7 @@ if(WIN32)
 elseif(APPLE)
     set(HVF_COMMON_SOURCES
         ${CMAKE_SOURCE_DIR}/src/platform/macos/hypervisor/hvf_platform.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/macos/console/posix_console_port.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/posix/console/posix_console_port.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/macos/vm_platform_macos.cpp
     )
 
@@ -52,5 +52,27 @@ elseif(APPLE)
         PUBLIC
             tenbox_core
             "-framework Hypervisor"
+    )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(KVM_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/kvm_platform.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/x86_64/kvm_vm.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/x86_64/kvm_vcpu.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/vm_platform_linux.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/posix/console/posix_console_port.cpp
+    )
+
+    add_library(tenbox_platform STATIC ${KVM_SOURCES})
+
+    target_include_directories(tenbox_platform
+        PUBLIC
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_BINARY_DIR}
+    )
+
+    target_link_libraries(tenbox_platform
+        PUBLIC
+            tenbox_core
+            pthread
     )
 endif()

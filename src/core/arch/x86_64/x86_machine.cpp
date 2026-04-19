@@ -110,6 +110,16 @@ bool X86Machine::SetupBootVCpu(HypervisorVCpu* vcpu, uint8_t* ram) {
 }
 
 void X86Machine::InjectIrq(HypervisorVm* hv_vm, uint8_t irq) {
+    // Hypervisors with an in-kernel irqchip (KVM) handle the IOAPIC/PIC/LAPIC
+    // in the kernel.  InjectIrq() has pulse semantics (one-shot edge IRQ), so
+    // pulse the GSI line: assert then de-assert.  Without the de-assert, an
+    // edge-triggered line stays latched high and no further IRQs re-fire on
+    // the same GSI (breaks UART THRE, PIT tick, etc.).
+    if (hv_vm->AssertIrq(irq, true)) {
+        hv_vm->AssertIrq(irq, false);
+        return;
+    }
+
     uint64_t rte = 0;
     if (!ioapic_.GetRedirEntry(irq, &rte)) return;
 
@@ -129,6 +139,7 @@ void X86Machine::InjectIrq(HypervisorVm* hv_vm, uint8_t irq) {
 }
 
 void X86Machine::SetIrqLevel(HypervisorVm* hv_vm, uint8_t irq, bool asserted) {
+    if (hv_vm->AssertIrq(irq, asserted)) return;
     if (asserted) {
         InjectIrq(hv_vm, irq);
     }

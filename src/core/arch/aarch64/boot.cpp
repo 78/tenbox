@@ -59,9 +59,8 @@ GPA LoadLinuxImage(BootConfig& config) {
         return 0;
     }
 
-    LOG_INFO("aarch64: kernel loaded at GPA 0x%llx (%ld bytes, text_offset=0x%llx)",
-             (unsigned long long)kernel_gpa, file_size,
-             (unsigned long long)text_offset);
+    LOG_INFO("aarch64: kernel loaded at GPA 0x%" PRIx64 " (%ld bytes, text_offset=0x%" PRIx64 ")",
+             (uint64_t)kernel_gpa, file_size, text_offset);
 
     return kernel_gpa;
 }

@@ -1,5 +1,5 @@
 #include "core/vmm/vm_platform.h"
-#include "platform/macos/console/posix_console_port.h"
+#include "platform/posix/console/posix_console_port.h"
 #include "platform/macos/hypervisor/hvf_platform.h"
 
 #ifdef __aarch64__

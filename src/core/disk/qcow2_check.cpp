@@ -64,8 +64,7 @@ int Qcow2DiskImage::RepairLeaks(bool fix) {
         _fseeki64(file_, l2_offset, SEEK_SET);
         size_t l2_bytes = l2_entries_ * sizeof(uint64_t);
         if (fread(l2_raw.data(), 1, l2_bytes, file_) != l2_bytes) {
-            LOG_ERROR("Qcow2: Check: failed to read L2 table at 0x%llX",
-                      (unsigned long long)l2_offset);
+            LOG_ERROR("Qcow2: Check: failed to read L2 table at 0x%" PRIX64, l2_offset);
             continue;
         }
 
@@ -131,12 +130,12 @@ int Qcow2DiskImage::RepairLeaks(bool fix) {
 
     for (uint64_t idx = 0; idx < total_clusters; idx++) {
         if (stored[idx] > computed[idx]) {
-            LOG_INFO("Leaked cluster %llu refcount=%u reference=%u",
-                     (unsigned long long)idx, stored[idx], computed[idx]);
+            LOG_INFO("Leaked cluster %" PRIu64 " refcount=%u reference=%u",
+                     idx, stored[idx], computed[idx]);
             leaked++;
         } else if (stored[idx] < computed[idx]) {
-            LOG_ERROR("ERROR cluster %llu refcount=%u reference=%u",
-                      (unsigned long long)idx, stored[idx], computed[idx]);
+            LOG_ERROR("ERROR cluster %" PRIu64 " refcount=%u reference=%u",
+                      idx, stored[idx], computed[idx]);
             errors++;
         }
     }
@@ -154,16 +153,16 @@ int Qcow2DiskImage::RepairLeaks(bool fix) {
     }
 
     uint64_t total_guest_clusters = virtual_size_ / cluster_size_;
-    LOG_INFO("%llu/%llu = %.2f%% allocated, %.2f%% fragmented, %.2f%% compressed clusters",
-             (unsigned long long)allocated_clusters,
-             (unsigned long long)total_guest_clusters,
+    LOG_INFO("%" PRIu64 "/%" PRIu64 " = %.2f%% allocated, %.2f%% fragmented, %.2f%% compressed clusters",
+             allocated_clusters,
+             total_guest_clusters,
              total_guest_clusters > 0
                  ? 100.0 * allocated_clusters / total_guest_clusters : 0.0,
              allocated_clusters > 0
                  ? 100.0 * fragmented_clusters / allocated_clusters : 0.0,
              allocated_clusters > 0
                  ? 100.0 * compressed_clusters / allocated_clusters : 0.0);
-    LOG_INFO("Image end offset: %llu", (unsigned long long)file_end_);
+    LOG_INFO("Image end offset: %" PRIu64, file_end_);
 
     // Phase 3: fix leaked clusters only (stored > computed).
     // Errors (stored < computed) indicate possible corruption — never
@@ -202,7 +201,7 @@ int Qcow2DiskImage::RepairLeaks(bool fix) {
                 _fseeki64(file_, block_offset, SEEK_SET);
                 if (fwrite(block.data(), 1, bytes, file_) != bytes) {
                     LOG_ERROR("Qcow2: RepairLeaks: failed to write refcount block "
-                              "at 0x%llX", (unsigned long long)block_offset);
+                              "at 0x%" PRIX64, block_offset);
                 }
             }
         }

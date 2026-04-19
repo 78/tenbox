@@ -26,6 +26,12 @@ public:
 
     virtual void RequestInterrupt(const InterruptRequest& req) = 0;
 
+    // Optional hook for hypervisors with an in-kernel irqchip (e.g. KVM).
+    // Returns true if the IRQ was injected through the hypervisor's own
+    // interrupt controller and the generic userspace IOAPIC path must be
+    // skipped. Default returns false so HVF / WHVP keep their current path.
+    virtual bool AssertIrq(uint32_t /*gsi*/, bool /*level*/) { return false; }
+
     virtual void SetGuestMemMap(const GuestMemMap*) {}
 
     virtual void QueueInterrupt(uint32_t vector, uint32_t dest_vcpu) {

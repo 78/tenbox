@@ -8,6 +8,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <cinttypes>
 #include <filesystem>
 #include <string>
 
@@ -40,7 +41,7 @@ static std::string FormatSize(uint64_t bytes) {
     else if (bytes >= 1024)
         snprintf(buf, sizeof(buf), "%.0f KB", bytes / 1024.0);
     else
-        snprintf(buf, sizeof(buf), "%llu B", static_cast<unsigned long long>(bytes));
+        snprintf(buf, sizeof(buf), "%" PRIu64 " B", bytes);
     return buf;
 }
 

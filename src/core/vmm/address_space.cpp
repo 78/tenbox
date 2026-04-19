@@ -70,7 +70,7 @@ bool AddressSpace::HandleMmioRead(uint64_t addr, uint8_t size,
         return true;
     }
     *value = 0;
-    LOG_DEBUG("Unhandled MMIO read: addr=0x%llX size=%u", addr, size);
+    LOG_DEBUG("Unhandled MMIO read: addr=0x%" PRIX64 " size=%u", addr, size);
     return false;
 }
 
@@ -83,7 +83,7 @@ bool AddressSpace::HandleMmioWrite(uint64_t addr, uint8_t size,
         dev->MmioWrite(offset, size, value);
         return true;
     }
-    LOG_DEBUG("Unhandled MMIO write: addr=0x%llX size=%u val=0x%llX",
+    LOG_DEBUG("Unhandled MMIO write: addr=0x%" PRIX64 " size=%u val=0x%" PRIX64,
               addr, size, value);
     return false;
 }

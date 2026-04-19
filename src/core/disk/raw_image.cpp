@@ -30,13 +30,13 @@ bool RawDiskImage::Open(const std::string& path) {
     _fseeki64(file_, 0, SEEK_SET);
 
     if (disk_size_ < 512) {
-        LOG_ERROR("RawDiskImage: image too small (%llu bytes)", disk_size_);
+        LOG_ERROR("RawDiskImage: image too small (%" PRIu64 " bytes)", disk_size_);
         fclose(file_);
         file_ = nullptr;
         return false;
     }
 
-    LOG_INFO("RawDiskImage: %s, %llu bytes (%llu MB)",
+    LOG_INFO("RawDiskImage: %s, %" PRIu64 " bytes (%" PRIu64 " MB)",
              path.c_str(), disk_size_, disk_size_ / (1024 * 1024));
     return true;
 }

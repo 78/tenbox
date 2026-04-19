@@ -168,4 +168,10 @@ private:
     uint32_t inject_prev_buttons_ = 0;
 
     std::vector<std::unique_ptr<VCpuStartupState>> vcpu_startup_;
+
+    // Input pump thread for locally-created ConsolePort (CLI interactive mode).
+    // Inactive when running under an external IPC controller that injects
+    // console bytes itself.
+    std::thread console_input_thread_;
+    bool owned_console_input_ = false;
 };

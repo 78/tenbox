@@ -18,12 +18,27 @@ target_include_directories(tenbox-vm-runtime
         ${CMAKE_BINARY_DIR}
 )
 
-target_link_libraries(tenbox-vm-runtime
-    PRIVATE
-        tenbox_platform
-        tenbox_core
-        tenbox_ipc
-)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # GNU ld resolves static archives left-to-right with no rescan. Our core
+    # library references VmPlatform symbols defined in tenbox_platform, which
+    # in turn depends on tenbox_core, so wrap the pair in --start-group to
+    # allow cross-archive symbol resolution.
+    target_link_libraries(tenbox-vm-runtime
+        PRIVATE
+            -Wl,--start-group
+            tenbox_platform
+            tenbox_core
+            -Wl,--end-group
+            tenbox_ipc
+    )
+else()
+    target_link_libraries(tenbox-vm-runtime
+        PRIVATE
+            tenbox_platform
+            tenbox_core
+            tenbox_ipc
+    )
+endif()
 
 if(WIN32)
     target_link_libraries(tenbox-vm-runtime PRIVATE ws2_32)
@@ -40,4 +55,6 @@ elseif(APPLE)
                 "$<TARGET_FILE:tenbox-vm-runtime>"
         COMMENT "Signing tenbox-vm-runtime with hypervisor entitlement"
     )
+elseif(UNIX)
+    target_link_libraries(tenbox-vm-runtime PRIVATE pthread)
 endif()

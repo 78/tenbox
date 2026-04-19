@@ -134,7 +134,8 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
                 vq.SetDriverAddr(cfg.driver_addr);
                 vq.SetDeviceAddr(cfg.device_addr);
                 vq.SetReady(true);
-                LOG_DEBUG("VirtIO queue %u ready: size=%u desc=0x%llX driver=0x%llX device=0x%llX",
+                LOG_DEBUG("VirtIO queue %u ready: size=%u desc=0x%" PRIX64
+                         " driver=0x%" PRIX64 " device=0x%" PRIX64,
                          queue_sel_, qs, cfg.desc_addr, cfg.driver_addr, cfg.device_addr);
             } else {
                 queues_[queue_sel_].SetReady(false);

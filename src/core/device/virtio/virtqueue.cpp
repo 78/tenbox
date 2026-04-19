@@ -98,7 +98,7 @@ bool VirtQueue::WalkChain(uint16_t head_idx,
         } else {
             uint8_t* hva = GpaToHva(desc->addr);
             if (!hva) {
-                LOG_ERROR("VirtQueue: bad GPA 0x%llX in descriptor %u",
+                LOG_ERROR("VirtQueue: bad GPA 0x%" PRIX64 " in descriptor %u",
                           desc->addr, idx);
                 return false;
             }
@@ -130,7 +130,7 @@ bool VirtQueue::WalkIndirect(uint64_t table_gpa, uint32_t table_len,
 
     auto* table = reinterpret_cast<VirtqDesc*>(GpaToHva(table_gpa));
     if (!table) {
-        LOG_ERROR("VirtQueue: bad GPA 0x%llX for indirect table", table_gpa);
+        LOG_ERROR("VirtQueue: bad GPA 0x%" PRIX64 " for indirect table", table_gpa);
         return false;
     }
 
@@ -145,7 +145,7 @@ bool VirtQueue::WalkIndirect(uint64_t table_gpa, uint32_t table_len,
 
         uint8_t* hva = GpaToHva(d->addr);
         if (!hva) {
-            LOG_ERROR("VirtQueue: bad GPA 0x%llX in indirect descriptor %u",
+            LOG_ERROR("VirtQueue: bad GPA 0x%" PRIX64 " in indirect descriptor %u",
                       d->addr, i);
             return false;
         }

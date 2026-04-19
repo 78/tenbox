@@ -2,6 +2,7 @@
 #include "core/arch/x86_64/boot.h"
 #include "core/device/irq/local_apic.h"
 #include "core/vmm/types.h"
+#include <cinttypes>
 
 #include <Hypervisor/hv.h>
 #include <Hypervisor/hv_vmx.h>
@@ -280,9 +281,9 @@ bool HvfVCpu::SetupBootRegisters(uint8_t* ram) {
     hv_vcpu_write_register(vcpuid_, HV_X86_RBP, 0);
     hv_vcpu_write_register(vcpuid_, HV_X86_RSP, 0);
 
-    LOG_INFO("hvf: vCPU %u boot: 32-bit protected mode, RIP=0x%llx RSI=0x%llx",
-             index_, (unsigned long long)Layout::kKernelBase,
-             (unsigned long long)Layout::kBootParams);
+    LOG_INFO("hvf: vCPU %u boot: 32-bit protected mode, RIP=0x%" PRIx64 " RSI=0x%" PRIx64,
+             index_, (uint64_t)Layout::kKernelBase,
+             (uint64_t)Layout::kBootParams);
     return true;
 }
 
@@ -497,26 +498,26 @@ void HvfVCpu::PrintExitStats() {
     uint32_t top_msr = s.wrmsr_top_msr.exchange(0, std::memory_order_relaxed);
 
     double rate = total / elapsed_s;
-    LOG_INFO("=== VM exit stats (%.1fs, %.0f/s, total %llu) ===", elapsed_s, rate, total);
-    LOG_INFO("  IRQ:%-7llu IRQ_WND:%-7llu HLT:%-7llu IO:%-7llu EPT:%-7llu CPUID:%-5llu",
+    LOG_INFO("=== VM exit stats (%.1fs, %.0f/s, total %" PRIu64 ") ===", elapsed_s, rate, total);
+    LOG_INFO("  IRQ:%-7" PRIu64 " IRQ_WND:%-7" PRIu64 " HLT:%-7" PRIu64 " IO:%-7" PRIu64 " EPT:%-7" PRIu64 " CPUID:%-5" PRIu64,
              irq, irq_wnd, hlt, io, ept, cpuid);
-    LOG_INFO("  RDMSR:%-5llu WRMSR:%-7llu CR:%-5llu XSETBV:%-3llu OTHER:%-3llu",
+    LOG_INFO("  RDMSR:%-5" PRIu64 " WRMSR:%-7" PRIu64 " CR:%-5" PRIu64 " XSETBV:%-3" PRIu64 " OTHER:%-3" PRIu64,
              rdmsr, wrmsr, cr, xsetbv, other);
     if (io > 0)
-        LOG_INFO("  IO: UART:%-5llu PIT:%-5llu ACPI:%-5llu PCI:%-5llu PIC:%-4llu RTC:%-3llu SINK:%-3llu OTHER:%-3llu",
+        LOG_INFO("  IO: UART:%-5" PRIu64 " PIT:%-5" PRIu64 " ACPI:%-5" PRIu64 " PCI:%-5" PRIu64 " PIC:%-4" PRIu64 " RTC:%-3" PRIu64 " SINK:%-3" PRIu64 " OTHER:%-3" PRIu64,
                  io_uart, io_pit, io_acpi, io_pci, io_pic, io_rtc, io_sink, io_other);
     if (ept > 0)
-        LOG_INFO("  EPT: EOI:%-5llu TPR:%-5llu ICR:%-5llu TIMER:%-5llu LAPIC_X:%-4llu IOAPIC:%-4llu OTHER:%-4llu",
+        LOG_INFO("  EPT: EOI:%-5" PRIu64 " TPR:%-5" PRIu64 " ICR:%-5" PRIu64 " TIMER:%-5" PRIu64 " LAPIC_X:%-4" PRIu64 " IOAPIC:%-4" PRIu64 " OTHER:%-4" PRIu64,
                  ept_lapic_eoi, ept_lapic_tpr, ept_lapic_icr, ept_lapic_timer,
                  ept_lapic_other, ept_ioapic, ept_other);
     if (cr > 0)
-        LOG_INFO("  CR: CR0:%-5llu CR3:%-5llu CR4:%-5llu CR8:%-5llu OTHER:%-3llu",
+        LOG_INFO("  CR: CR0:%-5" PRIu64 " CR3:%-5" PRIu64 " CR4:%-5" PRIu64 " CR8:%-5" PRIu64 " OTHER:%-3" PRIu64,
                  cr0, cr3, cr4, cr8, cr_other);
     if (wrmsr > 0) {
-        LOG_INFO("  WRMSR: KVMCLK:%-7llu WALL:%-3llu POLL:%-3llu EFER:%-3llu APIC:%-3llu OTHER:%-5llu",
+        LOG_INFO("  WRMSR: KVMCLK:%-7" PRIu64 " WALL:%-3" PRIu64 " POLL:%-3" PRIu64 " EFER:%-3" PRIu64 " APIC:%-3" PRIu64 " OTHER:%-5" PRIu64,
                  wrmsr_kvmclock, wrmsr_wallclock, wrmsr_poll, wrmsr_efer, wrmsr_apicbase, wrmsr_other);
         if (wrmsr_other > 0)
-            LOG_INFO("  WRMSR top: MSR 0x%X x%llu", top_msr, wrmsr_top_count);
+            LOG_INFO("  WRMSR top: MSR 0x%X x%" PRIu64, top_msr, wrmsr_top_count);
     }
 }
 
@@ -609,25 +610,25 @@ VCpuExitAction HvfVCpu::RunOnce() {
         hv_vmx_vcpu_read_vmcs(vcpuid_, VMCS_GUEST_TR, &tr);
         hv_vmx_vcpu_read_vmcs(vcpuid_, VMCS_GUEST_TR_AR, &tr_ar);
         hv_vmx_vcpu_read_vmcs(vcpuid_, VMCS_GUEST_TR_BASE, &tr_base);
-        LOG_ERROR("hvf: vCPU %u triple fault — RIP=0x%llx RSP=0x%llx RFLAGS=0x%llx "
-                  "CR0=0x%llx CR3=0x%llx CR4=0x%llx CS=0x%llx(base=0x%llx lim=0x%llx ar=0x%llx)",
-                  index_, (unsigned long long)rip, (unsigned long long)rsp,
-                  (unsigned long long)rflags, (unsigned long long)cr0,
-                  (unsigned long long)cr3, (unsigned long long)cr4,
-                  (unsigned long long)cs, (unsigned long long)cs_base,
-                  (unsigned long long)cs_limit, (unsigned long long)cs_ar);
-        LOG_ERROR("hvf: vCPU %u  IDTR=0x%llx:0x%llx GDTR=0x%llx:0x%llx EFER=0x%llx entry_ctrl=0x%llx "
-                  "SS=0x%llx(ar=0x%llx) TR=0x%llx(ar=0x%llx base=0x%llx)",
-                  index_, (unsigned long long)idtr_base, (unsigned long long)idtr_limit,
-                  (unsigned long long)gdtr_base, (unsigned long long)gdtr_limit,
-                  (unsigned long long)efer, (unsigned long long)entry_ctrl,
-                  (unsigned long long)ss, (unsigned long long)ss_ar,
-                  (unsigned long long)tr, (unsigned long long)tr_ar,
-                  (unsigned long long)tr_base);
+        LOG_ERROR("hvf: vCPU %u triple fault — RIP=0x%" PRIx64 " RSP=0x%" PRIx64 " RFLAGS=0x%" PRIx64 " "
+                  "CR0=0x%" PRIx64 " CR3=0x%" PRIx64 " CR4=0x%" PRIx64 " CS=0x%" PRIx64 "(base=0x%" PRIx64 " lim=0x%" PRIx64 " ar=0x%" PRIx64 ")",
+                  index_, rip, rsp,
+                  rflags, cr0,
+                  cr3, cr4,
+                  cs, cs_base,
+                  cs_limit, cs_ar);
+        LOG_ERROR("hvf: vCPU %u  IDTR=0x%" PRIx64 ":0x%" PRIx64 " GDTR=0x%" PRIx64 ":0x%" PRIx64 " EFER=0x%" PRIx64 " entry_ctrl=0x%" PRIx64 " "
+                  "SS=0x%" PRIx64 "(ar=0x%" PRIx64 ") TR=0x%" PRIx64 "(ar=0x%" PRIx64 " base=0x%" PRIx64 ")",
+                  index_, idtr_base, idtr_limit,
+                  gdtr_base, gdtr_limit,
+                  efer, entry_ctrl,
+                  ss, ss_ar,
+                  tr, tr_ar,
+                  tr_base);
 
         // Dump last EPT violation details
-        LOG_ERROR("hvf: vCPU %u  last EPT GPA=0x%llx decode_fail_count=%u",
-                  index_, (unsigned long long)last_ept_gpa_, last_decode_fail_count_);
+        LOG_ERROR("hvf: vCPU %u  last EPT GPA=0x%" PRIx64 " decode_fail_count=%u",
+                  index_, last_ept_gpa_, last_decode_fail_count_);
         return VCpuExitAction::kError;
     }
 
@@ -670,16 +671,16 @@ VCpuExitAction HvfVCpu::RunOnce() {
         hv_vmx_vcpu_read_vmcs(vcpuid_, VMCS_GUEST_TR_AR, &tr_ar);
         hv_vmx_vcpu_read_vmcs(vcpuid_, VMCS_GUEST_ACTIVITY_STATE, &act_state);
         LOG_ERROR("hvf: vCPU %u VM-entry failure (invalid guest state): "
-                  "RIP=0x%llx RFLAGS=0x%llx CR0=0x%llx CR4=0x%llx EFER=0x%llx "
-                  "entry_ctrl=0x%llx proc2=0x%llx CS=%04llx base=0x%llx limit=0x%llx ar=0x%llx "
-                  "SS_ar=0x%llx TR_ar=0x%llx activity=%llu",
-                  index_, (unsigned long long)rip, (unsigned long long)rflags,
-                  (unsigned long long)cr0, (unsigned long long)cr4,
-                  (unsigned long long)efer, (unsigned long long)entry_ctrl,
-                  (unsigned long long)proc2, (unsigned long long)cs,
-                  (unsigned long long)cs_base, (unsigned long long)cs_limit,
-                  (unsigned long long)cs_ar, (unsigned long long)ss_ar,
-                  (unsigned long long)tr_ar, (unsigned long long)act_state);
+                  "RIP=0x%" PRIx64 " RFLAGS=0x%" PRIx64 " CR0=0x%" PRIx64 " CR4=0x%" PRIx64 " EFER=0x%" PRIx64 " "
+                  "entry_ctrl=0x%" PRIx64 " proc2=0x%" PRIx64 " CS=%04" PRIx64 " base=0x%" PRIx64 " limit=0x%" PRIx64 " ar=0x%" PRIx64 " "
+                  "SS_ar=0x%" PRIx64 " TR_ar=0x%" PRIx64 " activity=%" PRIu64,
+                  index_, rip, rflags,
+                  cr0, cr4,
+                  efer, entry_ctrl,
+                  proc2, cs,
+                  cs_base, cs_limit,
+                  cs_ar, ss_ar,
+                  tr_ar, act_state);
         return VCpuExitAction::kError;
     }
 
@@ -688,8 +689,8 @@ VCpuExitAction HvfVCpu::RunOnce() {
             s_stats_.other.fetch_add(1, std::memory_order_relaxed);
         uint64_t rip = 0;
         hv_vcpu_read_register(vcpuid_, HV_X86_RIP, &rip);
-        LOG_WARN("hvf: vCPU %u unhandled exit reason %llu at RIP=0x%llx",
-                 index_, (unsigned long long)exit_reason, (unsigned long long)rip);
+        LOG_WARN("hvf: vCPU %u unhandled exit reason %" PRIu64 " at RIP=0x%" PRIx64,
+                 index_, exit_reason, rip);
         return VCpuExitAction::kError;
     }
     }
@@ -1149,13 +1150,13 @@ VCpuExitAction HvfVCpu::HandleEptViolation(uint64_t exit_qual) {
         if (rip_translated) {
             uint8_t* code = GpaToHost(rip_gpa, 8);
             if (code) {
-                LOG_WARN("hvf: vCPU %u MMIO decode fail GPA=0x%llx RIP=0x%llx rip_gpa=0x%llx "
-                         "bytes=%02x %02x %02x %02x %02x %02x %02x %02x is_write=%d insn_len=%llu",
-                         index_, (unsigned long long)gpa, (unsigned long long)rip,
-                         (unsigned long long)rip_gpa,
+                LOG_WARN("hvf: vCPU %u MMIO decode fail GPA=0x%" PRIx64 " RIP=0x%" PRIx64 " rip_gpa=0x%" PRIx64 " "
+                         "bytes=%02x %02x %02x %02x %02x %02x %02x %02x is_write=%d insn_len=%" PRIu64,
+                         index_, gpa, rip,
+                         rip_gpa,
                          code[0], code[1], code[2], code[3],
                          code[4], code[5], code[6], code[7],
-                         (int)is_write, (unsigned long long)insn_len);
+                         (int)is_write, insn_len);
             }
         }
         uint8_t skip = (insn_len > 0 && insn_len <= 15) ? (uint8_t)insn_len : 0;
@@ -1493,8 +1494,8 @@ VCpuExitAction HvfVCpu::HandleMsr(bool is_write) {
 
                 __sync_synchronize();
                 wc->version = 2u;
-                LOG_INFO("kvmclock: wall_clock GPA=0x%llx sec=%u nsec=%u",
-                         (unsigned long long)gpa, wc->sec, wc->nsec);
+                LOG_INFO("kvmclock: wall_clock GPA=0x%" PRIx64 " sec=%u nsec=%u",
+                         gpa, wc->sec, wc->nsec);
             }
         } else if (msr == MSR_KVM_SYSTEM_TIME_NEW) {
             bool enable = val & 1;
@@ -1503,8 +1504,8 @@ VCpuExitAction HvfVCpu::HandleMsr(bool is_write) {
                 kvmclock_system_time_gpa_ = gpa;
                 kvmclock_enabled_ = true;
                 UpdateKvmclock(gpa);
-                LOG_INFO("kvmclock: system_time enabled GPA=0x%llx tsc_freq=%llu",
-                         (unsigned long long)gpa, (unsigned long long)tsc_freq_);
+                LOG_INFO("kvmclock: system_time enabled GPA=0x%" PRIx64 " tsc_freq=%" PRIu64,
+                         gpa, tsc_freq_);
             } else {
                 kvmclock_enabled_ = false;
                 LOG_INFO("kvmclock: system_time disabled");
@@ -1522,8 +1523,8 @@ VCpuExitAction HvfVCpu::HandleMsr(bool is_write) {
         } else {
             hv_return_t ret = hv_vcpu_write_msr(vcpuid_, msr, val);
             if (ret != HV_SUCCESS) {
-                LOG_DEBUG("hvf: MSR write 0x%X = 0x%llx unsupported",
-                          msr, (unsigned long long)val);
+                LOG_DEBUG("hvf: MSR write 0x%X = 0x%" PRIx64 " unsupported",
+                          msr, val);
             }
         }
     } else {

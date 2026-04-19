@@ -2,6 +2,7 @@
 #include "core/arch/aarch64/fdt_builder.h"
 #include "core/device/irq/gicv3.h"
 #include "core/vmm/vm.h"
+#include <cinttypes>
 #include <cstring>
 #include <cstdio>
 #include <random>
@@ -47,8 +48,9 @@ bool Aarch64Machine::SetupPlatformDevices(
         auto* hvf = dynamic_cast<hvf::HvfVm*>(hv_vm);
         if (hvf && hvf->UsesSoftGic()) {
             hvf->GetSoftGic()->RegisterDevices(addr_space, kGicDistBase, kGicRedistBase);
-            LOG_INFO("aarch64: software GICv3 MMIO registered at dist=0x%llx redist=0x%llx",
-                     (unsigned long long)kGicDistBase, (unsigned long long)kGicRedistBase);
+            LOG_INFO("aarch64: software GICv3 MMIO registered at dist=0x%" PRIx64
+                     " redist=0x%" PRIx64,
+                     (uint64_t)kGicDistBase, (uint64_t)kGicRedistBase);
         }
     }
 #endif
@@ -126,17 +128,16 @@ bool Aarch64Machine::LoadKernel(
         fclose(fp);
 
         if (read != static_cast<size_t>(initrd_size)) {
-            LOG_ERROR("aarch64: short initrd read (%zu / %llu)", read,
-                      (unsigned long long)initrd_size);
+            LOG_ERROR("aarch64: short initrd read (%zu / %" PRIu64 ")", read,
+                      initrd_size);
             return false;
         }
 
         initrd_start = Layout::kRamBase + initrd_offset;
         initrd_end = initrd_start + initrd_size;
 
-        LOG_INFO("aarch64: initrd loaded at GPA 0x%llx (%llu bytes)",
-                 (unsigned long long)initrd_start,
-                 (unsigned long long)initrd_size);
+        LOG_INFO("aarch64: initrd loaded at GPA 0x%" PRIx64 " (%" PRIu64 " bytes)",
+                 (uint64_t)initrd_start, initrd_size);
     }
 
     // Build FDT
@@ -162,8 +163,8 @@ bool Aarch64Machine::LoadKernel(
         fdt.AddPropertyU64("linux,initrd-end", initrd_end);
     }
     char stdout_path[64];
-    snprintf(stdout_path, sizeof(stdout_path), "/pl011@%llx",
-             (unsigned long long)kUartBase);
+    snprintf(stdout_path, sizeof(stdout_path), "/pl011@%" PRIx64,
+             (uint64_t)kUartBase);
     fdt.AddPropertyString("stdout-path", stdout_path);
 
     // Provide host entropy so the guest kernel can initialize CRNG
@@ -182,8 +183,8 @@ bool Aarch64Machine::LoadKernel(
 
     // /memory
     char mem_name[32];
-    snprintf(mem_name, sizeof(mem_name), "memory@%llx",
-             (unsigned long long)Layout::kRamBase);
+    snprintf(mem_name, sizeof(mem_name), "memory@%" PRIx64,
+             (uint64_t)Layout::kRamBase);
     fdt.BeginNode(mem_name);
     fdt.AddPropertyString("device_type", "memory");
     fdt.AddPropertyCells("reg", {
@@ -249,8 +250,8 @@ bool Aarch64Machine::LoadKernel(
 #endif
 
     char gic_name[64];
-    snprintf(gic_name, sizeof(gic_name), "intc@%llx",
-             (unsigned long long)kGicDistBase);
+    snprintf(gic_name, sizeof(gic_name), "intc@%" PRIx64,
+             (uint64_t)kGicDistBase);
     fdt.BeginNode(gic_name);
     fdt.AddPropertyString("compatible", "arm,gic-v3");
     fdt.AddPropertyU32("#interrupt-cells", 3);
@@ -278,8 +279,8 @@ bool Aarch64Machine::LoadKernel(
 
     // /pl011 UART (AMBA PL011 — needs arm,primecell compat and clocks)
     char uart_name[64];
-    snprintf(uart_name, sizeof(uart_name), "pl011@%llx",
-             (unsigned long long)kUartBase);
+    snprintf(uart_name, sizeof(uart_name), "pl011@%" PRIx64,
+             (uint64_t)kUartBase);
     fdt.BeginNode(uart_name);
     {
         const char* compat[] = {"arm,pl011", "arm,primecell"};
@@ -307,8 +308,8 @@ bool Aarch64Machine::LoadKernel(
     // PL031 RTC (arm,pl031 — PrimeCell, needs clocks like PL011)
     {
         char rtc_name[64];
-        snprintf(rtc_name, sizeof(rtc_name), "pl031@%llx",
-                 (unsigned long long)kRtcBase);
+        snprintf(rtc_name, sizeof(rtc_name), "pl031@%" PRIx64,
+                 (uint64_t)kRtcBase);
         fdt.BeginNode(rtc_name);
         {
             const char* compat[] = {"arm,pl031", "arm,primecell"};
@@ -335,8 +336,8 @@ bool Aarch64Machine::LoadKernel(
     for (size_t i = 0; i < virtio_slots.size(); i++) {
         const auto& slot = virtio_slots[i];
         char name[64];
-        snprintf(name, sizeof(name), "virtio_mmio@%llx",
-                 (unsigned long long)slot.mmio_base);
+        snprintf(name, sizeof(name), "virtio_mmio@%" PRIx64,
+                 (uint64_t)slot.mmio_base);
         fdt.BeginNode(name);
         fdt.AddPropertyString("compatible", "virtio,mmio");
         fdt.AddPropertyCells("reg", {
@@ -357,14 +358,14 @@ bool Aarch64Machine::LoadKernel(
     // Place FDT at the start of guest RAM
     fdt_gpa_ = Layout::kFdtBase;
     if (dtb.size() > Layout::kFdtMaxSize) {
-        LOG_ERROR("aarch64: FDT too large (%zu bytes, max %llu)",
-                  dtb.size(), (unsigned long long)Layout::kFdtMaxSize);
+        LOG_ERROR("aarch64: FDT too large (%zu bytes, max %" PRIu64 ")",
+                  dtb.size(), (uint64_t)Layout::kFdtMaxSize);
         return false;
     }
 
     memcpy(mem.base, dtb.data(), dtb.size());
-    LOG_INFO("aarch64: FDT placed at GPA 0x%llx (%zu bytes)",
-             (unsigned long long)fdt_gpa_, dtb.size());
+    LOG_INFO("aarch64: FDT placed at GPA 0x%" PRIx64 " (%zu bytes)",
+             (uint64_t)fdt_gpa_, dtb.size());
 
     return true;
 }

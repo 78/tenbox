@@ -9,8 +9,11 @@
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
-#else
+#elif defined(__APPLE__)
 #include <mach/mach_time.h>
+#include <unistd.h>
+#else
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -26,7 +29,7 @@ AcpiPm::AcpiPm() {
 
     double elapsed = static_cast<double>(qpc_end.QuadPart - qpc_start.QuadPart)
                      / qpf.QuadPart;
-#else
+#elif defined(__APPLE__)
     mach_timebase_info_data_t tb;
     mach_timebase_info(&tb);
     uint64_t mach_start = mach_absolute_time();
@@ -36,6 +39,16 @@ AcpiPm::AcpiPm() {
     uint64_t mach_end = mach_absolute_time();
 
     double elapsed = static_cast<double>(mach_end - mach_start) * tb.numer / tb.denom / 1e9;
+#else
+    struct timespec ts_start, ts_end;
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+    uint64_t tsc_start = __rdtsc();
+    usleep(50000);
+    uint64_t tsc_end = __rdtsc();
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+
+    double elapsed = static_cast<double>(ts_end.tv_sec - ts_start.tv_sec) +
+                     static_cast<double>(ts_end.tv_nsec - ts_start.tv_nsec) / 1e9;
 #endif
     tsc_freq_ = static_cast<uint64_t>((tsc_end - tsc_start) / elapsed);
     tsc_base_ = __rdtsc();

@@ -379,7 +379,7 @@ VCpuExitAction WhvpVCpu::RunOnce() {
 
     case WHvRunVpExitReasonUnsupportedFeature:
         if (stats) s_stats_.unsupported.fetch_add(1, std::memory_order_relaxed);
-        LOG_WARN("Unsupported feature at RIP=0x%llX (feature=%u)",
+        LOG_WARN("Unsupported feature at RIP=0x%" PRIX64 " (feature=%u)",
                  exit_ctx.VpContext.Rip,
                  exit_ctx.UnsupportedFeature.FeatureCode);
         return VCpuExitAction::kContinue;
@@ -390,13 +390,13 @@ VCpuExitAction WhvpVCpu::RunOnce() {
 
     case WHvRunVpExitReasonUnrecoverableException:
         if (stats) s_stats_.exception.fetch_add(1, std::memory_order_relaxed);
-        LOG_ERROR("Unrecoverable guest exception at RIP=0x%llX",
+        LOG_ERROR("Unrecoverable guest exception at RIP=0x%" PRIX64,
                   exit_ctx.VpContext.Rip);
         return VCpuExitAction::kError;
 
     case WHvRunVpExitReasonInvalidVpRegisterValue:
         if (stats) s_stats_.invalid_reg.fetch_add(1, std::memory_order_relaxed);
-        LOG_ERROR("Invalid VP register value at RIP=0x%llX",
+        LOG_ERROR("Invalid VP register value at RIP=0x%" PRIX64,
                   exit_ctx.VpContext.Rip);
         return VCpuExitAction::kError;
 
@@ -480,7 +480,7 @@ VCpuExitAction WhvpVCpu::RunOnce() {
                 }
                 }
             }
-            LOG_DEBUG("MSR write: 0x%X = 0x%llX", msr.MsrNumber,
+            LOG_DEBUG("MSR write: 0x%X = 0x%" PRIX64, msr.MsrNumber,
                       (msr.Rdx << 32) | (msr.Rax & 0xFFFFFFFF));
             SetRegisters(&rip_name, &rip_val, 1);
         }
@@ -489,7 +489,7 @@ VCpuExitAction WhvpVCpu::RunOnce() {
 
     default:
         if (stats) s_stats_.other.fetch_add(1, std::memory_order_relaxed);
-        LOG_WARN("Unhandled VM exit reason: 0x%X at RIP=0x%llX",
+        LOG_WARN("Unhandled VM exit reason: 0x%X at RIP=0x%" PRIX64,
                  exit_ctx.ExitReason, exit_ctx.VpContext.Rip);
         return VCpuExitAction::kError;
     }
@@ -523,7 +523,7 @@ VCpuExitAction WhvpVCpu::HandleMmio(
         emulator_, this, &vp_ctx, &mem, &status);
 
     if (FAILED(hr) || !status.EmulationSuccessful) {
-        LOG_WARN("MMIO emulation failed: gpa=0x%llX hr=0x%08lX success=%d",
+        LOG_WARN("MMIO emulation failed: gpa=0x%" PRIX64 " hr=0x%08lX success=%d",
                  mem.Gpa, hr, status.EmulationSuccessful);
         WHV_REGISTER_NAME name = WHvX64RegisterRip;
         WHV_REGISTER_VALUE val{};

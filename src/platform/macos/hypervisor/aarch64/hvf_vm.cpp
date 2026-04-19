@@ -2,6 +2,7 @@
 #include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
 #include "core/device/irq/gicv3.h"
 #include "core/vmm/types.h"
+#include <cinttypes>
 
 #include <Hypervisor/Hypervisor.h>
 #include <cstdlib>
@@ -58,9 +59,10 @@ static bool CreateVmWithHwGic(HvfVm* vm, uint32_t cpu_count,
             actual_redist_base = (actual_redist_base + redist_align - 1) & ~(redist_align - 1);
         }
 
-        LOG_INFO("hvf: GIC layout: dist=0x%llx[0x%zx] redist=0x%llx[region=0x%zx per_cpu=0x%zx * %u]",
-                 (unsigned long long)kGicDistBase, dist_size,
-                 (unsigned long long)actual_redist_base, redist_region_size,
+        LOG_INFO("hvf: GIC layout: dist=0x%" PRIx64 "[0x%zx] redist=0x%" PRIx64
+                 "[region=0x%zx per_cpu=0x%zx * %u]",
+                 (uint64_t)kGicDistBase, dist_size,
+                 (uint64_t)actual_redist_base, redist_region_size,
                  redist_per_cpu, cpu_count);
 
         hv_return_t ret;
@@ -82,7 +84,7 @@ static bool CreateVmWithHwGic(HvfVm* vm, uint32_t cpu_count,
             if (msi_align_val > 0 && msi_base % msi_align_val != 0) {
                 msi_base = (msi_base + msi_align_val - 1) & ~(msi_align_val - 1);
             }
-            LOG_INFO("hvf: GIC MSI at 0x%llx[0x%zx]", (unsigned long long)msi_base, msi_size);
+            LOG_INFO("hvf: GIC MSI at 0x%" PRIx64 "[0x%zx]", (uint64_t)msi_base, msi_size);
             hv_gic_config_set_msi_region_base(gic_config, msi_base);
             hv_gic_config_set_msi_interrupt_range(gic_config, 64, 64);
         }
@@ -163,8 +165,8 @@ bool HvfVm::MapMemory(GPA gpa, void* hva, uint64_t size, bool writable) {
 
     hv_return_t ret = hv_vm_map(hva, gpa, size, flags);
     if (ret != HV_SUCCESS) {
-        LOG_ERROR("hvf: hv_vm_map(GPA=0x%llx, size=0x%llx) failed: %d",
-                  (unsigned long long)gpa, (unsigned long long)size, (int)ret);
+        LOG_ERROR("hvf: hv_vm_map(GPA=0x%" PRIx64 ", size=0x%" PRIx64 ") failed: %d",
+                  gpa, size, (int)ret);
         return false;
     }
     return true;
@@ -173,8 +175,8 @@ bool HvfVm::MapMemory(GPA gpa, void* hva, uint64_t size, bool writable) {
 bool HvfVm::UnmapMemory(GPA gpa, uint64_t size) {
     hv_return_t ret = hv_vm_unmap(gpa, size);
     if (ret != HV_SUCCESS) {
-        LOG_ERROR("hvf: hv_vm_unmap(GPA=0x%llx) failed: %d",
-                  (unsigned long long)gpa, (int)ret);
+        LOG_ERROR("hvf: hv_vm_unmap(GPA=0x%" PRIx64 ") failed: %d",
+                  gpa, (int)ret);
         return false;
     }
     return true;
