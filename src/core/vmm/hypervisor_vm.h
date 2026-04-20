@@ -53,6 +53,23 @@ public:
                                     int /*resample_fd*/) { return false; }
     virtual bool UnregisterIrqFd(uint32_t /*gsi*/, int /*trigger_fd*/) { return false; }
 
+    // Register an eventfd (or platform equivalent) as an IOEVENTFD: when the
+    // guest writes `len` bytes of value `datamatch` to `mmio_addr`, the
+    // hypervisor absorbs the exit and signals event_fd instead of bouncing
+    // out to userspace. virtio-mmio uses this for the QueueNotify register,
+    // with datamatch = queue_index so one fd maps 1:1 to a queue.
+    //
+    // Default returns false so HVF/WHVP auto-fall back to the synchronous
+    // MMIO-write -> VirtioMmioDevice::MmioWrite path.
+    virtual bool RegisterIoEventFd(uint64_t /*mmio_addr*/, uint32_t /*len*/,
+                                   int /*event_fd*/, uint32_t /*datamatch*/) {
+        return false;
+    }
+    virtual bool UnregisterIoEventFd(uint64_t /*mmio_addr*/, uint32_t /*len*/,
+                                     int /*event_fd*/, uint32_t /*datamatch*/) {
+        return false;
+    }
+
     virtual void SetGuestMemMap(const GuestMemMap*) {}
 
     virtual void QueueInterrupt(uint32_t vector, uint32_t dest_vcpu) {

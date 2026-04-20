@@ -37,6 +37,7 @@ public:
     // or 0 to stop (and destroy) the timer.
     using TimerCallback = std::function<uint64_t()>;
     using Task = std::function<void()>;
+    using IoEventCallback = std::function<void()>;
 
     VmIoLoop();
     ~VmIoLoop();
@@ -80,6 +81,15 @@ public:
     void AttachIrqFd(VirtioMmioDevice* dev, int trigger_fd, int resample_fd);
     void DetachIrqFd(VirtioMmioDevice* dev);
 
+    // Attach an eventfd that KVM signals when the guest writes a matching
+    // value to a registered MMIO address (KVM_IOEVENTFD). The callback runs
+    // on io_thread_ after draining the eventfd counter. Keyed by fd so the
+    // caller can register multiple (device, queue_idx) pairs independently.
+    // The fd's lifetime is the caller's responsibility; call DetachIoEventFd
+    // before closing it. No-op on non-Linux.
+    void AttachIoEventFd(int fd, IoEventCallback cb);
+    void DetachIoEventFd(int fd);
+
 public:
     // Public for static-callback access; treat as implementation detail.
     struct TimerCtx {
@@ -95,6 +105,12 @@ public:
         int trigger_fd = -1;
         int resample_fd = -1;
     };
+    struct IoEventFdCtx {
+        uv_poll_t handle{};
+        VmIoLoop* owner = nullptr;
+        int fd = -1;
+        IoEventCallback cb;
+    };
 
 private:
     void ThreadMain();
@@ -102,6 +118,7 @@ private:
     static void OnAsyncStop(uv_async_t* h);
     static void OnTimerFire(uv_timer_t* t);
     static void OnIrqFdReadable(uv_poll_t* p, int status, int events);
+    static void OnIoEventFdReadable(uv_poll_t* p, int status, int events);
 
     uv_loop_t loop_{};
     uv_async_t async_post_{};
@@ -118,5 +135,6 @@ private:
     // Accessed only from io_thread_.
     std::unordered_map<uint64_t, TimerCtx*> timers_;
     std::unordered_map<VirtioMmioDevice*, IrqFdCtx*> irqfds_;
+    std::unordered_map<int, IoEventFdCtx*> ioeventfds_;
     bool io_stopped_ = false;
 };

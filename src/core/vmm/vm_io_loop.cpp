@@ -131,6 +131,16 @@ void VmIoLoop::OnAsyncStop(uv_async_t* h) {
     }
     self->irqfds_.clear();
 
+    for (auto& kv : self->ioeventfds_) {
+        auto* ctx = kv.second;
+        uv_poll_stop(&ctx->handle);
+        uv_close(reinterpret_cast<uv_handle_t*>(&ctx->handle),
+                 [](uv_handle_t* h2) {
+                     delete static_cast<VmIoLoop::IoEventFdCtx*>(h2->data);
+                 });
+    }
+    self->ioeventfds_.clear();
+
     uv_close(reinterpret_cast<uv_handle_t*>(&self->async_post_), nullptr);
     uv_close(reinterpret_cast<uv_handle_t*>(h), nullptr);
 }
@@ -244,6 +254,71 @@ void VmIoLoop::OnIrqFdReadable(uv_poll_t* p, int status, int events) {
         uint64_t one = 1;
         (void)::write(ctx->trigger_fd, &one, sizeof(one));
     }
+#else
+    (void)p;
+    (void)status;
+    (void)events;
+#endif
+}
+
+void VmIoLoop::AttachIoEventFd(int fd, IoEventCallback cb) {
+#if defined(__linux__)
+    if (fd < 0 || !cb) return;
+    Post([this, fd, cb = std::move(cb)]() mutable {
+        if (io_stopped_) return;
+        if (ioeventfds_.count(fd)) return;  // idempotent
+        auto* ctx = new IoEventFdCtx{};
+        ctx->owner = this;
+        ctx->fd = fd;
+        ctx->cb = std::move(cb);
+        ctx->handle.data = ctx;
+        if (uv_poll_init(&loop_, &ctx->handle, fd) != 0) {
+            LOG_WARN("VmIoLoop: uv_poll_init(ioeventfd=%d) failed", fd);
+            delete ctx;
+            return;
+        }
+        ioeventfds_[fd] = ctx;
+        uv_poll_start(&ctx->handle, UV_READABLE, OnIoEventFdReadable);
+    });
+#else
+    (void)fd;
+    (void)cb;
+#endif
+}
+
+void VmIoLoop::DetachIoEventFd(int fd) {
+#if defined(__linux__)
+    if (fd < 0) return;
+    Post([this, fd]() {
+        auto it = ioeventfds_.find(fd);
+        if (it == ioeventfds_.end()) return;
+        auto* ctx = it->second;
+        ioeventfds_.erase(it);
+        uv_poll_stop(&ctx->handle);
+        uv_close(reinterpret_cast<uv_handle_t*>(&ctx->handle),
+                 [](uv_handle_t* h) {
+                     delete static_cast<IoEventFdCtx*>(h->data);
+                 });
+    });
+#else
+    (void)fd;
+#endif
+}
+
+void VmIoLoop::OnIoEventFdReadable(uv_poll_t* p, int status, int events) {
+#if defined(__linux__)
+    (void)events;
+    auto* ctx = static_cast<IoEventFdCtx*>(p->data);
+    if (status < 0) {
+        LOG_WARN("VmIoLoop: ioeventfd poll error: %s", uv_strerror(status));
+        return;
+    }
+    // Drain the eventfd counter. We don't care about the count — each wakeup
+    // just means "at least one guest kick happened", and the virtio backend
+    // re-scans the queue for all newly-available buffers anyway.
+    uint64_t v = 0;
+    (void)::read(ctx->fd, &v, sizeof(v));
+    if (ctx->cb) ctx->cb();
 #else
     (void)p;
     (void)status;

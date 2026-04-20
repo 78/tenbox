@@ -62,8 +62,9 @@ Vm::~Vm() {
         if (t.joinable()) t.join();
     }
 
-    // Tear down irqfds (detach uv_poll, unregister with kvm, close fds, stop
-    // io_loop_) before destroying the hypervisor VM.
+    // Tear down ioeventfds and irqfds (detach uv_poll, unregister with kvm,
+    // close fds, stop io_loop_) before destroying the hypervisor VM.
+    ShutdownIoEventFds();
     ShutdownIrqFds();
     io_loop_.Stop();
 
@@ -437,6 +438,85 @@ void Vm::ShutdownIrqFds() {
 #endif
 }
 
+bool Vm::TryEnableIoEventFd(VirtioMmioDevice* dev, uint64_t mmio_base,
+                            uint32_t num_queues) {
+#if defined(__linux__)
+    if (!dev || num_queues == 0) return false;
+    for (uint32_t q = 0; q < num_queues; ++q) {
+        IoEventFdSlot s;
+        s.dev = dev;
+        s.notify_addr = mmio_base + VirtioMmioDevice::kQueueNotifyOffset;
+        s.queue_idx = q;
+        ioeventfd_slots_.push_back(s);
+    }
+    return true;
+#else
+    (void)dev;
+    (void)mmio_base;
+    (void)num_queues;
+    return false;
+#endif
+}
+
+void Vm::InstallIoEventFds() {
+#if defined(__linux__)
+    if (ioeventfd_slots_.empty() || !hv_vm_) return;
+
+    // Allocate one eventfd per (device, queue). KVM's datamatch filter routes
+    // each queue kick to its own fd. On failure we drop the slot; guest writes
+    // to that queue will fall through to MmioWrite -> DispatchQueueNotify.
+    size_t write_idx = 0;
+    for (size_t read_idx = 0; read_idx < ioeventfd_slots_.size(); ++read_idx) {
+        IoEventFdSlot& s = ioeventfd_slots_[read_idx];
+
+        int fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+        if (fd < 0) {
+            LOG_WARN("ioeventfd: eventfd() failed: %s", strerror(errno));
+            continue;
+        }
+        if (!hv_vm_->RegisterIoEventFd(
+                s.notify_addr, VirtioMmioDevice::kQueueNotifyLen,
+                fd, s.queue_idx)) {
+            ::close(fd);
+            continue;
+        }
+
+        s.event_fd = fd;
+        VirtioMmioDevice* dev = s.dev;
+        uint32_t q = s.queue_idx;
+        io_loop_.AttachIoEventFd(fd, [dev, q]() { dev->DispatchQueueNotify(q); });
+        ioeventfd_slots_[write_idx++] = s;
+    }
+    ioeventfd_slots_.resize(write_idx);
+
+    if (!ioeventfd_slots_.empty()) {
+        LOG_INFO("ioeventfd: %zu slots attached to io_loop", ioeventfd_slots_.size());
+    }
+#endif
+}
+
+void Vm::ShutdownIoEventFds() {
+#if defined(__linux__)
+    // Detach from io_loop first (same reasoning as ShutdownIrqFds: lets the
+    // uv_poll close run on io_thread_ before we close the fd under it).
+    for (auto& s : ioeventfd_slots_) {
+        if (s.event_fd >= 0) io_loop_.DetachIoEventFd(s.event_fd);
+    }
+    for (auto& s : ioeventfd_slots_) {
+        if (s.event_fd >= 0) {
+            if (hv_vm_) {
+                hv_vm_->UnregisterIoEventFd(
+                    s.notify_addr, VirtioMmioDevice::kQueueNotifyLen,
+                    s.event_fd, s.queue_idx);
+            }
+            ::close(s.event_fd);
+            s.event_fd = -1;
+        }
+    }
+    ioeventfd_slots_.clear();
+#endif
+}
+
 bool Vm::SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& slot) {
     virtio_blk_ = std::make_unique<VirtioBlkDevice>();
     if (!virtio_blk_->Open(disk_path)) return false;
@@ -446,6 +526,7 @@ bool Vm::SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& sl
     virtio_mmio_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_.get(), slot.irq);
+    TryEnableIoEventFd(virtio_mmio_.get(), slot.mmio_base, virtio_mmio_->NumQueues());
     virtio_blk_->SetMmioDevice(virtio_mmio_.get());
 
     addr_space_.AddMmioDevice(
@@ -466,6 +547,7 @@ bool Vm::SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
     virtio_mmio_net_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_net_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_net_.get(), slot.irq);
+    TryEnableIoEventFd(virtio_mmio_net_.get(), slot.mmio_base, virtio_mmio_net_->NumQueues());
     virtio_net_->SetMmioDevice(virtio_mmio_net_.get());
 
     virtio_net_->SetTxCallback([this](const uint8_t* frame, uint32_t len) {
@@ -493,6 +575,7 @@ bool Vm::SetupVirtioInput(const VirtioDeviceSlot& kbd_slot,
     virtio_mmio_kbd_->SetIrqCallback([this, irq = kbd_slot.irq]() { InjectIrq(irq); });
     virtio_mmio_kbd_->SetIrqLevelCallback([this, irq = kbd_slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_kbd_.get(), kbd_slot.irq);
+    TryEnableIoEventFd(virtio_mmio_kbd_.get(), kbd_slot.mmio_base, virtio_mmio_kbd_->NumQueues());
     virtio_kbd_->SetMmioDevice(virtio_mmio_kbd_.get());
     addr_space_.AddMmioDevice(
         kbd_slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_kbd_.get());
@@ -504,6 +587,7 @@ bool Vm::SetupVirtioInput(const VirtioDeviceSlot& kbd_slot,
     virtio_mmio_tablet_->SetIrqCallback([this, irq = tablet_slot.irq]() { InjectIrq(irq); });
     virtio_mmio_tablet_->SetIrqLevelCallback([this, irq = tablet_slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_tablet_.get(), tablet_slot.irq);
+    TryEnableIoEventFd(virtio_mmio_tablet_.get(), tablet_slot.mmio_base, virtio_mmio_tablet_->NumQueues());
     virtio_tablet_->SetMmioDevice(virtio_mmio_tablet_.get());
     addr_space_.AddMmioDevice(
         tablet_slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_tablet_.get());
@@ -533,6 +617,10 @@ bool Vm::SetupVirtioGpu(uint32_t width, uint32_t height, const VirtioDeviceSlot&
     virtio_mmio_gpu_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_gpu_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_gpu_.get(), slot.irq);
+    // NOTE: intentionally no TryEnableIoEventFd here. Moving GPU queue notify
+    // onto io_thread_ would serialize guest-driven rendering against the
+    // display/cursor/scanout callbacks; revisit once the GPU backend is
+    // audited for concurrent OnQueueNotify.
     virtio_gpu_->SetMmioDevice(virtio_mmio_gpu_.get());
     addr_space_.AddMmioDevice(
         slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_gpu_.get());
@@ -578,6 +666,7 @@ bool Vm::SetupVirtioSerial(const VirtioDeviceSlot& slot) {
     virtio_mmio_serial_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_serial_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_serial_.get(), slot.irq);
+    TryEnableIoEventFd(virtio_mmio_serial_.get(), slot.mmio_base, virtio_mmio_serial_->NumQueues());
     virtio_serial_->SetMmioDevice(virtio_mmio_serial_.get());
     addr_space_.AddMmioDevice(
         slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_serial_.get());
@@ -596,6 +685,7 @@ bool Vm::SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders,
     virtio_mmio_fs_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_fs_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_fs_.get(), slot.irq);
+    TryEnableIoEventFd(virtio_mmio_fs_.get(), slot.mmio_base, virtio_mmio_fs_->NumQueues());
     virtio_fs_->SetMmioDevice(virtio_mmio_fs_.get());
 
     addr_space_.AddMmioDevice(slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_fs_.get());
@@ -625,6 +715,7 @@ bool Vm::SetupVirtioSnd(const VirtioDeviceSlot& slot) {
     virtio_mmio_snd_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_snd_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
     TryEnableIrqFd(virtio_mmio_snd_.get(), slot.irq);
+    TryEnableIoEventFd(virtio_mmio_snd_.get(), slot.mmio_base, virtio_mmio_snd_->NumQueues());
     virtio_snd_->SetMmioDevice(virtio_mmio_snd_.get());
     addr_space_.AddMmioDevice(
         slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_snd_.get());
@@ -761,10 +852,11 @@ int Vm::Run() {
         }
 #endif
         // Bring up the central device I/O loop, then register each virtio
-        // slot's irqfd with it. Slots that fail to register stay on the
-        // classic KVM_IRQ_LINE fallback.
+        // slot's irqfd + ioeventfd with it. Slots that fail to register stay
+        // on the classic KVM_IRQ_LINE / MmioWrite fallback.
         io_loop_.Start();
         InstallIrqFds();
+        InstallIoEventFds();
     }
 
     // Phase 2: release all threads into their run loops.

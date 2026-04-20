@@ -163,9 +163,10 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
         }
         break;
     case kQueueNotify:
-        if (val < queues_.size() && queues_[val].IsReady()) {
-            ops_->OnQueueNotify(val, queues_[val]);
-        }
+        // Fallback path when no ioeventfd is armed for this (device, queue)
+        // — e.g. virtio-gpu today, or non-Linux backends. When ioeventfd is
+        // active, KVM absorbs the write in kernel space and we never get here.
+        DispatchQueueNotify(val);
         break;
     case kInterruptACK: {
         uint32_t prev = interrupt_status_.fetch_and(~val, std::memory_order_acq_rel);
@@ -235,6 +236,13 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
                   (uint32_t)offset, val);
         break;
     }
+}
+
+void VirtioMmioDevice::DispatchQueueNotify(uint32_t queue_idx) {
+    if (!ops_) return;
+    if (queue_idx >= queues_.size()) return;
+    if (!queues_[queue_idx].IsReady()) return;
+    ops_->OnQueueNotify(queue_idx, queues_[queue_idx]);
 }
 
 void VirtioMmioDevice::NotifyUsedBuffer(int queue_idx) {

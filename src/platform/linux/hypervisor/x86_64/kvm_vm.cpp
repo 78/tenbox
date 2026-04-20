@@ -168,4 +168,14 @@ bool KvmVm::UnregisterIrqFd(uint32_t gsi, int trigger_fd) {
     return true;
 }
 
+bool KvmVm::RegisterIoEventFd(uint64_t mmio_addr, uint32_t len, int event_fd,
+                              uint32_t datamatch) {
+    return RegisterMmioIoEventFd(vm_fd_, mmio_addr, len, event_fd, datamatch);
+}
+
+bool KvmVm::UnregisterIoEventFd(uint64_t mmio_addr, uint32_t len, int event_fd,
+                                uint32_t datamatch) {
+    return UnregisterMmioIoEventFd(vm_fd_, mmio_addr, len, event_fd, datamatch);
+}
+
 } // namespace kvm

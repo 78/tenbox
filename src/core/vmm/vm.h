@@ -121,6 +121,15 @@ private:
     void InstallIrqFds();
     void ShutdownIrqFds();
 
+    // Record a virtio-mmio slot as an IOEVENTFD candidate. Like TryEnableIrqFd,
+    // the actual KVM_IOEVENTFD registration is deferred to Run() via
+    // InstallIoEventFds(). Creates one slot per queue in the device (datamatch
+    // equals queue_idx). Linux-only; stub on other platforms.
+    bool TryEnableIoEventFd(VirtioMmioDevice* dev, uint64_t mmio_base,
+                            uint32_t num_queues);
+    void InstallIoEventFds();
+    void ShutdownIoEventFds();
+
     uint32_t cpu_count_ = 1;
     std::unique_ptr<MachineModel> machine_;
     std::unique_ptr<HypervisorVm> hv_vm_;
@@ -167,6 +176,15 @@ private:
         VirtioMmioDevice* dev = nullptr;  // for pending-status re-check
     };
     std::vector<IrqFdSlot> irqfd_slots_;
+
+    struct IoEventFdSlot {
+        VirtioMmioDevice* dev = nullptr;
+        uint64_t notify_addr = 0;   // mmio_base + kQueueNotifyOffset
+        uint32_t queue_idx = 0;     // also used as KVM_IOEVENTFD datamatch
+        int event_fd = -1;          // owned by Vm; closed in ShutdownIoEventFds
+    };
+    std::vector<IoEventFdSlot> ioeventfd_slots_;
+
     VmIoLoop io_loop_;
 
     std::atomic<bool> running_{false};

@@ -29,6 +29,13 @@ public:
     static constexpr uint32_t kVersion  = 2;
     static constexpr uint32_t kVendorId = 0x554D4551; // "QEMU" (conventional)
 
+    // Offset of the QueueNotify register within the MMIO slot. Exposed so the
+    // Vm layer can register a KVM_IOEVENTFD on (mmio_base + this offset) with
+    // datamatch = queue_index, letting the kernel absorb guest queue kicks
+    // without a userspace exit.
+    static constexpr uint32_t kQueueNotifyOffset = 0x050;
+    static constexpr uint32_t kQueueNotifyLen = 4;
+
     using IrqCallback = std::function<void()>;
     using IrqLevelCallback = std::function<void(bool asserted)>;
 
@@ -55,6 +62,13 @@ public:
     void MmioRead(uint64_t offset, uint8_t size, uint64_t* value) override;
     void MmioWrite(uint64_t offset, uint8_t size, uint64_t value) override;
 
+    // Entry point for guest queue kicks. Called from MmioWrite when the write
+    // fell out of KVM to userspace, and from VmIoLoop when a KVM_IOEVENTFD
+    // absorbed the write and signalled an eventfd. May run on the vCPU thread
+    // (MMIO fallback) OR on the VmIoLoop's io_thread_ (ioeventfd fast path),
+    // so the backend's OnQueueNotify must be thread-safe.
+    void DispatchQueueNotify(uint32_t queue_idx);
+
     // Called by the backend device to signal a used buffer notification.
     // When queue_idx is provided, EVENT_IDX suppression is applied.
     void NotifyUsedBuffer(int queue_idx = -1);
@@ -66,6 +80,8 @@ public:
     VirtQueue* GetQueue(uint32_t idx) {
         return idx < queues_.size() ? &queues_[idx] : nullptr;
     }
+
+    uint32_t NumQueues() const { return static_cast<uint32_t>(queues_.size()); }
 
 private:
     void DoReset();

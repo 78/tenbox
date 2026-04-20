@@ -40,6 +40,11 @@ public:
     bool RegisterLevelIrqFd(uint32_t gsi, int trigger_fd, int resample_fd) override;
     bool UnregisterIrqFd(uint32_t gsi, int trigger_fd) override;
 
+    bool RegisterIoEventFd(uint64_t mmio_addr, uint32_t len, int event_fd,
+                           uint32_t datamatch) override;
+    bool UnregisterIoEventFd(uint64_t mmio_addr, uint32_t len, int event_fd,
+                             uint32_t datamatch) override;
+
     void SetGuestMemMap(const GuestMemMap* mem) override { guest_mem_ = mem; }
 
     // Issue KVM_DEV_ARM_VGIC_CTRL_INIT on the in-kernel VGIC. Must be called
