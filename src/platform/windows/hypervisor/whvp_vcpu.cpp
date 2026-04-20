@@ -4,12 +4,246 @@
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
+#include <cstring>
+#include <intrin.h>
+#include <mutex>
+#include <vector>
 
 namespace whvp {
+
+// ---------------------------------------------------------------------------
+// RAM-backing map used by the Hyper-V overlay helpers.
+//
+// The Hyper-V hypercall page and reference TSC page both live in guest RAM.
+// Rather than going through WHvWriteGpaRange (which returned E_INVALIDARG
+// for 4 KiB overlays on Windows 11 24H2 / Server 2025 during development),
+// we remember the HVA that backs each mapped GPA range and memcpy directly.
+// WhvpVm::MapMemory calls RegisterRamMapping for every range it maps, and
+// the overlay helpers resolve (gpa, size) -> HVA through GpaToHva.
+// ---------------------------------------------------------------------------
+struct RamMapping {
+    uint64_t gpa;
+    uint64_t size;
+    uint8_t* hva;
+};
+static std::mutex             g_ram_map_mu;
+static std::vector<RamMapping> g_ram_map;
+
+void RegisterRamMapping(uint64_t gpa, void* hva, uint64_t size) {
+    std::lock_guard<std::mutex> lk(g_ram_map_mu);
+    g_ram_map.push_back({gpa, size, static_cast<uint8_t*>(hva)});
+}
+
+// Translate a guest physical address to a host virtual address within a
+// single RAM mapping. Returns nullptr if the (gpa, len) range is not fully
+// contained in any single registered mapping (e.g. it lands in MMIO or
+// straddles the low/high RAM split).
+static uint8_t* GpaToHva(uint64_t gpa, uint64_t len) {
+    std::lock_guard<std::mutex> lk(g_ram_map_mu);
+    for (const auto& m : g_ram_map) {
+        if (gpa >= m.gpa && (gpa + len) <= (m.gpa + m.size)) {
+            return m.hva + (gpa - m.gpa);
+        }
+    }
+    return nullptr;
+}
 
 // Static definitions
 WhvpVCpu::ExitStats WhvpVCpu::s_stats_{};
 std::atomic<bool>   WhvpVCpu::s_stats_enabled_{false};
+
+// ---------------------------------------------------------------------------
+// Hyper-V enlightenment partition-wide state
+// ---------------------------------------------------------------------------
+// GUEST_OS_ID (0x40000000) and HYPERCALL (0x40000001) are defined per Hyper-V
+// TLFS as partition-wide. Linux writes them exactly once from the BP during
+// hyperv_init(), but we guard with std::atomic in case of races. A single VM
+// per process keeps this as file-local storage.
+static std::atomic<uint64_t> g_hv_guest_os_id{0};
+static std::atomic<uint64_t> g_hv_hypercall_msr{0};
+static std::atomic<bool>     g_hv_hypercall_page_ready{false};
+
+// Reference TSC page: guest points MSR 0x40000021 at a 4 KiB GPA and
+// reads (tsc * scale) >> 64 + offset locally — no VM exit per time read.
+// Stored partition-wide; all vCPUs share the same page.
+static std::atomic<uint64_t> g_hv_tsc_page_msr{0};       // last MSR value written
+static std::atomic<uint64_t> g_hv_tsc_freq_hz{0};        // set by SetHypervTscFrequency
+static std::atomic<bool>     g_hv_tsc_page_ready{false}; // overlay succeeded
+
+// Partition reference time is defined by TLFS §12 to start at 0 when the
+// partition is created, and to advance at a constant 10 MHz (100 ns units).
+// Linux feeds HV_X64_MSR_TIME_REF_COUNT and the reference TSC page into
+// sched_clock / ktime, which expect a small, monotonic counter starting near
+// zero — NOT a Windows FILETIME (epoch 1601, ~1.3e19 when interpreted as
+// 100 ns units). Using FILETIME was our bug: on first read sched_clock
+// jumped forward by ~13 quintillion nanoseconds, so the boot timeline
+// appeared to freeze (every jiffies tick produced the same "time since
+// boot" up to float rounding).
+//
+// Solution: anchor both the MSR and the TSC page to `g_partition_boot_tsc`.
+// Reference time is derived purely from the host TSC:
+//
+//   ref_time_100ns = ((__rdtsc() - boot_tsc) * tsc_scale) >> 64
+//
+// so MSR 0x40000020 and the TSC page read from guest share the same math
+// (sched_clock monotonicity requirement) and start at 0. boot_tsc is
+// captured lazily on first MSR / CPUID publish rather than at VM-creation
+// time so we don't need to thread anything through WhvpVm::Create; the
+// kernel itself treats any non-negative starting point as "now".
+static std::atomic<uint64_t> g_partition_boot_tsc{0};
+
+// Lazily capture the partition-start TSC snapshot. The first caller wins;
+// everyone else observes the same value.
+static uint64_t GetOrInitPartitionBootTsc() {
+    uint64_t v = g_partition_boot_tsc.load(std::memory_order_acquire);
+    if (v != 0) return v;
+    uint64_t snapshot = __rdtsc();
+    uint64_t expected = 0;
+    if (g_partition_boot_tsc.compare_exchange_strong(
+            expected, snapshot,
+            std::memory_order_release, std::memory_order_acquire)) {
+        return snapshot;
+    }
+    return expected; // someone else beat us; use their value
+}
+
+// HV_REFERENCE_TSC_PAGE layout (TLFS 5.0 §12.7.3).
+struct HvReferenceTscPage {
+    uint32_t tsc_sequence;
+    uint32_t reserved1;
+    uint64_t tsc_scale;
+    int64_t  tsc_offset;
+    uint64_t reserved2[509];
+};
+static_assert(sizeof(HvReferenceTscPage) == 4096, "TSC page must be 4 KiB");
+
+// Hyper-V hypercall page stub (TLFS 5.0 §3.13).
+//   mov eax, HV_STATUS_INVALID_HYPERCALL_CODE (0x2)
+//   ret
+// We advertise HV_MSR_HYPERCALL_AVAILABLE so Linux's hyperv_init() proceeds
+// past its "HYPERCALL MSR not available" early-exit, which in turn unlocks
+// VP_INDEX and TIME_REF_COUNT initialization. None of the features we
+// advertise require real hypercalls, but Linux still probes a few (e.g.
+// hv_query_ext_cap); the stub returns an error status so those probes fail
+// gracefully instead of #UD'ing on an empty page.
+static const uint8_t kHvHypercallTrampoline[] = {
+    0xB8, 0x02, 0x00, 0x00, 0x00, // mov eax, 0x2
+    0xC3                           // ret
+};
+
+static void OverlayHypercallPage(uint64_t gpa) {
+    uint8_t* hva = GpaToHva(gpa, sizeof(kHvHypercallTrampoline));
+    if (!hva) {
+        LOG_WARN("Hyper-V hypercall page: GPA 0x%" PRIX64 " not in guest RAM "
+                 "— guest hypercalls will fault", gpa);
+        return;
+    }
+    std::memcpy(hva, kHvHypercallTrampoline, sizeof(kHvHypercallTrampoline));
+    g_hv_hypercall_page_ready.store(true, std::memory_order_release);
+    LOG_INFO("Hyper-V hypercall page at gpa=0x%" PRIX64 " (%zu bytes)",
+             gpa, sizeof(kHvHypercallTrampoline));
+}
+
+// ---------------------------------------------------------------------------
+// Reference TSC page helpers
+// ---------------------------------------------------------------------------
+
+// TscScale = (10_000_000 * 2^64) / tsc_hz, since the synthetic clock runs at
+// 10 MHz (100 ns units, matching MSR 0x40000020). Expressed as
+// (2^63 * 20000) / tsc_hz to avoid overflow in a single 64-bit divide.
+// Linux's calc: mul_u64_u32_div(1ULL<<63, 20000, tsc_khz) — identical math
+// modulo rounding.
+static uint64_t ComputeTscScale(uint64_t tsc_hz) {
+    if (tsc_hz == 0) return 0;
+    // Safe because (2^63) * 20000 fits in 128 bits; use __uint128 via MSVC
+    // intrinsics. We split manually to stay portable to clang-cl.
+    const uint64_t high = (1ULL << 63);
+    // Compute high*20000/tsc_hz without __uint128_t: use _umul128/_udiv128.
+    uint64_t hi = 0;
+    uint64_t lo = _umul128(high, 20000ULL, &hi);
+    uint64_t rem = 0;
+    return _udiv128(hi, lo, tsc_hz, &rem);
+}
+
+// Cached scale = ComputeTscScale(g_hv_tsc_freq_hz). Populated the first time
+// any time-read path needs it (the value is immutable for the lifetime of
+// the partition once SetHypervTscFrequency has been called).
+static std::atomic<uint64_t> g_hv_tsc_scale{0};
+
+static uint64_t GetOrInitTscScale() {
+    uint64_t s = g_hv_tsc_scale.load(std::memory_order_acquire);
+    if (s != 0) return s;
+    const uint64_t tsc_hz = g_hv_tsc_freq_hz.load(std::memory_order_acquire);
+    if (tsc_hz == 0) return 0;
+    s = ComputeTscScale(tsc_hz);
+    g_hv_tsc_scale.store(s, std::memory_order_release);
+    return s;
+}
+
+// Current Hyper-V partition reference time in 100 ns units.
+//
+// Derived from the host TSC so it stays perfectly coherent with the
+// reference TSC page (which uses the same tsc_scale). Starts at 0 at
+// partition boot, per TLFS §12. Returns 0 until we know the TSC
+// frequency (SetHypervTscFrequency has been called); callers are
+// responsible for not publishing the TSC page before then.
+static uint64_t CurrentHvRefTime100ns() {
+    const uint64_t scale = GetOrInitTscScale();
+    if (scale == 0) return 0;
+    const uint64_t boot_tsc = GetOrInitPartitionBootTsc();
+    const uint64_t tsc_now  = __rdtsc();
+    // Guard against the rare case where the TSC reading from this core was
+    // captured before boot_tsc's publishing core. Clamp to 0 rather than
+    // underflow into a huge number.
+    if (tsc_now < boot_tsc) return 0;
+    const uint64_t delta = tsc_now - boot_tsc;
+    uint64_t hi = 0;
+    (void)_umul128(delta, scale, &hi);
+    return hi;
+}
+
+// Build the reference TSC page contents and memcpy them into the guest RAM
+// backing for `gpa`. Zero VM exits on subsequent guest reads: the guest just
+// loads the page, multiplies, shifts, and adds.
+static void OverlayReferenceTscPage(uint64_t gpa) {
+    const uint64_t scale = GetOrInitTscScale();
+    if (scale == 0) {
+        LOG_WARN("Hyper-V TSC page: TSC frequency not set, refusing to enable");
+        return;
+    }
+
+    HvReferenceTscPage page{};
+    // TLFS: readers loop until TscSequence is non-zero AND stable across the
+    // read. We publish atomically via memcpy, so any non-zero sequence
+    // suffices; use 1 for simplicity.
+    page.tsc_sequence = 1;
+    page.tsc_scale    = scale;
+
+    // Anchor the page at the same TSC snapshot the MSR path uses, so the
+    // guest sees identical values regardless of which interface it samples.
+    // TLFS formula: ref_time = ((guest_rdtsc * scale) >> 64) + offset.
+    // We want ref_time = ((tsc - boot_tsc) * scale) >> 64, hence
+    //   offset = -((boot_tsc * scale) >> 64).
+    const uint64_t boot_tsc = GetOrInitPartitionBootTsc();
+    uint64_t hi = 0;
+    (void)_umul128(boot_tsc, scale, &hi);
+    page.tsc_offset = -static_cast<int64_t>(hi);
+
+    uint8_t* hva = GpaToHva(gpa, sizeof(page));
+    if (!hva) {
+        LOG_WARN("Hyper-V TSC page: GPA 0x%" PRIX64 " not in guest RAM", gpa);
+        return;
+    }
+    std::memcpy(hva, &page, sizeof(page));
+    g_hv_tsc_page_ready.store(true, std::memory_order_release);
+    LOG_INFO("Hyper-V reference TSC page at gpa=0x%" PRIX64
+             " (scale=0x%" PRIX64 ", offset=0x%" PRIX64 ")",
+             gpa, page.tsc_scale, static_cast<uint64_t>(page.tsc_offset));
+}
+
+void SetHypervTscFrequency(uint64_t tsc_hz) {
+    g_hv_tsc_freq_hz.store(tsc_hz, std::memory_order_release);
+}
 
 // I/O port range helpers (mirrors HVF classification)
 static bool IsUartPort(uint16_t port) {
@@ -444,15 +678,78 @@ VCpuExitAction WhvpVCpu::RunOnce() {
                 else
                     s_stats_.rdmsr_other.fetch_add(1, std::memory_order_relaxed);
             }
+
+            // Hyper-V enlightenment MSRs. Advertised via CPUID 0x40000003:
+            //   EAX[1] reference counter, EAX[5] hypercall, EAX[6] VP index,
+            //   EAX[8] frequency MSRs, EAX[9] reference TSC page.
+            uint64_t read_val = 0;
+            switch (msr.MsrNumber) {
+            case 0x40000000: {
+                // HV_X64_MSR_GUEST_OS_ID: readback of guest-written identifier.
+                read_val = g_hv_guest_os_id.load(std::memory_order_acquire);
+                break;
+            }
+            case 0x40000001: {
+                // HV_X64_MSR_HYPERCALL: readback of guest-written enable+GPA.
+                read_val = g_hv_hypercall_msr.load(std::memory_order_acquire);
+                break;
+            }
+            case 0x40000002: {
+                // HV_X64_MSR_VP_INDEX: per-vCPU identifier.
+                read_val = vp_index_;
+                break;
+            }
+            case 0x40000020: {
+                // HV_X64_MSR_TIME_REF_COUNT: partition-wide monotonic counter
+                // in 100 ns units, starting at 0 when the partition was
+                // created (TLFS §12.4.1). Derived from (host_tsc - boot_tsc)
+                // so it stays lock-step with the reference TSC page that
+                // Linux reads locally.
+                read_val = CurrentHvRefTime100ns();
+                break;
+            }
+            case 0x40000021: {
+                // HV_X64_MSR_REFERENCE_TSC: readback of guest-written enable+GPA.
+                read_val = g_hv_tsc_page_msr.load(std::memory_order_acquire);
+                break;
+            }
+            case 0x40000022: {
+                // HV_X64_MSR_TSC_FREQUENCY: TSC frequency in Hz. Linux reads
+                // this to set tsc_khz directly and mark TSC reliable, skipping
+                // ~50 ms of PIT-based calibration.
+                read_val = g_hv_tsc_freq_hz.load(std::memory_order_acquire);
+                break;
+            }
+            case 0x40000023: {
+                // HV_X64_MSR_APIC_FREQUENCY: APIC timer frequency in Hz. Not
+                // used by Linux for LAPIC timer (it calibrates), but exposed
+                // for completeness. 1 GHz matches WHPX's InterruptClockFrequency
+                // reported by WHvCapabilityCodeInterruptClockFrequency on
+                // typical hosts (200 MHz seen, round up to avoid div-by-zero).
+                read_val = 1000000000ULL;
+                break;
+            }
+            case 0x40000118: {
+                // HV_X64_MSR_TSC_INVARIANT_CONTROL: readback of whatever the
+                // guest wrote. Linux only reads this on some diagnostic
+                // paths; the important path is the write (below).
+                read_val = 0; // guest last-wrote value is not tracked per-VM
+                break;
+            }
+            default:
+                read_val = 0;
+                break;
+            }
+
             WHV_REGISTER_NAME reg_names[] = {
                 WHvX64RegisterRax, WHvX64RegisterRdx, WHvX64RegisterRip
             };
             WHV_REGISTER_VALUE vals[3]{};
-            vals[0].Reg64 = 0;
-            vals[1].Reg64 = 0;
+            vals[0].Reg64 = read_val & 0xFFFFFFFFULL;
+            vals[1].Reg64 = (read_val >> 32) & 0xFFFFFFFFULL;
             vals[2] = rip_val;
             SetRegisters(reg_names, vals, 3);
-            LOG_DEBUG("MSR read: 0x%X -> 0", msr.MsrNumber);
+            LOG_DEBUG("MSR read: 0x%X -> 0x%" PRIX64, msr.MsrNumber, read_val);
         } else {
             if (stats) {
                 switch (msr.MsrNumber) {
@@ -480,8 +777,65 @@ VCpuExitAction WhvpVCpu::RunOnce() {
                 }
                 }
             }
-            LOG_DEBUG("MSR write: 0x%X = 0x%" PRIX64, msr.MsrNumber,
-                      (msr.Rdx << 32) | (msr.Rax & 0xFFFFFFFF));
+            const uint64_t write_val =
+                ((msr.Rdx & 0xFFFFFFFFULL) << 32) | (msr.Rax & 0xFFFFFFFFULL);
+
+            // Hyper-V enlightenment: store partition-wide MSRs and, on
+            // HYPERCALL / REFERENCE_TSC enable, overlay the corresponding
+            // guest page. Linux's hyperv_init() writes GUEST_OS_ID first
+            // then HYPERCALL with the enable bit set; we defensively mirror
+            // that ordering before publishing the hypercall trampoline.
+            switch (msr.MsrNumber) {
+            case 0x40000000:
+                g_hv_guest_os_id.store(write_val, std::memory_order_release);
+                LOG_INFO("Hyper-V GUEST_OS_ID = 0x%" PRIX64, write_val);
+                break;
+            case 0x40000001: {
+                g_hv_hypercall_msr.store(write_val, std::memory_order_release);
+                const bool enable = (write_val & 0x1ULL) != 0;
+                const uint64_t gpa = write_val & ~0xFFFULL;
+                const uint64_t os_id =
+                    g_hv_guest_os_id.load(std::memory_order_acquire);
+                if (enable && gpa != 0 && os_id != 0) {
+                    OverlayHypercallPage(gpa);
+                } else {
+                    LOG_INFO("Hyper-V HYPERCALL write 0x%" PRIX64
+                             " (enable=%d gpa=0x%" PRIX64 " os_id=0x%" PRIX64 ")",
+                             write_val, enable ? 1 : 0, gpa, os_id);
+                }
+                break;
+            }
+            case 0x40000021: {
+                // HV_X64_MSR_REFERENCE_TSC: bit 0 = enable, bits 12..63 = GFN.
+                g_hv_tsc_page_msr.store(write_val, std::memory_order_release);
+                const bool enable = (write_val & 0x1ULL) != 0;
+                const uint64_t gpa = write_val & ~0xFFFULL;
+                if (enable && gpa != 0) {
+                    OverlayReferenceTscPage(gpa);
+                } else {
+                    LOG_INFO("Hyper-V REFERENCE_TSC write 0x%" PRIX64
+                             " (disable or null GPA)", write_val);
+                }
+                break;
+            }
+            case 0x40000118: {
+                // HV_X64_MSR_TSC_INVARIANT_CONTROL: guest opts in to invariant
+                // TSC by writing bit 0. We advertise the privilege (CPUID
+                // 0x40000003 EAX[15]) and our host TSC really is invariant
+                // (modern Intel with CPUID.80000007H:EDX[8]=1), so we simply
+                // accept the write. Linux then sets X86_FEATURE_TSC_RELIABLE
+                // and skips mark_tsc_unstable("running on Hyper-V"), which
+                // lets sched_clock stay on the TSC page (~ns resolution)
+                // instead of falling back to jiffies (4 ms @ HZ=250).
+                LOG_INFO("Hyper-V TSC_INVARIANT_CONTROL = 0x%" PRIX64
+                         " (TSC marked reliable in guest)", write_val);
+                break;
+            }
+            default:
+                break;
+            }
+
+            LOG_DEBUG("MSR write: 0x%X = 0x%" PRIX64, msr.MsrNumber, write_val);
             SetRegisters(&rip_name, &rip_val, 1);
         }
         return VCpuExitAction::kContinue;

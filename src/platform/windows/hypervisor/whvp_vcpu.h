@@ -102,4 +102,19 @@ private:
     WHV_EMULATOR_HANDLE emulator_ = nullptr;
 };
 
+// ---------------------------------------------------------------------------
+// Hyper-V enlightenment helpers (implemented in whvp_vcpu.cpp).
+// ---------------------------------------------------------------------------
+
+// Publish the measured TSC frequency (Hz). Must be called once during VM
+// setup, before any vCPU executes guest code. Used to derive TscScale for the
+// reference TSC page and to answer MSR 0x40000022 (HV_X64_MSR_TSC_FREQUENCY).
+void SetHypervTscFrequency(uint64_t tsc_hz);
+
+// Record a guest-RAM backing mapping so the Hyper-V overlay helpers can
+// translate GPA -> host virtual address and write directly (bypassing
+// WHvWriteGpaRange, which has proven unreliable for 4 KiB overlays on some
+// WHPX builds). Called from WhvpVm::MapMemory for each RAM range we map.
+void RegisterRamMapping(uint64_t gpa, void* hva, uint64_t size);
+
 } // namespace whvp
