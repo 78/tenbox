@@ -232,6 +232,22 @@ bool Aarch64Machine::LoadKernel(
     fdt.AddPropertyString("method", "hvc");
     fdt.EndNode();
 
+    // /hypervisor node — ARM64 has no CPUID equivalent, so the paravirt
+    // handshake happens through this FDT node + the SMCCC vendor-hyp HVC.
+    // Only emit it under KVM: "linux,kvm" tells the guest to enable kvm_ptp,
+    // lets systemd-detect-virt report "kvm", and gates drivers that probe
+    // for the KVM SMCCC vendor UID. Under HVF there is no matching vendor
+    // hyp UID, so claiming "linux,kvm" would either mislead systemd or
+    // trigger failed SMCCC probes in kvm_ptp_arm; better to omit the node
+    // entirely and let the guest see itself as a generic arm64 platform.
+#if defined(__linux__) && defined(__aarch64__)
+    if (dynamic_cast<kvm::KvmVm*>(hv_vm_)) {
+        fdt.BeginNode("hypervisor");
+        fdt.AddPropertyString("compatible", "linux,kvm");
+        fdt.EndNode();
+    }
+#endif
+
     // /timer (ARM generic timer)
     fdt.BeginNode("timer");
     fdt.AddPropertyString("compatible", "arm,armv8-timer");
