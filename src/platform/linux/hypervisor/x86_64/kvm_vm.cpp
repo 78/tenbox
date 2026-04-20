@@ -130,4 +130,42 @@ bool KvmVm::AssertIrq(uint32_t gsi, bool level) {
     return true;
 }
 
+bool KvmVm::RegisterLevelIrqFd(uint32_t gsi, int trigger_fd, int resample_fd) {
+    // On x86 KVM, the default GSI routing created alongside KVM_CREATE_IRQCHIP
+    // maps GSI 0..23 onto IOAPIC pins, so no explicit KVM_SET_GSI_ROUTING is
+    // required for level-triggered virtio-mmio lines.
+    if (trigger_fd < 0) return false;
+
+    struct kvm_irqfd ifd{};
+    ifd.fd = static_cast<uint32_t>(trigger_fd);
+    ifd.gsi = gsi;
+    if (resample_fd >= 0) {
+        ifd.flags = KVM_IRQFD_FLAG_RESAMPLE;
+        ifd.resamplefd = static_cast<uint32_t>(resample_fd);
+    }
+    if (::ioctl(vm_fd_, KVM_IRQFD, &ifd) < 0) {
+        LOG_WARN("kvm: KVM_IRQFD(gsi=%u trigger=%d resample=%d) failed: %s",
+                 gsi, trigger_fd, resample_fd, strerror(errno));
+        return false;
+    }
+    LOG_INFO("kvm: irqfd registered gsi=%u trigger=%d resample=%d",
+             gsi, trigger_fd, resample_fd);
+    return true;
+}
+
+bool KvmVm::UnregisterIrqFd(uint32_t gsi, int trigger_fd) {
+    if (trigger_fd < 0) return false;
+
+    struct kvm_irqfd ifd{};
+    ifd.fd = static_cast<uint32_t>(trigger_fd);
+    ifd.gsi = gsi;
+    ifd.flags = KVM_IRQFD_FLAG_DEASSIGN;
+    if (::ioctl(vm_fd_, KVM_IRQFD, &ifd) < 0) {
+        LOG_WARN("kvm: KVM_IRQFD DEASSIGN(gsi=%u trigger=%d) failed: %s",
+                 gsi, trigger_fd, strerror(errno));
+        return false;
+    }
+    return true;
+}
+
 } // namespace kvm

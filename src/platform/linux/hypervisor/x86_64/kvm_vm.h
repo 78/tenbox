@@ -27,6 +27,10 @@ public:
     // KVM has an in-kernel irqchip: IRQ lines go through KVM_IRQ_LINE.
     bool AssertIrq(uint32_t gsi, bool level) override;
 
+    // Register / unregister a KVM_IRQFD for a level-triggered GSI (IOAPIC pin).
+    bool RegisterLevelIrqFd(uint32_t gsi, int trigger_fd, int resample_fd) override;
+    bool UnregisterIrqFd(uint32_t gsi, int trigger_fd) override;
+
     void SetGuestMemMap(const GuestMemMap* mem) override { guest_mem_ = mem; }
 
     int VmFd() const { return vm_fd_; }

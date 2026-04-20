@@ -1,9 +1,12 @@
 #pragma once
 
 #include "core/vmm/machine_model.h"
+#include "core/vmm/console_tx_batcher.h"
 #include "core/arch/aarch64/pl011.h"
 #include "core/arch/aarch64/boot.h"
 #include "core/device/rtc/pl031_rtc.h"
+
+#include <memory>
 
 // ARM64 virt machine model (Apple Hypervisor.framework).
 // Uses GICv3, PL011 UART, FDT boot, and VirtIO MMIO.
@@ -16,6 +19,7 @@ public:
         GuestMemMap& mem,
         HypervisorVm* hv_vm,
         std::shared_ptr<ConsolePort> console_port,
+        VmIoLoop* io_loop,
         std::function<void()> shutdown_cb,
         std::function<void()> reboot_cb) override;
 
@@ -42,6 +46,10 @@ public:
 private:
     Pl011 uart_;
     Pl031Rtc rtc_;
+    // Coalesces per-byte UART tx writes into larger chunks before they
+    // reach the ConsolePort. unique_ptr so the object is created only
+    // once SetupPlatformDevices captures the downstream writer.
+    std::unique_ptr<ConsoleTxBatcher> tx_batcher_;
     GPA kernel_entry_ = 0;
     GPA fdt_gpa_ = 0;
 

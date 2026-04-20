@@ -1,6 +1,8 @@
 # Common sources shared by all platforms
 set(TENBOX_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/vmm/vm.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/vmm/vm_io_loop.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/vmm/console_tx_batcher.cpp
     ${CMAKE_SOURCE_DIR}/src/core/vmm/address_space.cpp
     ${CMAKE_SOURCE_DIR}/src/core/device/virtio/virtqueue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/device/virtio/virtio_mmio.cpp

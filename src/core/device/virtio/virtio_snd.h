@@ -3,13 +3,14 @@
 #include "common/ports.h"
 #include "core/device/virtio/virtio_mmio.h"
 #include <atomic>
-#include <condition_variable>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <mutex>
-#include <thread>
 #include <vector>
+
+class VmIoLoop;
 
 // virtio-snd device ID (spec 5.14)
 constexpr uint32_t VIRTIO_SND_DEVICE_ID = 25;
@@ -149,6 +150,10 @@ public:
     void SetMmioDevice(VirtioMmioDevice* mmio) { mmio_ = mmio; }
     void SetMemMap(const GuestMemMap& mem) { mem_ = mem; }
     void SetAudioPort(std::shared_ptr<AudioPort> port) { audio_port_ = std::move(port); }
+    // The io_loop hosts our period timer. Must be set before the guest
+    // starts a stream; a nullptr falls back to "no audio pacing" (playback
+    // effectively stalls, matching a stream-less config).
+    void SetIoLoop(VmIoLoop* loop) { io_loop_ = loop; }
 
     uint32_t GetDeviceId() const override { return VIRTIO_SND_DEVICE_ID; }
     uint64_t GetDeviceFeatures() const override;
@@ -173,7 +178,9 @@ private:
     void HandleChmapInfo(const VirtioSndQueryInfo* query,
                          uint8_t* resp, uint32_t* resp_len);
 
-    void PeriodTimerThread();
+    // One tick of the period-driven playback loop. Runs on io_loop_'s
+    // thread; returns the delay (ms) until the next tick.
+    uint64_t PeriodTick();
     void StartPeriodTimer();
     void StopPeriodTimer();
     void FlushPendingTxBuffers();
@@ -197,11 +204,15 @@ private:
     uint32_t pcm_buffer_bytes_ = 0;
     uint32_t pcm_period_bytes_ = 0;
 
-    // Period timer: releases TX buffers at real audio rate to throttle guest
-    std::thread period_thread_;
+    // Period timer: releases TX buffers at real audio rate to throttle guest.
+    // The timer itself is owned by io_loop_; we only keep the id and state
+    // used by PeriodTick.
+    VmIoLoop* io_loop_ = nullptr;
     std::mutex period_mutex_;
-    std::condition_variable period_cv_;
     std::atomic<bool> period_running_{false};
+    uint64_t period_timer_id_ = 0;
+    std::chrono::steady_clock::time_point period_start_time_{};
+    uint64_t period_bytes_processed_ = 0;
 
     // Pending TX buffers waiting to be returned to guest
     struct PendingTxBuffer {

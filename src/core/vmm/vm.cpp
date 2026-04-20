@@ -2,6 +2,13 @@
 #include "core/vmm/vm_platform.h"
 #include <algorithm>
 
+#if defined(__linux__)
+#include <cerrno>
+#include <cstring>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#endif
+
 #if defined(__APPLE__) && defined(__x86_64__)
 #include "core/arch/x86_64/x86_machine.h"
 #include "platform/macos/hypervisor/x86_64/hvf_vcpu.h"
@@ -13,12 +20,16 @@
 #include "core/arch/x86_64/x86_machine.h"
 #elif defined(__linux__) && defined(__x86_64__)
 #include "core/arch/x86_64/x86_machine.h"
+#elif defined(__linux__) && defined(__aarch64__)
+#include "core/arch/aarch64/aarch64_machine.h"
+#include "platform/linux/hypervisor/aarch64/kvm_vcpu.h"
+#include "platform/linux/hypervisor/aarch64/kvm_vm.h"
 #endif
 
 static std::unique_ptr<MachineModel> CreateMachineModel() {
 #if defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__)) || (defined(__linux__) && defined(__x86_64__))
     return std::make_unique<X86Machine>();
-#elif defined(__APPLE__) && defined(__aarch64__)
+#elif (defined(__APPLE__) && defined(__aarch64__)) || (defined(__linux__) && defined(__aarch64__))
     return std::make_unique<Aarch64Machine>();
 #else
     LOG_ERROR("No machine model available for this platform/architecture");
@@ -50,6 +61,11 @@ Vm::~Vm() {
     for (auto& t : vcpu_threads_) {
         if (t.joinable()) t.join();
     }
+
+    // Tear down irqfds (detach uv_poll, unregister with kvm, close fds, stop
+    // io_loop_) before destroying the hypervisor VM.
+    ShutdownIrqFds();
+    io_loop_.Stop();
 
     if (vdagent_handler_) {
         vdagent_handler_->SetClipboardCallback(nullptr);
@@ -108,6 +124,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
     if (!vm->machine_->SetupPlatformDevices(
             vm->addr_space_, vm->mem_, vm->hv_vm_.get(),
             vm->console_port_,
+            &vm->io_loop_,
             [&vm_ref = *vm]() { vm_ref.RequestStop(); },
             [&vm_ref = *vm]() { vm_ref.RequestReboot(); })) {
         LOG_ERROR("Failed to set up platform devices");
@@ -231,6 +248,14 @@ void Vm::SetupVCpuCallbacks(uint32_t vcpu_index) {
         hvf_vcpu->SetPsciShutdownCallback([this]() { RequestStop(); });
         hvf_vcpu->SetPsciRebootCallback([this]() { RequestReboot(); });
     }
+#elif defined(__linux__) && defined(__aarch64__)
+    // In-kernel PSCI handles CPU_ON; only SYSTEM_OFF / SYSTEM_RESET bubble
+    // up to userspace as KVM_EXIT_SYSTEM_EVENT.
+    auto* kvm_vcpu = dynamic_cast<kvm::KvmVCpu*>(vcpus_[vcpu_index].get());
+    if (kvm_vcpu) {
+        kvm_vcpu->SetShutdownCallback([this]() { RequestStop(); });
+        kvm_vcpu->SetRebootCallback([this]() { RequestReboot(); });
+    }
 #else
     (void)vcpu_index;
 #endif
@@ -326,6 +351,92 @@ void Vm::SetIrqLevel(uint8_t irq, bool asserted) {
     machine_->SetIrqLevel(hv_vm_.get(), irq, asserted);
 }
 
+bool Vm::TryEnableIrqFd(VirtioMmioDevice* dev, uint8_t slot_irq) {
+#if defined(__linux__)
+    IrqFdSlot slot;
+    #if defined(__aarch64__)
+        slot.gsi = static_cast<uint32_t>(slot_irq) + 32;  // absolute SPI INTID
+    #elif defined(__x86_64__)
+        slot.gsi = static_cast<uint32_t>(slot_irq);       // IOAPIC pin
+    #else
+        (void)slot_irq;
+        return false;
+    #endif
+    slot.dev = dev;
+    irqfd_slots_.push_back(slot);
+    return true;
+#else
+    (void)dev;
+    (void)slot_irq;
+    return false;
+#endif
+}
+
+void Vm::InstallIrqFds() {
+#if defined(__linux__)
+    if (irqfd_slots_.empty() || !hv_vm_) return;
+
+    // Allocate trigger + resample eventfds per slot, then ask the hypervisor
+    // to register each one. On any failure, drop the slot from the list
+    // (its virtio device keeps using the SetIrqLevelCallback fallback).
+    size_t write_idx = 0;
+    for (size_t read_idx = 0; read_idx < irqfd_slots_.size(); ++read_idx) {
+        IrqFdSlot& s = irqfd_slots_[read_idx];
+
+        int trig = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+        int resamp = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+        if (trig < 0 || resamp < 0) {
+            LOG_WARN("irqfd: eventfd() failed: %s", strerror(errno));
+            if (trig >= 0) ::close(trig);
+            if (resamp >= 0) ::close(resamp);
+            continue;
+        }
+        if (!hv_vm_->RegisterLevelIrqFd(s.gsi, trig, resamp)) {
+            ::close(trig);
+            ::close(resamp);
+            continue;
+        }
+
+        s.trigger_fd = trig;
+        s.resample_fd = resamp;
+        s.dev->SetIrqEventFd(trig);
+        io_loop_.AttachIrqFd(s.dev, trig, resamp);
+        irqfd_slots_[write_idx++] = s;
+    }
+    irqfd_slots_.resize(write_idx);
+
+    if (!irqfd_slots_.empty()) {
+        LOG_INFO("irqfd: %zu slots attached to io_loop", irqfd_slots_.size());
+    }
+#endif
+}
+
+void Vm::ShutdownIrqFds() {
+#if defined(__linux__)
+    // Detach uv_poll on the io_loop first (synchronously-ish: Post returns
+    // immediately but the detach closure runs in the io_thread before Stop
+    // completes). Then unregister with the kernel and close fds.
+    for (auto& s : irqfd_slots_) {
+        if (s.dev) io_loop_.DetachIrqFd(s.dev);
+    }
+    for (auto& s : irqfd_slots_) {
+        if (s.trigger_fd >= 0) {
+            if (hv_vm_) hv_vm_->UnregisterIrqFd(s.gsi, s.trigger_fd);
+            ::close(s.trigger_fd);
+            s.trigger_fd = -1;
+        }
+        if (s.resample_fd >= 0) {
+            ::close(s.resample_fd);
+            s.resample_fd = -1;
+        }
+        if (s.dev) {
+            s.dev->SetIrqEventFd(-1);  // revert to callback path on teardown
+        }
+    }
+    irqfd_slots_.clear();
+#endif
+}
+
 bool Vm::SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& slot) {
     virtio_blk_ = std::make_unique<VirtioBlkDevice>();
     if (!virtio_blk_->Open(disk_path)) return false;
@@ -334,6 +445,7 @@ bool Vm::SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& sl
     virtio_mmio_->Init(virtio_blk_.get(), mem_);
     virtio_mmio_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_.get(), slot.irq);
     virtio_blk_->SetMmioDevice(virtio_mmio_.get());
 
     addr_space_.AddMmioDevice(
@@ -353,6 +465,7 @@ bool Vm::SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
     virtio_mmio_net_->Init(virtio_net_.get(), mem_);
     virtio_mmio_net_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_net_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_net_.get(), slot.irq);
     virtio_net_->SetMmioDevice(virtio_mmio_net_.get());
 
     virtio_net_->SetTxCallback([this](const uint8_t* frame, uint32_t len) {
@@ -379,6 +492,7 @@ bool Vm::SetupVirtioInput(const VirtioDeviceSlot& kbd_slot,
     virtio_mmio_kbd_->Init(virtio_kbd_.get(), mem_);
     virtio_mmio_kbd_->SetIrqCallback([this, irq = kbd_slot.irq]() { InjectIrq(irq); });
     virtio_mmio_kbd_->SetIrqLevelCallback([this, irq = kbd_slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_kbd_.get(), kbd_slot.irq);
     virtio_kbd_->SetMmioDevice(virtio_mmio_kbd_.get());
     addr_space_.AddMmioDevice(
         kbd_slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_kbd_.get());
@@ -389,6 +503,7 @@ bool Vm::SetupVirtioInput(const VirtioDeviceSlot& kbd_slot,
     virtio_mmio_tablet_->Init(virtio_tablet_.get(), mem_);
     virtio_mmio_tablet_->SetIrqCallback([this, irq = tablet_slot.irq]() { InjectIrq(irq); });
     virtio_mmio_tablet_->SetIrqLevelCallback([this, irq = tablet_slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_tablet_.get(), tablet_slot.irq);
     virtio_tablet_->SetMmioDevice(virtio_mmio_tablet_.get());
     addr_space_.AddMmioDevice(
         tablet_slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_tablet_.get());
@@ -417,6 +532,7 @@ bool Vm::SetupVirtioGpu(uint32_t width, uint32_t height, const VirtioDeviceSlot&
     virtio_mmio_gpu_->Init(virtio_gpu_.get(), mem_);
     virtio_mmio_gpu_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_gpu_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_gpu_.get(), slot.irq);
     virtio_gpu_->SetMmioDevice(virtio_mmio_gpu_.get());
     addr_space_.AddMmioDevice(
         slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_gpu_.get());
@@ -461,6 +577,7 @@ bool Vm::SetupVirtioSerial(const VirtioDeviceSlot& slot) {
     virtio_mmio_serial_->Init(virtio_serial_.get(), mem_);
     virtio_mmio_serial_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_serial_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_serial_.get(), slot.irq);
     virtio_serial_->SetMmioDevice(virtio_mmio_serial_.get());
     addr_space_.AddMmioDevice(
         slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_serial_.get());
@@ -478,6 +595,7 @@ bool Vm::SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders,
     virtio_mmio_fs_->Init(virtio_fs_.get(), mem_);
     virtio_mmio_fs_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_fs_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_fs_.get(), slot.irq);
     virtio_fs_->SetMmioDevice(virtio_mmio_fs_.get());
 
     addr_space_.AddMmioDevice(slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_fs_.get());
@@ -496,6 +614,7 @@ bool Vm::SetupVirtioFs(const std::vector<VmSharedFolder>& initial_folders,
 bool Vm::SetupVirtioSnd(const VirtioDeviceSlot& slot) {
     virtio_snd_ = std::make_unique<VirtioSndDevice>();
     virtio_snd_->SetMemMap(mem_);
+    virtio_snd_->SetIoLoop(&io_loop_);
 
     if (audio_port_) {
         virtio_snd_->SetAudioPort(audio_port_);
@@ -505,6 +624,7 @@ bool Vm::SetupVirtioSnd(const VirtioDeviceSlot& slot) {
     virtio_mmio_snd_->Init(virtio_snd_.get(), mem_);
     virtio_mmio_snd_->SetIrqCallback([this, irq = slot.irq]() { InjectIrq(irq); });
     virtio_mmio_snd_->SetIrqLevelCallback([this, irq = slot.irq](bool a) { SetIrqLevel(irq, a); });
+    TryEnableIrqFd(virtio_mmio_snd_.get(), slot.irq);
     virtio_snd_->SetMmioDevice(virtio_mmio_snd_.get());
     addr_space_.AddMmioDevice(
         slot.mmio_base, VirtioMmioDevice::kMmioSize, virtio_mmio_snd_.get());
@@ -627,6 +747,24 @@ int Vm::Run() {
     if (running_) {
         // Load the kernel, set APIC IDs in ACPI MADT, and configure BSP registers.
         FinalizeBoot(boot_config_);
+    }
+
+    if (running_) {
+#if defined(__linux__) && defined(__aarch64__)
+        // KVM_IRQFD on arm64 requires the in-kernel VGIC to have had its
+        // KVM_DEV_ARM_VGIC_CTRL_INIT issued. SetupAarch64Boot normally drives
+        // that, but it runs on the BSP thread after boot_complete_ — i.e.
+        // after we would try to register irqfds here. Force-finalize from
+        // this (main) thread; FinalizeVgicInit is idempotent.
+        if (auto* kvm_vm = dynamic_cast<kvm::KvmVm*>(hv_vm_.get())) {
+            kvm_vm->FinalizeVgicInit();
+        }
+#endif
+        // Bring up the central device I/O loop, then register each virtio
+        // slot's irqfd with it. Slots that fail to register stay on the
+        // classic KVM_IRQ_LINE fallback.
+        io_loop_.Start();
+        InstallIrqFds();
     }
 
     // Phase 2: release all threads into their run loops.

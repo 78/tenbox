@@ -21,6 +21,7 @@ bool X86Machine::SetupPlatformDevices(
     GuestMemMap& /*mem*/,
     HypervisorVm* hv_vm,
     std::shared_ptr<ConsolePort> console_port,
+    VmIoLoop* io_loop,
     std::function<void()> shutdown_cb,
     std::function<void()> reboot_cb) {
 
@@ -29,9 +30,15 @@ bool X86Machine::SetupPlatformDevices(
     };
 
     uart_.SetIrqCallback([this]() { irq_injector_(4); });
-    uart_.SetTxCallback([console_port](uint8_t byte) {
-        if (!console_port) return;
-        console_port->Write(&byte, 1);
+    // Thread the per-byte UART stream through a batcher so the downstream
+    // ConsolePort sees larger chunks instead of N * 1-byte writes.
+    tx_batcher_ = std::make_unique<ConsoleTxBatcher>(
+        [console_port](const uint8_t* data, size_t size) {
+            if (console_port) console_port->Write(data, size);
+        });
+    tx_batcher_->AttachIoLoop(io_loop);
+    uart_.SetTxCallback([this](uint8_t byte) {
+        tx_batcher_->Append(&byte, 1);
     });
     addr_space.AddPioDevice(
         Uart16550::kCom1Base, Uart16550::kRegCount, &uart_);

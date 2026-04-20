@@ -10,6 +10,9 @@
 #ifdef __APPLE__
 #include "platform/macos/hypervisor/aarch64/hvf_vcpu.h"
 #include "platform/macos/hypervisor/aarch64/hvf_vm.h"
+#elif defined(__linux__) && defined(__aarch64__)
+#include "platform/linux/hypervisor/aarch64/kvm_vcpu.h"
+#include "platform/linux/hypervisor/aarch64/kvm_vm.h"
 #endif
 
 bool Aarch64Machine::SetupPlatformDevices(
@@ -17,6 +20,7 @@ bool Aarch64Machine::SetupPlatformDevices(
     GuestMemMap& /*mem*/,
     HypervisorVm* hv_vm,
     std::shared_ptr<ConsolePort> console_port,
+    VmIoLoop* io_loop,
     std::function<void()> shutdown_cb,
     std::function<void()> reboot_cb) {
 
@@ -30,9 +34,15 @@ bool Aarch64Machine::SetupPlatformDevices(
     uart_.SetIrqLevelCallback([this](bool asserted) {
         SetIrqLevel(hv_vm_, kUartIrq, asserted);
     });
-    uart_.SetTxCallback([console_port](uint8_t byte) {
-        if (!console_port) return;
-        console_port->Write(&byte, 1);
+    // Thread the per-byte UART stream through a batcher so the downstream
+    // ConsolePort sees larger chunks instead of N * 1-byte writes.
+    tx_batcher_ = std::make_unique<ConsoleTxBatcher>(
+        [console_port](const uint8_t* data, size_t size) {
+            if (console_port) console_port->Write(data, size);
+        });
+    tx_batcher_->AttachIoLoop(io_loop);
+    uart_.SetTxCallback([this](uint8_t byte) {
+        tx_batcher_->Append(&byte, 1);
     });
     addr_space.AddMmioDevice(kUartBase, Pl011::kMmioSize, &uart_);
 
@@ -206,20 +216,21 @@ bool Aarch64Machine::LoadKernel(
         fdt.AddPropertyString("device_type", "cpu");
         fdt.AddPropertyString("compatible", "arm,arm-v8");
         fdt.AddPropertyU32("reg", i);
-        if (config.cpu_count > 1) {
-            fdt.AddPropertyString("enable-method", "psci");
-        }
+        // PSCI is always available (in-kernel PSCI on KVM, userspace
+        // emulation on HVF) so every CPU — including a single-core config —
+        // uses "psci" as its enable-method. This also lets the guest use
+        // PSCI SYSTEM_OFF / SYSTEM_RESET for shutdown/reboot.
+        fdt.AddPropertyString("enable-method", "psci");
         fdt.EndNode();
     }
     fdt.EndNode();
 
-    // PSCI node (for multi-core)
-    if (config.cpu_count > 1) {
-        fdt.BeginNode("psci");
-        fdt.AddPropertyString("compatible", "arm,psci-1.0");
-        fdt.AddPropertyString("method", "hvc");
-        fdt.EndNode();
-    }
+    // PSCI node (always present so the guest can issue SYSTEM_OFF /
+    // SYSTEM_RESET, even in single-CPU configurations).
+    fdt.BeginNode("psci");
+    fdt.AddPropertyString("compatible", "arm,psci-1.0");
+    fdt.AddPropertyString("method", "hvc");
+    fdt.EndNode();
 
     // /timer (ARM generic timer)
     fdt.BeginNode("timer");
@@ -235,10 +246,13 @@ bool Aarch64Machine::LoadKernel(
     fdt.AddPropertyEmpty("always-on");
     fdt.EndNode();
 
-    // /intc (GICv3)
-    // Use actual redistributor addresses from the hypervisor
+    // /intc — GICv3 by default, with a GICv2 fallback for hosts where the
+    // in-kernel VGICv3 is unavailable (e.g. Raspberry Pi 5 with GIC-400).
     GPA actual_redist_base = kGicRedistBase;
     uint32_t redist_total_size = static_cast<uint32_t>(config.cpu_count * 0x20000);
+    bool use_gic_v2 = false;
+    GPA gic_v2_cpu_base = 0x08010000ULL;
+    uint32_t gic_v2_cpu_size = 0x10000;
 #ifdef __APPLE__
     if (hv_vm_) {
         auto* hvf = dynamic_cast<hvf::HvfVm*>(hv_vm_);
@@ -247,24 +261,48 @@ bool Aarch64Machine::LoadKernel(
             redist_total_size = static_cast<uint32_t>(hvf->GetRedistSizePerCpu()) * config.cpu_count;
         }
     }
+#elif defined(__linux__) && defined(__aarch64__)
+    if (hv_vm_) {
+        auto* kvm_vm = dynamic_cast<kvm::KvmVm*>(hv_vm_);
+        if (kvm_vm && kvm_vm->UsesGicV2()) {
+            use_gic_v2 = true;
+            gic_v2_cpu_base = kvm::KvmVm::kGicV2CpuBase;
+            gic_v2_cpu_size = static_cast<uint32_t>(kvm::KvmVm::kGicV2CpuSize);
+        }
+    }
 #endif
 
     char gic_name[64];
     snprintf(gic_name, sizeof(gic_name), "intc@%" PRIx64,
              (uint64_t)kGicDistBase);
     fdt.BeginNode(gic_name);
-    fdt.AddPropertyString("compatible", "arm,gic-v3");
+    if (use_gic_v2) {
+        fdt.AddPropertyString("compatible", "arm,cortex-a15-gic");
+    } else {
+        fdt.AddPropertyString("compatible", "arm,gic-v3");
+    }
     fdt.AddPropertyU32("#interrupt-cells", 3);
     fdt.AddPropertyEmpty("interrupt-controller");
     fdt.AddPropertyU32("phandle", gic_phandle);
-    fdt.AddPropertyCells("reg", {
-        static_cast<uint32_t>(kGicDistBase >> 32),
-        static_cast<uint32_t>(kGicDistBase & 0xFFFFFFFF),
-        0, 0x10000,    // Distributor: 64 KiB
-        static_cast<uint32_t>(actual_redist_base >> 32),
-        static_cast<uint32_t>(actual_redist_base & 0xFFFFFFFF),
-        0, redist_total_size,
-    });
+    if (use_gic_v2) {
+        fdt.AddPropertyCells("reg", {
+            static_cast<uint32_t>(kGicDistBase >> 32),
+            static_cast<uint32_t>(kGicDistBase & 0xFFFFFFFF),
+            0, 0x10000,    // Distributor: 64 KiB (v2 only uses first 4 KiB)
+            static_cast<uint32_t>(gic_v2_cpu_base >> 32),
+            static_cast<uint32_t>(gic_v2_cpu_base & 0xFFFFFFFF),
+            0, gic_v2_cpu_size,  // CPU interface (GICC)
+        });
+    } else {
+        fdt.AddPropertyCells("reg", {
+            static_cast<uint32_t>(kGicDistBase >> 32),
+            static_cast<uint32_t>(kGicDistBase & 0xFFFFFFFF),
+            0, 0x10000,    // Distributor: 64 KiB
+            static_cast<uint32_t>(actual_redist_base >> 32),
+            static_cast<uint32_t>(actual_redist_base & 0xFFFFFFFF),
+            0, redist_total_size,
+        });
+    }
     fdt.EndNode();
 
     // Fixed clock for AMBA peripherals (PL011 requires clocks property)
@@ -380,9 +418,16 @@ bool Aarch64Machine::SetupBootVCpu(HypervisorVCpu* vcpu, uint8_t* /*ram*/) {
         return false;
     }
     return hvf_vcpu->SetupAarch64Boot(kernel_entry_, fdt_gpa_);
+#elif defined(__linux__) && defined(__aarch64__)
+    auto* kvm_vcpu = dynamic_cast<kvm::KvmVCpu*>(vcpu);
+    if (!kvm_vcpu) {
+        LOG_ERROR("aarch64: SetupBootVCpu requires KvmVCpu on Linux");
+        return false;
+    }
+    return kvm_vcpu->SetupAarch64Boot(kernel_entry_, fdt_gpa_);
 #else
     (void)vcpu;
-    LOG_ERROR("aarch64: SetupBootVCpu called on non-Apple platform");
+    LOG_ERROR("aarch64: SetupBootVCpu called on unsupported platform");
     return false;
 #endif
 }

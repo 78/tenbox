@@ -5,6 +5,7 @@
 #include "core/vmm/hypervisor_vm.h"
 #include "core/vmm/machine_model.h"
 #include "core/vmm/vcpu_startup_state.h"
+#include "core/vmm/vm_io_loop.h"
 #include "core/device/virtio/virtio_mmio.h"
 #include "core/device/virtio/virtio_blk.h"
 #include "core/device/virtio/virtio_net.h"
@@ -109,6 +110,17 @@ private:
     void InjectIrq(uint8_t irq);
     void SetIrqLevel(uint8_t irq, bool asserted);
 
+    // Record a virtio-mmio slot as an IRQFD candidate. The actual KVM_IRQFD
+    // registration happens inside Run() once vCPUs (and, on arm64, the VGIC)
+    // are up. The classic SetIrqLevelCallback path stays wired as a fallback;
+    // when the real fd is installed the device transparently switches over.
+    bool TryEnableIrqFd(VirtioMmioDevice* dev, uint8_t slot_irq);
+
+    // Register all recorded candidate slots with the hypervisor + io_loop_.
+    // Slots that fail stay in the callback-driven path. Linux-only.
+    void InstallIrqFds();
+    void ShutdownIrqFds();
+
     uint32_t cpu_count_ = 1;
     std::unique_ptr<MachineModel> machine_;
     std::unique_ptr<HypervisorVm> hv_vm_;
@@ -147,6 +159,15 @@ private:
 
     // Active virtio slot list (populated during setup, used for kernel loading)
     std::vector<VirtioDeviceSlot> active_virtio_slots_;
+
+    struct IrqFdSlot {
+        uint32_t gsi = 0;             // absolute hypervisor GSI
+        int trigger_fd = -1;          // write-to-assert eventfd
+        int resample_fd = -1;         // signalled on EOI (may be -1)
+        VirtioMmioDevice* dev = nullptr;  // for pending-status re-check
+    };
+    std::vector<IrqFdSlot> irqfd_slots_;
+    VmIoLoop io_loop_;
 
     std::atomic<bool> running_{false};
     std::atomic<bool> reboot_requested_{false};

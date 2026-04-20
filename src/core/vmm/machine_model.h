@@ -13,6 +13,7 @@
 
 struct VmSharedFolder;
 struct VmConfig;
+class VmIoLoop;
 
 // Describes a VirtIO MMIO device slot with its base address and IRQ number.
 struct VirtioDeviceSlot {
@@ -36,6 +37,7 @@ public:
         GuestMemMap& mem,
         HypervisorVm* hv_vm,
         std::shared_ptr<ConsolePort> console_port,
+        VmIoLoop* io_loop,
         std::function<void()> shutdown_cb,
         std::function<void()> reboot_cb) = 0;
 

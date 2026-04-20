@@ -36,6 +36,22 @@ public:
     void SetIrqCallback(IrqCallback cb) { irq_callback_ = std::move(cb); }
     void SetIrqLevelCallback(IrqLevelCallback cb) { irq_level_callback_ = std::move(cb); }
 
+    // Switch the device to IRQFD mode: instead of invoking the callbacks on
+    // every notify, write a single 64-bit value to irq_eventfd, letting the
+    // hypervisor's in-kernel irqchip assert the line directly. In this mode
+    // the explicit deassert on InterruptACK is skipped as well — deassertion
+    // is handled by the irqchip EOI + resample path.
+    //
+    // Ownership of the fd stays with the caller; it must outlive this device.
+    void SetIrqEventFd(int fd) { irq_eventfd_ = fd; }
+
+    // Snapshot of the internal interrupt_status register. Used by the irqfd
+    // resample poller to decide whether the device still has a pending
+    // condition and needs to be re-asserted.
+    uint32_t GetInterruptStatus() const {
+        return interrupt_status_.load(std::memory_order_acquire);
+    }
+
     void MmioRead(uint64_t offset, uint8_t size, uint64_t* value) override;
     void MmioWrite(uint64_t offset, uint8_t size, uint64_t value) override;
 
@@ -91,6 +107,7 @@ private:
     GuestMemMap mem_;
     IrqCallback irq_callback_;
     IrqLevelCallback irq_level_callback_;
+    int irq_eventfd_ = -1;  // IRQFD mode: write to assert; -1 disables.
 
     // Transport state
     uint32_t status_ = 0;

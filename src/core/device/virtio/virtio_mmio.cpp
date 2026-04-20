@@ -1,7 +1,27 @@
 #include "core/device/virtio/virtio_mmio.h"
 
+#if defined(__linux__) || defined(__APPLE__)
+#include <unistd.h>  // write() for eventfd in IRQFD mode
+#endif
+
 static constexpr uint64_t VIRTIO_RING_F_INDIRECT_DESC = (1ULL << 28);
 static constexpr uint64_t VIRTIO_F_EVENT_IDX = (1ULL << 29);
+
+namespace {
+
+inline void SignalIrqEventFd(int fd) {
+#if defined(__linux__) || defined(__APPLE__)
+    uint64_t one = 1;
+    // EFD_NONBLOCK fds may return EAGAIN if the counter saturates (2^64-2
+    // accumulated unhandled writes) — impossible in practice and harmless.
+    // Ignore the return value: the only interesting failure would be EBADF.
+    (void)::write(fd, &one, sizeof(one));
+#else
+    (void)fd;
+#endif
+}
+
+}  // namespace
 
 void VirtioMmioDevice::Init(VirtioDeviceOps* ops, const GuestMemMap& mem) {
     ops_ = ops;
@@ -149,7 +169,10 @@ void VirtioMmioDevice::MmioWrite(uint64_t offset, uint8_t size,
         break;
     case kInterruptACK: {
         uint32_t prev = interrupt_status_.fetch_and(~val, std::memory_order_acq_rel);
-        if ((prev & ~val) == 0 && irq_level_callback_) {
+        // In IRQFD mode, deassert is handled by the in-kernel irqchip via
+        // the EOI + resample path — do not fire the level callback here
+        // (that would race with the kernel and double-toggle the line).
+        if (irq_eventfd_ < 0 && (prev & ~val) == 0 && irq_level_callback_) {
             irq_level_callback_(false);
         }
         break;
@@ -221,6 +244,10 @@ void VirtioMmioDevice::NotifyUsedBuffer(int queue_idx) {
     }
 
     interrupt_status_.fetch_or(1, std::memory_order_release);  // VIRTIO_MMIO_INT_VRING
+    if (irq_eventfd_ >= 0) {
+        SignalIrqEventFd(irq_eventfd_);
+        return;
+    }
     if (irq_level_callback_)
         irq_level_callback_(true);
     else if (irq_callback_)
@@ -230,6 +257,10 @@ void VirtioMmioDevice::NotifyUsedBuffer(int queue_idx) {
 void VirtioMmioDevice::NotifyConfigChange() {
     config_generation_++;
     interrupt_status_.fetch_or(2, std::memory_order_release);  // VIRTIO_MMIO_INT_CONFIG
+    if (irq_eventfd_ >= 0) {
+        SignalIrqEventFd(irq_eventfd_);
+        return;
+    }
     if (irq_level_callback_)
         irq_level_callback_(true);
     else if (irq_callback_)

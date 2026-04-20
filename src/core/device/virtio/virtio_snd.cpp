@@ -1,5 +1,6 @@
 #include "core/device/virtio/virtio_snd.h"
 #include "core/vmm/types.h"
+#include "core/vmm/vm_io_loop.h"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -366,8 +367,16 @@ void VirtioSndDevice::HandleChmapInfo(const VirtioSndQueryInfo* query,
 
 void VirtioSndDevice::StartPeriodTimer() {
     StopPeriodTimer();
-    period_running_ = true;
-    period_thread_ = std::thread(&VirtioSndDevice::PeriodTimerThread, this);
+    if (!io_loop_) return;  // no loop => no pacing (dev effectively silent)
+    period_start_time_ = std::chrono::steady_clock::now();
+    period_bytes_processed_ = 0;
+    period_running_.store(true);
+    period_timer_id_ = io_loop_->AddTimer(0, [this]() -> uint64_t {
+        if (!period_running_.load()) return 0;  // self-destruct
+        uint64_t next_ms = PeriodTick();
+        if (!period_running_.load()) return 0;
+        return next_ms ? next_ms : 1;  // never return 0 while running
+    });
 }
 
 void VirtioSndDevice::FlushPendingTxBuffers() {
@@ -392,106 +401,85 @@ void VirtioSndDevice::FlushPendingTxBuffers() {
 }
 
 void VirtioSndDevice::StopPeriodTimer() {
-    if (period_running_) {
-        period_running_ = false;
-        period_cv_.notify_all();
-        if (period_thread_.joinable()) {
-            period_thread_.join();
-        }
+    if (!period_running_.exchange(false)) return;
+    if (io_loop_ && period_timer_id_) {
+        io_loop_->RemoveTimer(period_timer_id_);
+        period_timer_id_ = 0;
     }
 }
 
-void VirtioSndDevice::PeriodTimerThread() {
-    auto start_time = std::chrono::steady_clock::now();
-    uint64_t bytes_processed = 0;  // Track audio position in bytes
+uint64_t VirtioSndDevice::PeriodTick() {
+    // Get current stream parameters
+    uint32_t sample_rate, period_bytes;
+    uint8_t channels;
+    {
+        std::lock_guard<std::mutex> lock(period_mutex_);
+        sample_rate = pcm_sample_rate_;
+        period_bytes = pcm_period_bytes_;
+        channels = pcm_channels_;
+    }
 
-    while (period_running_) {
-        // Get current stream parameters
-        uint32_t sample_rate, period_bytes;
-        uint8_t channels;
-        {
-            std::lock_guard<std::mutex> lock(period_mutex_);
-            sample_rate = pcm_sample_rate_;
-            period_bytes = pcm_period_bytes_;
-            channels = pcm_channels_;
-        }
+    if (sample_rate == 0 || period_bytes == 0 || channels == 0) {
+        return 10;  // stream not yet set up; retry later
+    }
 
-        if (sample_rate == 0 || period_bytes == 0 || channels == 0) {
-            std::unique_lock<std::mutex> lock(period_mutex_);
-            period_cv_.wait_for(lock, std::chrono::milliseconds(10),
-                                [this]() { return !period_running_.load(); });
-            continue;
-        }
+    uint32_t bytes_per_second = sample_rate * channels * 2;  // S16
 
-        uint32_t bytes_per_second = sample_rate * channels * 2; // S16
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          now - period_start_time_).count();
+    int64_t audio_ms = static_cast<int64_t>(period_bytes_processed_) * 1000 /
+                       bytes_per_second;
+    int64_t drift_ms = audio_ms - elapsed_ms;  // +ahead / -behind
 
-        // Calculate timing: how far ahead/behind are we?
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
-        int64_t audio_ms = static_cast<int64_t>(bytes_processed) * 1000 / bytes_per_second;
-        int64_t drift_ms = audio_ms - elapsed_ms;  // positive = ahead, negative = behind
+    if (drift_ms > 0) {
+        // Ahead of real time — wait until we need more samples.
+        return static_cast<uint64_t>((std::min)(drift_ms, (int64_t)10));
+    }
 
-        // If we're behind, process buffers immediately
-        // If we're ahead, sleep until we need to process
-        if (drift_ms > 0) {
-            // We're ahead of real-time, sleep a bit
-            int64_t sleep_ms = (std::min)(drift_ms, (int64_t)10);
-            std::unique_lock<std::mutex> lock(period_mutex_);
-            period_cv_.wait_for(lock, std::chrono::milliseconds(sleep_ms),
-                                [this]() { return !period_running_.load(); });
-            continue;
-        }
+    if (drift_ms < -200) {
+        // Way behind (suspend/resume?); resync the clock instead of
+        // burning through every queued buffer.
+        period_start_time_ = std::chrono::steady_clock::now();
+        period_bytes_processed_ = 0;
+        return 1;
+    }
 
-        // If we're way behind (> 200ms), reset timing
-        if (drift_ms < -200) {
-            start_time = std::chrono::steady_clock::now();
-            bytes_processed = 0;
-            continue;
-        }
-
-        // Process one buffer
-        PendingTxBuffer buf{};
-        bool have_buf = false;
-        {
-            std::lock_guard<std::mutex> lock(tx_mutex_);
-            if (!pending_tx_buffers_.empty()) {
-                buf = std::move(pending_tx_buffers_.front());
-                pending_tx_buffers_.pop_front();
-                have_buf = true;
-            }
-        }
-
-        if (!have_buf) {
-            // No buffers available, wait briefly
-            std::unique_lock<std::mutex> lock(period_mutex_);
-            period_cv_.wait_for(lock, std::chrono::milliseconds(1),
-                                [this]() { return !period_running_.load(); });
-            continue;
-        }
-
-        // Send PCM data to manager
-        size_t pcm_bytes = 0;
-        if (!buf.pcm_data.empty() && audio_port_) {
-            AudioChunk chunk;
-            chunk.sample_rate = sample_rate;
-            chunk.channels = channels;
-            pcm_bytes = buf.pcm_data.size() * sizeof(int16_t);
-            chunk.pcm = std::move(buf.pcm_data);
-            audio_port_->SubmitPcm(std::move(chunk));
-        }
-
-        // Track audio position
-        bytes_processed += (pcm_bytes > 0) ? pcm_bytes : period_bytes;
-
-        // Return buffer to guest
-        if (mmio_) {
-            auto* txq = mmio_->GetQueue(VIRTIO_SND_VQ_TX);
-            if (txq) {
-                txq->PushUsed(buf.head, buf.status_len);
-                mmio_->NotifyUsedBuffer(VIRTIO_SND_VQ_TX);
-            }
+    PendingTxBuffer buf{};
+    bool have_buf = false;
+    {
+        std::lock_guard<std::mutex> lock(tx_mutex_);
+        if (!pending_tx_buffers_.empty()) {
+            buf = std::move(pending_tx_buffers_.front());
+            pending_tx_buffers_.pop_front();
+            have_buf = true;
         }
     }
+
+    if (!have_buf) {
+        return 1;  // spin gently until the guest queues more data
+    }
+
+    size_t pcm_bytes = 0;
+    if (!buf.pcm_data.empty() && audio_port_) {
+        AudioChunk chunk;
+        chunk.sample_rate = sample_rate;
+        chunk.channels = channels;
+        pcm_bytes = buf.pcm_data.size() * sizeof(int16_t);
+        chunk.pcm = std::move(buf.pcm_data);
+        audio_port_->SubmitPcm(std::move(chunk));
+    }
+
+    period_bytes_processed_ += (pcm_bytes > 0) ? pcm_bytes : period_bytes;
+
+    if (mmio_) {
+        auto* txq = mmio_->GetQueue(VIRTIO_SND_VQ_TX);
+        if (txq) {
+            txq->PushUsed(buf.head, buf.status_len);
+            mmio_->NotifyUsedBuffer(VIRTIO_SND_VQ_TX);
+        }
+    }
+    return 1;  // immediately try the next buffer; drift calc paces us
 }
 
 uint32_t VirtioSndDevice::RateEnumToHz(uint8_t rate_enum) {

@@ -22,7 +22,12 @@ jobs:
           - os: ubuntu-latest
             configure_args: -DCMAKE_BUILD_TYPE=Release
             build_args: --parallel
-            artifact_name: tenbox-build-linux
+            artifact_name: tenbox-build-linux-x64
+            artifact_path: build/tenbox-vm-runtime
+          - os: ubuntu-24.04-arm
+            configure_args: -DCMAKE_BUILD_TYPE=Release
+            build_args: --parallel
+            artifact_name: tenbox-build-linux-arm64
             artifact_path: build/tenbox-vm-runtime
     steps:
       - uses: actions/checkout@v4

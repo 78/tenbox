@@ -54,15 +54,25 @@ elseif(APPLE)
             "-framework Hypervisor"
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(KVM_SOURCES
+    set(KVM_COMMON_SOURCES
         ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/kvm_platform.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/x86_64/kvm_vm.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/x86_64/kvm_vcpu.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/vm_platform_linux.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/posix/console/posix_console_port.cpp
     )
 
-    add_library(tenbox_platform STATIC ${KVM_SOURCES})
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        set(KVM_ARCH_SOURCES
+            ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/aarch64/kvm_vm.cpp
+            ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/aarch64/kvm_vcpu.cpp
+        )
+    else()
+        set(KVM_ARCH_SOURCES
+            ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/x86_64/kvm_vm.cpp
+            ${CMAKE_SOURCE_DIR}/src/platform/linux/hypervisor/x86_64/kvm_vcpu.cpp
+        )
+    endif()
+
+    add_library(tenbox_platform STATIC ${KVM_COMMON_SOURCES} ${KVM_ARCH_SOURCES})
 
     target_include_directories(tenbox_platform
         PUBLIC

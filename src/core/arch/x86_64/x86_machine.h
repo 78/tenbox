@@ -1,7 +1,10 @@
 #pragma once
 
 #include "core/vmm/machine_model.h"
+#include "core/vmm/console_tx_batcher.h"
 #include "core/device/serial/uart_16550.h"
+
+#include <memory>
 #include "core/device/timer/i8254_pit.h"
 #include "core/device/rtc/cmos_rtc.h"
 #include "core/device/irq/ioapic.h"
@@ -22,6 +25,7 @@ public:
         GuestMemMap& mem,
         HypervisorVm* hv_vm,
         std::shared_ptr<ConsolePort> console_port,
+        VmIoLoop* io_loop,
         std::function<void()> shutdown_cb,
         std::function<void()> reboot_cb) override;
 
@@ -57,6 +61,8 @@ public:
 
 private:
     Uart16550 uart_;
+    // Coalesces per-byte UART tx writes before they reach the ConsolePort.
+    std::unique_ptr<ConsoleTxBatcher> tx_batcher_;
     I8254Pit pit_;
     SystemControlB sys_ctrl_b_;
     CmosRtc rtc_;
