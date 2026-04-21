@@ -6,9 +6,10 @@
     <description>TenBox Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.7.1</title>
+      <title>Version 0.7.2</title>
       <description><![CDATA[
         <ul>
+          <li>- 修复部分黑屏问题</li>
           <li>- 虚拟机平台表述改为 Windows 虚拟机监控程序平台</li>
           <li>- 菜单中增加帮助文档</li>
           <li>- 优化性能</li>
@@ -18,10 +19,10 @@
       <pubDate>Tue, 21 Apr 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>10</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.1.msi"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.2.msi"
         sparkle:os="windows"
-        sparkle:version="0.7.1"
-        sparkle:shortVersionString="0.7.1"
+        sparkle:version="0.7.2"
+        sparkle:shortVersionString="0.7.2"
         sparkle:installerArguments="/passive"
         length="3256320"
         type="application/octet-stream"

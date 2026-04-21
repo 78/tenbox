@@ -1346,6 +1346,26 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
     int w = (geo.width > 0) ? geo.width : impl_->Dpi(1024);
     int h = (geo.height > 0) ? geo.height : impl_->Dpi(680);
 
+    // Clamp the restored window rectangle into the nearest monitor's work area,
+    // so the window stays visible when a previously used monitor is gone or the
+    // display layout has changed.
+    if (x != CW_USEDEFAULT && y != CW_USEDEFAULT) {
+        RECT saved{ x, y, x + w, y + h };
+        HMONITOR mon = MonitorFromRect(&saved, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{ sizeof(mi) };
+        if (mon && GetMonitorInfoW(mon, &mi)) {
+            const RECT& wa = mi.rcWork;
+            const int wa_w = wa.right - wa.left;
+            const int wa_h = wa.bottom - wa.top;
+            if (w > wa_w) w = wa_w;
+            if (h > wa_h) h = wa_h;
+            if (x < wa.left)         x = wa.left;
+            if (y < wa.top)          y = wa.top;
+            if (x + w > wa.right)    x = wa.right  - w;
+            if (y + h > wa.bottom)   y = wa.bottom - h;
+        }
+    }
+
     i18n::InitLanguage();
     impl_->menu_bar = BuildMenuBar(manager_.app_settings().show_toolbar);
 

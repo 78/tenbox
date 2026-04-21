@@ -10,19 +10,27 @@ namespace {
 constexpr DWORD kMaxDoorbellSlots =
     MAXIMUM_WAIT_OBJECTS > 0 ? static_cast<DWORD>(MAXIMUM_WAIT_OBJECTS) - 1u : 63u;
 
-// WHvCreateNotificationPort / WHvDeleteNotificationPort were added after
-// Windows 10 1803. Referencing them directly would add static imports to
-// WinHvPlatform.dll that cause the loader to reject the EXE on 1803 with
-// "entry point not found" before main() runs. Resolve them dynamically and
-// call through these function pointers instead.
+// WHvCreateNotificationPort / WHvDeleteNotificationPort (notification-port
+// API, 1809+) and WHvRegisterPartitionDoorbellEvent /
+// WHvUnregisterPartitionDoorbellEvent (legacy doorbell API, also post-1803)
+// are not present on Windows 10 1803. Referencing any of them directly would
+// add static imports to WinHvPlatform.dll that cause the loader to reject the
+// EXE on 1803 with "entry point not found" before main() runs. Resolve them
+// dynamically and call through these function pointers instead.
 using PFN_WHvCreateNotificationPort = HRESULT(WINAPI*)(
     WHV_PARTITION_HANDLE, const WHV_NOTIFICATION_PORT_PARAMETERS*, HANDLE,
     WHV_NOTIFICATION_PORT_HANDLE*);
 using PFN_WHvDeleteNotificationPort = HRESULT(WINAPI*)(
     WHV_PARTITION_HANDLE, WHV_NOTIFICATION_PORT_HANDLE);
+using PFN_WHvRegisterPartitionDoorbellEvent = HRESULT(WINAPI*)(
+    WHV_PARTITION_HANDLE, const WHV_DOORBELL_MATCH_DATA*, HANDLE);
+using PFN_WHvUnregisterPartitionDoorbellEvent = HRESULT(WINAPI*)(
+    WHV_PARTITION_HANDLE, const WHV_DOORBELL_MATCH_DATA*);
 
 static PFN_WHvCreateNotificationPort g_pfnCreateNotificationPort = nullptr;
 static PFN_WHvDeleteNotificationPort g_pfnDeleteNotificationPort = nullptr;
+static PFN_WHvRegisterPartitionDoorbellEvent g_pfnRegisterDoorbell = nullptr;
+static PFN_WHvUnregisterPartitionDoorbellEvent g_pfnUnregisterDoorbell = nullptr;
 
 void FillDoorbellMatch(WHV_DOORBELL_MATCH_DATA* m, uint64_t mmio_addr, uint32_t len,
                        uint32_t datamatch) {
@@ -57,9 +65,11 @@ static bool WhvDoorbellApisAvailable(bool* use_notification_port) {
         GetProcAddress(whv, "WHvDeleteNotificationPort"));
     const bool notify = (pCreate != nullptr && pDelete != nullptr);
 
-    const bool legacy =
-        GetProcAddress(whv, "WHvRegisterPartitionDoorbellEvent") &&
-        GetProcAddress(whv, "WHvUnregisterPartitionDoorbellEvent");
+    auto pRegDb = reinterpret_cast<PFN_WHvRegisterPartitionDoorbellEvent>(
+        GetProcAddress(whv, "WHvRegisterPartitionDoorbellEvent"));
+    auto pUnregDb = reinterpret_cast<PFN_WHvUnregisterPartitionDoorbellEvent>(
+        GetProcAddress(whv, "WHvUnregisterPartitionDoorbellEvent"));
+    const bool legacy = (pRegDb != nullptr && pUnregDb != nullptr);
 
     if (notify) {
         g_pfnCreateNotificationPort = pCreate;
@@ -68,6 +78,8 @@ static bool WhvDoorbellApisAvailable(bool* use_notification_port) {
         return true;
     }
     if (legacy) {
+        g_pfnRegisterDoorbell = pRegDb;
+        g_pfnUnregisterDoorbell = pUnregDb;
         *use_notification_port = false;
         return true;
     }
@@ -138,9 +150,11 @@ bool WhvpDoorbellRegistrar::Register(uint64_t mmio_addr, uint32_t len, uint32_t 
         params.Doorbell = match;
         hr = g_pfnCreateNotificationPort(partition_, &params, ev, &port);
         api = ApiKind::NotificationPort;
-    } else {
-        hr = WHvRegisterPartitionDoorbellEvent(partition_, &match, ev);
+    } else if (g_pfnRegisterDoorbell) {
+        hr = g_pfnRegisterDoorbell(partition_, &match, ev);
         api = ApiKind::LegacyDoorbell;
+    } else {
+        hr = E_NOTIMPL;
     }
 
     if (FAILED(hr)) {
@@ -191,11 +205,14 @@ void WhvpDoorbellRegistrar::Shutdown() {
             }
             up->port_handle = nullptr;
         } else if (up->api == ApiKind::LegacyDoorbell) {
-            HRESULT hr =
-                WHvUnregisterPartitionDoorbellEvent(partition_, &up->legacy_match);
-            if (FAILED(hr)) {
-                LOG_WARN("WHPX doorbell: WHvUnregisterPartitionDoorbellEvent failed: 0x%08lX",
-                         hr);
+            if (g_pfnUnregisterDoorbell) {
+                HRESULT hr =
+                    g_pfnUnregisterDoorbell(partition_, &up->legacy_match);
+                if (FAILED(hr)) {
+                    LOG_WARN(
+                        "WHPX doorbell: WHvUnregisterPartitionDoorbellEvent failed: 0x%08lX",
+                        hr);
+                }
             }
         }
         if (up->event) {

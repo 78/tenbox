@@ -120,6 +120,14 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
     // Override CPUID leaf 1 to mask features WHVP doesn't support and to
     // advertise hypervisor presence:
     //   ECX bit  3: MONITOR/MWAIT   — causes #UD in WHVP (clear)
+    //   ECX bit 21: x2APIC          — WHVP LocalApicEmulationMode is xApic
+    //               only; advertising x2APIC makes Linux run
+    //               __x2apic_enable() which WRMSRs IA32_APIC_BASE (0x1B)
+    //               with the EXTD bit set. WHPX rejects the write (#GP on
+    //               the guest), but Linux proceeds as if x2APIC were live
+    //               and then hangs SMP bring-up at the first x2APIC ICR
+    //               (MSR 0x830) INIT/SIPI. Keep it cleared so the guest
+    //               stays in xAPIC mode, matching the partition config.
     //   ECX bit 24: TSC-Deadline    — WHVP xAPIC may not fire these (clear)
     //   ECX bit 31: Hypervisor-present — required for Linux to probe leaf
     //               0x40000000 and find the Hyper-V signature (set)
@@ -130,7 +138,8 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
     int cpuid1[4]{};
     __cpuidex(cpuid1, 1, 0);
     {
-        constexpr uint32_t kMaskOutEcx = (1u << 3) | (1u << 24);
+        constexpr uint32_t kMaskOutEcx =
+            (1u << 3) | (1u << 21) | (1u << 24);
         constexpr uint32_t kSetEcx     = (1u << 31);
         auto& o = cpuid_overrides[num_overrides++];
         o.Function = 1;
@@ -139,7 +148,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         o.Ecx = (static_cast<uint32_t>(cpuid1[2]) & ~kMaskOutEcx) | kSetEcx;
         o.Edx = static_cast<uint32_t>(cpuid1[3]);
         LOG_INFO("CPUID 1 override: ECX 0x%08X -> 0x%08X "
-                 "(masked MWAIT+TSC-deadline, set HV_PRESENT)",
+                 "(masked MWAIT+x2APIC+TSC-deadline, set HV_PRESENT)",
                  static_cast<uint32_t>(cpuid1[2]), o.Ecx);
     }
 
