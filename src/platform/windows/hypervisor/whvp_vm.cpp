@@ -314,7 +314,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
     {
         auto db = std::make_unique<WhvpDoorbellRegistrar>(vm->partition_);
         if (db->Available()) {
-            LOG_INFO("WHPX doorbell: enabled");
+            LOG_INFO("WHPX doorbell: enabled (WHvCreateNotificationPort)");
             vm->doorbell_ = std::move(db);
         } else {
             LOG_INFO("WHPX doorbell: unavailable (virtio kicks use MMIO exit path)");

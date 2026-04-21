@@ -15,6 +15,11 @@ namespace whvp {
 // semantics as Linux KVM_IOEVENTFD + datamatch). One dispatcher thread
 // waits on all per-queue auto-reset events and invokes callbacks directly.
 //
+// Only uses the WHvCreateNotificationPort API (Windows 10 1809+). The older
+// WHvRegisterPartitionDoorbellEvent path is intentionally not used: on some
+// pre-19H1 builds it crashes the host process inside vmcompute.dll when
+// doorbells are registered across different guest physical addresses.
+//
 // Thread-safety: Register() may be called from the VM setup thread while the
 // dispatcher is running. Shutdown() must be called before the partition is
 // deleted (typically from Vm teardown after vCPU threads have joined).
@@ -36,24 +41,19 @@ public:
     void Shutdown();
 
 private:
-    enum class ApiKind { None, LegacyDoorbell, NotificationPort };
-
     struct Slot {
         uint64_t mmio_addr = 0;
         uint32_t len = 0;
         uint32_t datamatch = 0;
         HANDLE event = nullptr;
         std::function<void()> cb;
-        ApiKind api = ApiKind::None;
         WHV_NOTIFICATION_PORT_HANDLE port_handle = nullptr;
-        WHV_DOORBELL_MATCH_DATA legacy_match{};
     };
 
     void DispatcherLoop();
 
     WHV_PARTITION_HANDLE partition_ = nullptr;
     bool available_ = false;
-    bool use_notification_port_api_ = false;
 
     HANDLE wakeup_event_ = nullptr;
     std::atomic<bool> stop_{false};
