@@ -1,17 +1,17 @@
 {
-  "latest_version": "0.7.0",
+  "latest_version": "0.7.1",
   "min_supported_version": "0.1.0",
-  "release_notes": "- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+  "release_notes": "- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
   "release_date": "2026-04-21",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.0.msi",
-  "sha256": "6a92c7dd067c832f2e7699ddaef770341cc95178be7c4384b91d707b00009a90",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.1.msi",
+  "sha256": "585c8217ef78ce286349e303c235521153edb91c10c3b85c06c8c28fcd8d11a1",
   "platforms": {
     "windows": {
-      "latest_version": "0.7.0",
-      "release_notes": "- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+      "latest_version": "0.7.1",
+      "release_notes": "- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
       "release_date": "2026-04-21",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.0.msi",
-      "sha256": "6a92c7dd067c832f2e7699ddaef770341cc95178be7c4384b91d707b00009a90",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.1.msi",
+      "sha256": "585c8217ef78ce286349e303c235521153edb91c10c3b85c06c8c28fcd8d11a1",
       "size": 3256320,
       "min_os": "Windows 10"
     },
