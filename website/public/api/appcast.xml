@@ -28,9 +28,10 @@
       />
     </item>
     <item>
-      <title>Version 0.7.0</title>
+      <title>Version 0.7.1</title>
       <description><![CDATA[
         <ul>
+          <li>- 修复公证签名</li>
           <li>- 菜单中增加帮助文档</li>
           <li>- 优化性能</li>
           <li>- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据</li>
@@ -39,12 +40,12 @@
       <pubDate>Tue, 21 Apr 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>12</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.7.0.zip"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.7.1.zip"
         sparkle:os="macos"
-        sparkle:version="0.7.0"
-        sparkle:shortVersionString="0.7.0"
-        sparkle:edSignature="EG9BYtsAqOLVPHq0n0c8Pjxfbng7M6En8MFs3Oez4ApQJr4BiV7bIB3lfiyDJYNd3RiNE4YrEytqe3UY+BowCg=="
-        length="4675477"
+        sparkle:version="0.7.1"
+        sparkle:shortVersionString="0.7.1"
+        sparkle:edSignature="/9KmNIg1rRTjEUBwqV/HQ1OK30omScLx2Rjl2sd54kJLUoe16FpJ0voXnY/ERt7ie+tyuCyz7SFpGO+9Q1WyCw=="
+        length="4676137"
         type="application/octet-stream"
       />
     </item>

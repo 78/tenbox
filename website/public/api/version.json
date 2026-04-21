@@ -16,12 +16,12 @@
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.7.0",
-      "release_notes": "- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+      "latest_version": "0.7.1",
+      "release_notes": "- 修复公证签名\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
       "release_date": "2026-04-21",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.7.0.dmg",
-      "sha256": "7e4d501b2932fe9808ceae7c570e6628cc01aab433493107ef006c8d088945f5",
-      "size": 4613468,
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.7.1.dmg",
+      "sha256": "81664cf3d567d384f661f504e5022ff1aee8b74b132ea6f5cf5e9b1fcf23e401",
+      "size": 4620900,
       "min_os": "macOS 12"
     }
   }
