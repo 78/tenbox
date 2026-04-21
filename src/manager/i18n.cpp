@@ -216,7 +216,8 @@ static const std::unordered_map<S, const char*> kStringsEn = {
     {S::kErrHvNotEnabled,
         "Windows Hypervisor Platform is not enabled.\n\n"
         "To fix this:\n"
-        "1. Enable \"Virtual Machine Platform\" in Windows Features\n"
+        "1. Enable \"Windows Hypervisor Platform\" in Windows Features\n"
+        "   (also enable \"Virtual Machine Platform\" for full compatibility)\n"
         "   (Control Panel > Programs > Turn Windows features on or off)\n"
         "2. Enable hardware virtualization in BIOS/UEFI settings\n"
         "   - Intel CPU: Enable VT-x (Intel Virtualization Technology)\n"
@@ -352,15 +353,15 @@ static const std::unordered_map<S, const char*> kStringsZhCN = {
     {S::kAboutTitle, "关于 " TENBOX_PRODUCT_NAME},
     {S::kAboutText, TENBOX_PRODUCT_NAME " 管理器\n版本 " TENBOX_VERSION_STR "\n\n一款轻量级的 Windows 虚拟机管理器。\n\n" TENBOX_COPYRIGHT},
     {S::kHvCheckTitle, "未启用虚拟化"},
-    {S::kHvCheckMessage, "虚拟机平台尚未启用。\n\nTenBox 需要此功能才能运行虚拟机。\n是否立即启用？"},
-    {S::kHvNoDllMessage, "此系统不支持虚拟机平台。\n\n请确保您运行的是 Windows 10 1803 或更高版本，\n并且已在 BIOS 中启用硬件虚拟化（VT-x/AMD-V）。"},
+    {S::kHvCheckMessage, "Windows 虚拟机监控程序平台尚未启用。\n\nTenBox 需要此功能才能运行虚拟机。\n是否立即启用？"},
+    {S::kHvNoDllMessage, "此系统不支持 Windows 虚拟机监控程序平台。\n\n请确保您运行的是 Windows 10 1803 或更高版本，\n并且已在 BIOS 中启用硬件虚拟化（VT-x/AMD-V）。"},
     {S::kHvBtnAutoEnable, "自动启用"},
     {S::kHvBtnManualOpen, "打开 Windows 功能"},
     {S::kHvBtnIgnore, "暂时跳过"},
     {S::kHvEnableSuccessTitle, "需要重启"},
-    {S::kHvEnableSuccessMsg, "虚拟机平台已启用。\n需要重启计算机才能生效。\n\n是否立即重启？"},
+    {S::kHvEnableSuccessMsg, "Windows 虚拟机监控程序平台已启用。\n需要重启计算机才能生效。\n\n是否立即重启？"},
     {S::kHvEnableFailTitle, "启用失败"},
-    {S::kHvEnableFailMsg, "无法自动启用虚拟机平台。\n请尝试通过 Windows 功能手动启用。"},
+    {S::kHvEnableFailMsg, "无法自动启用 Windows 虚拟机监控程序平台。\n请尝试通过 Windows 功能手动启用。"},
     {S::kSfColTag, "标签"},
     {S::kSfColHostPath, "主机路径"},
     {S::kSfColMode, "模式"},
@@ -461,10 +462,10 @@ static const std::unordered_map<S, const char*> kStringsZhCN = {
 
     // StartVm errors
     {S::kErrHvNotEnabled,
-        "虚拟机平台未启用，无法启动虚拟机。\n\n"
+        "Windows 虚拟机监控程序平台未启用，无法启动虚拟机。\n\n"
         "请按以下步骤排查：\n"
-        "1. 开启 Windows 虚拟机平台功能\n"
-        "   控制面板 → 程序 → 启用或关闭 Windows 功能 → 勾选\"虚拟机平台\"\n"
+        "1. 开启 Windows 虚拟机监控程序平台功能\n"
+        "   控制面板 → 程序 → 启用或关闭 Windows 功能 → 勾选\"Windows 虚拟机监控程序平台\"（建议同时勾选\"虚拟机平台\"）\n"
         "2. 在 BIOS/UEFI 中开启 CPU 硬件虚拟化\n"
         "   · Intel CPU：开启 VT-x（Intel Virtualization Technology）\n"
         "   · AMD CPU：开启 SVM Mode\n"
