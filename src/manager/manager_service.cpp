@@ -89,6 +89,9 @@ std::string BuildRuntimeCommand(const std::string& exe, const VmSpec& spec,
         << " --control-endpoint " << pipe
         << " --interactive off"
         << " --kernel \"" << spec.kernel_path << "\"";
+    if (!spec.vm_dir.empty()) {
+        cmd << " --vm-dir \"" << spec.vm_dir << '"';
+    }
     if (!spec.initrd_path.empty()) {
         cmd << " --initrd \"" << spec.initrd_path << '"';
     }

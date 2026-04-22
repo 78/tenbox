@@ -1,4 +1,5 @@
 #include "runtime/runtime_service.h"
+#include "runtime/crash_handler.h"
 #include "version.h"
 #include "core/vmm/vm.h"
 
@@ -77,6 +78,7 @@ static void PrintUsage(const char* prog) {
         "\n"
         "Options:\n"
         "  --vm-id <id>         Runtime vm id (default: default)\n"
+        "  --vm-dir <path>      VM working directory (crash dumps land under <dir>/crash)\n"
         "  --control-endpoint <name>\n"
 #ifdef _WIN32
         "                       Named pipe endpoint (without \\\\.\\pipe\\ prefix)\n"
@@ -134,9 +136,16 @@ int main(int argc, char* argv[]) {
     setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
     setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
 
+    // Crash handler is installed as early as possible so that even a fault
+    // during VmConfig parsing or Vm::Create produces a usable dump. vm_dir
+    // may still be empty at this point — we re-install after argv parsing to
+    // pick up the real VM directory if provided.
+    crash_handler::Install(std::string{}, "bootstrap", TENBOX_VERSION);
+
     VmConfig config;
     std::string vm_id = "default";
     std::string control_endpoint;
+    std::string vm_dir;  // VM working dir; receives crash/ dumps if a fault occurs.
 
     for (int i = 1; i < argc; i++) {
         auto Arg = [&](const char* flag) {
@@ -151,6 +160,9 @@ int main(int argc, char* argv[]) {
         if (Arg("--vm-id")) {
             auto v = NextArg(); if (!v) return 1;
             vm_id = v;
+        } else if (Arg("--vm-dir")) {
+            auto v = NextArg(); if (!v) return 1;
+            vm_dir = v;
         } else if (Arg("--control-endpoint")) {
             auto v = NextArg(); if (!v) return 1;
             control_endpoint = v;
@@ -243,6 +255,10 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
+
+    // Refine crash handler config now that --vm-dir / --vm-id are known so
+    // dumps land next to the VM's runtime.log instead of the process cwd.
+    crash_handler::Install(vm_dir, vm_id, TENBOX_VERSION);
 
     if (config.kernel_path.empty()) {
         fprintf(stderr, "Error: --kernel is required\n\n");

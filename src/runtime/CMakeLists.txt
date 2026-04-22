@@ -1,6 +1,7 @@
 set(RUNTIME_SOURCES
     ${CMAKE_SOURCE_DIR}/src/runtime/main.cpp
     ${CMAKE_SOURCE_DIR}/src/runtime/runtime_service.cpp
+    ${CMAKE_SOURCE_DIR}/src/runtime/crash_handler.cpp
 )
 
 if(WIN32)
@@ -41,7 +42,7 @@ else()
 endif()
 
 if(WIN32)
-    target_link_libraries(tenbox-vm-runtime PRIVATE ws2_32)
+    target_link_libraries(tenbox-vm-runtime PRIVATE ws2_32 dbghelp)
 elseif(APPLE)
     target_link_libraries(tenbox-vm-runtime PRIVATE
         "-framework Hypervisor"

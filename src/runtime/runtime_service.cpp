@@ -2,6 +2,7 @@
 
 #include "core/vmm/types.h"
 #include "core/vmm/vm.h"
+#include "runtime/crash_handler.h"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,9 @@
 
 void ManagedConsolePort::Write(const uint8_t* data, size_t size) {
     if (!data || size == 0) return;
+    // Feed the crash ring-buffer before queueing so guest panics are still
+    // captured even if the manager-bound send queue is backed up.
+    crash_handler::RecordGuestConsole(data, size);
     std::function<void()> notify;
     {
         std::lock_guard<std::mutex> lock(mutex_);
