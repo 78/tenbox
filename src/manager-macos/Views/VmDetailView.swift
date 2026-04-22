@@ -84,6 +84,13 @@ class VmSession: ObservableObject {
                         self.displaySize = newSize
                     }
                 }
+            } else if !active {
+                // Guest OS blanked the monitor: drop the cached framebuffer
+                // so the view shows black instead of freezing on the last
+                // captured frame. Keep displaySize / displayInitialized /
+                // lastSentDisplayW/H untouched so re-activation with the same
+                // resolution doesn't cause any window or tab reshuffling.
+                self.renderer?.clear()
             }
         }
 

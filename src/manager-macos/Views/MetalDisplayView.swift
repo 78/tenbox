@@ -132,6 +132,21 @@ class MetalDisplayRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    // Drop the cached framebuffer texture so the next draw shows the
+    // MTKView's clear color (black) instead of the last captured frame.
+    // Used when the guest OS blanks its display.
+    func clear() {
+        textureLock.lock()
+        texture = nil
+        textureWidth = 0
+        textureHeight = 0
+        textureLock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.view?.needsDisplay = true
+        }
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {

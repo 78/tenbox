@@ -1512,6 +1512,15 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                 VmUiState& state = impl_->GetVmUiState(vm_id);
                 if (active) {
                     state.current_tab = kTabDisplay;
+                } else {
+                    // Display deactivated (e.g. guest OS blanked the monitor).
+                    // Drop cached framebuffer/cursor so we don't restore a
+                    // stale frame when the user switches back to this VM.
+                    state.fb_width = 0;
+                    state.fb_height = 0;
+                    state.framebuffer.clear();
+                    state.cursor = CursorInfo{};
+                    state.cursor_pixels.clear();
                 }
 
                 bool is_current = (impl_->selected_index >= 0 &&
@@ -1528,6 +1537,11 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                     ResizeWindowForDisplay(impl_.get(), width, height);
                 } else {
                     impl_->display_available = false;
+                    // Clear the on-screen framebuffer so the panel goes black
+                    // instead of freezing on the last frame. Keep the window
+                    // size and last_sent_display_w/h so re-activation with
+                    // the same resolution doesn't cause any window reshuffle.
+                    if (impl_->display_panel) impl_->display_panel->Clear();
                 }
                 LayoutControls(impl_.get());
             });

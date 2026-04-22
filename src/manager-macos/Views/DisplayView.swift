@@ -481,6 +481,7 @@ struct MetalDisplayViewWrapper: NSViewRepresentable {
             view.colorPixelFormat = .bgra8Unorm
             view.isPaused = true
             view.enableSetNeedsDisplay = true
+            view.clearColor = MTLClearColorMake(0, 0, 0, 1)
             view.delegate = renderer
             renderer.view = view
         }
