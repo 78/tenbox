@@ -8,9 +8,7 @@
 #include <x86intrin.h>
 #endif
 
-#ifdef __APPLE__
-#include <dispatch/dispatch.h>
-#endif
+class VmIoLoop;
 
 // Minimal i8254 PIT emulation for Linux boot timing calibration.
 // Uses host RDTSC for timing to stay perfectly synchronized with guest TSC
@@ -26,6 +24,13 @@ public:
     ~I8254Pit();
 
     void SetIrqCallback(IrqFunc cb) { irq_callback_ = std::move(cb); }
+
+    // Wire the per-VM libuv event loop used to drive channel-0 IRQ 0 ticks.
+    // Must be called during machine setup before the guest programs the PIT.
+    // Null disables the timer; the count-register view via RDTSC polling
+    // keeps working (that's all Linux actually needs after LAPIC timer
+    // calibration anyway).
+    void SetIoLoop(VmIoLoop* loop) { io_loop_ = loop; }
 
     void PioRead(uint16_t offset, uint8_t size, uint32_t* value) override;
     void PioWrite(uint16_t offset, uint8_t size, uint32_t value) override;
@@ -61,10 +66,8 @@ private:
     void ArmChannel0Timer();
     void StopChannel0Timer();
 
-#ifdef __APPLE__
-    dispatch_source_t ch0_timer_ = nullptr;
-    dispatch_queue_t ch0_queue_ = nullptr;
-#endif
+    VmIoLoop* io_loop_ = nullptr;
+    uint64_t ch0_timer_id_ = 0;
 };
 
 // System Control Port B (port 0x61) - gates PIT channel 2.

@@ -44,6 +44,7 @@ bool X86Machine::SetupPlatformDevices(
         Uart16550::kCom1Base, Uart16550::kRegCount, &uart_);
 
     pit_.SetIrqCallback([this]() { irq_injector_(0); });
+    pit_.SetIoLoop(io_loop);
     addr_space.AddPioDevice(
         I8254Pit::kBasePort, I8254Pit::kRegCount, &pit_);
     sys_ctrl_b_.SetPit(&pit_);
@@ -59,6 +60,7 @@ bool X86Machine::SetupPlatformDevices(
     lapic_.SetIrqInjectCallback([hv_vm](uint32_t vector, uint32_t cpu) {
         hv_vm->QueueInterrupt(vector, cpu);
     });
+    lapic_.SetIoLoop(io_loop);
     addr_space.AddMmioDevice(
         LocalApic::kBaseAddress, LocalApic::kSize, &lapic_);
     lapic_.Start();

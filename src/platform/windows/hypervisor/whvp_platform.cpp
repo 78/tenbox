@@ -1,9 +1,16 @@
 #include "platform/windows/hypervisor/whvp_platform.h"
+#include "platform/windows/hypervisor/whvp_dyn.h"
 #include "core/vmm/types.h"
+
+#include <WinHvPlatform.h>
 
 namespace whvp {
 
 bool IsHypervisorPresent() {
+    // Load optional exports once per process; presence of WHvGetCapability
+    // itself is guaranteed on any host where WinHvPlatform.dll loaded.
+    dyn::Load();
+
     WHV_CAPABILITY capability{};
     UINT32 size = 0;
     HRESULT hr = WHvGetCapability(

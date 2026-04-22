@@ -341,6 +341,10 @@ void WhvpVCpu::PrintExitStats() {
 }
 
 WhvpVCpu::~WhvpVCpu() {
+    if (vm_) {
+        vm_->OnVCpuDestroyed(vp_index_);
+        vm_ = nullptr;
+    }
     if (emulator_) {
         WHvEmulatorDestroyEmulator(emulator_);
         emulator_ = nullptr;
@@ -353,6 +357,7 @@ WhvpVCpu::~WhvpVCpu() {
 std::unique_ptr<WhvpVCpu> WhvpVCpu::Create(WhvpVm& vm, uint32_t vp_index,
                                              AddressSpace* addr_space) {
     auto vcpu = std::unique_ptr<WhvpVCpu>(new WhvpVCpu());
+    vcpu->vm_ = &vm;
     vcpu->partition_ = vm.Handle();
     vcpu->vp_index_ = vp_index;
     vcpu->addr_space_ = addr_space;
@@ -361,6 +366,28 @@ std::unique_ptr<WhvpVCpu> WhvpVCpu::Create(WhvpVm& vm, uint32_t vp_index,
     if (FAILED(hr)) {
         LOG_ERROR("WHvCreateVirtualProcessor(%u) failed: 0x%08lX", vp_index, hr);
         return nullptr;
+    }
+
+    // Soft-APIC fallback: when the partition isn't running its own LAPIC
+    // emulation (pre-1809 hosts or TENBOX_SOFT_APIC=1 override), WHPX leaves
+    // the guest-visible IA32_APIC_BASE MSR at 0. Linux then doesn't know
+    // where to find its LAPIC and triple-faults during early SMP setup.
+    // Prime the MSR to the standard xAPIC base with APIC-enabled + BSP flag,
+    // mirroring what HVF does on macOS and what real hardware has at reset.
+    if (vm.SoftApic()) {
+        WHV_REGISTER_NAME  ab_name = WHvX64RegisterApicBase;
+        WHV_REGISTER_VALUE ab_val{};
+        ab_val.Reg64 = 0xFEE00000ULL | (1ULL << 11) |
+                       (vp_index == 0 ? (1ULL << 8) : 0);
+        HRESULT hr_ab = WHvSetVirtualProcessorRegisters(
+            vm.Handle(), vp_index, &ab_name, 1, &ab_val);
+        if (FAILED(hr_ab)) {
+            LOG_WARN("Set IA32_APIC_BASE for vCPU %u failed: 0x%08lX",
+                     vp_index, hr_ab);
+        } else {
+            LOG_INFO("vCPU %u IA32_APIC_BASE = 0x%" PRIX64 " (soft APIC)",
+                     vp_index, ab_val.Reg64);
+        }
     }
 
     // Read the APIC ID that WHVP assigned (may differ from vp_index on
@@ -393,8 +420,156 @@ std::unique_ptr<WhvpVCpu> WhvpVCpu::Create(WhvpVm& vm, uint32_t vp_index,
         return nullptr;
     }
 
+    vm.OnVCpuCreated(vp_index, vcpu.get());
+
     LOG_INFO("vCPU %u created (APIC ID %u)", vp_index, vcpu->apic_id_);
     return vcpu;
+}
+
+// ---------------------------------------------------------------------------
+// Soft-APIC interrupt injection (Windows 10 1803 fallback)
+// ---------------------------------------------------------------------------
+
+void WhvpVCpu::QueueInterrupt(uint32_t vector) {
+    {
+        std::lock_guard<std::mutex> lk(irq_mutex_);
+        pending_irqs_.push(vector);
+    }
+    irq_cv_.notify_one();
+}
+
+bool WhvpVCpu::HasPendingInterrupt() {
+    std::lock_guard<std::mutex> lk(irq_mutex_);
+    return !pending_irqs_.empty();
+}
+
+bool WhvpVCpu::WaitForInterrupt(uint32_t timeout_ms) {
+    std::unique_lock<std::mutex> lk(irq_mutex_);
+    if (!pending_irqs_.empty()) return true;
+    irq_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                     [this]() { return !pending_irqs_.empty(); });
+    return !pending_irqs_.empty();
+}
+
+void WhvpVCpu::SetInterruptWindowRequested(bool on) {
+    // WHvX64RegisterDeliverabilityNotifications.InterruptNotification asks
+    // WHPX to exit with WHvRunVpExitReasonX64InterruptWindow as soon as the
+    // guest is ready to accept an external interrupt. Must be cleared once
+    // the vector is injected or WHPX keeps generating window exits.
+    //
+    // Standalone form used by exit handlers (e.g. InterruptWindow exit that
+    // wants to clear the notification). The hot pre-run path packs this into
+    // the same batched SetRegisters call as PendingInterruption instead of
+    // calling this helper separately.
+    if (on == irq_window_active_) return;
+
+    WHV_REGISTER_NAME name = WHvX64RegisterDeliverabilityNotifications;
+    WHV_REGISTER_VALUE val{};
+    val.DeliverabilityNotifications.InterruptNotification = on ? 1 : 0;
+    HRESULT hr = WHvSetVirtualProcessorRegisters(
+        partition_, vp_index_, &name, 1, &val);
+    if (FAILED(hr)) {
+        LOG_WARN("Set DeliverabilityNotifications(%d) failed: 0x%08lX",
+                 on ? 1 : 0, hr);
+        return;
+    }
+    irq_window_active_ = on;
+}
+
+void WhvpVCpu::TryInjectInterrupt() {
+    if (!vm_ || !vm_->SoftApic()) return;
+
+    // Snapshot queue head under the lock and decide what to do. We consult
+    // only the cached guest-interruptibility state produced by the previous
+    // post-run — re-reading WHvRegisterPendingInterruption here would see
+    // the value we last wrote (WHPX doesn't clear that register until the
+    // next VM entry actually consumes the vector), which used to make us
+    // think "an event is already pending, skip" forever and deadlock the
+    // guest in HLT / spin-wait loops.
+    uint32_t vector = 0;
+    bool have_vector = false;
+    bool more_pending = false;
+    bool want_window = false;
+
+    {
+        std::lock_guard<std::mutex> lk(irq_mutex_);
+        if (pending_irqs_.empty()) {
+            // Nothing to deliver — make sure we're not still asking WHPX for
+            // a window exit (would otherwise storm us with spurious ones).
+            if (!irq_window_active_) return;
+            SetInterruptWindowRequested(false);
+            return;
+        }
+
+        // Have a pending vector. Can we deliver right now?
+        if (cached_interruption_pending_ || !cached_interruptable_) {
+            // Guest is mid-interrupt-delivery or in an interrupt shadow or
+            // has IF=0. Ask WHPX to bounce us back out as soon as that
+            // clears, and leave the vector on the queue.
+            want_window = true;
+        } else {
+            // Good to inject. Pop one vector; if the queue still has more,
+            // we keep the window active so the next X64InterruptWindow exit
+            // drains the rest.
+            vector = pending_irqs_.front();
+            pending_irqs_.pop();
+            have_vector = true;
+            more_pending = !pending_irqs_.empty();
+            want_window = more_pending;
+        }
+    }
+
+    // Batch the register writes: PendingInterruption (if injecting) and
+    // DeliverabilityNotifications (if its state needs to change) go in one
+    // WHvSetVirtualProcessorRegisters call — matches QEMU's pre_run.
+    WHV_REGISTER_NAME  names[2];
+    WHV_REGISTER_VALUE values[2]{};
+    uint32_t n = 0;
+
+    if (have_vector) {
+        names[n] = WHvRegisterPendingInterruption;
+        values[n].PendingInterruption.InterruptionPending = 1;
+        values[n].PendingInterruption.InterruptionType = 0; // external IRQ
+        values[n].PendingInterruption.InterruptionVector = vector;
+        n++;
+    }
+    if (want_window != irq_window_active_) {
+        names[n] = WHvX64RegisterDeliverabilityNotifications;
+        values[n].DeliverabilityNotifications.InterruptNotification =
+            want_window ? 1 : 0;
+        n++;
+    }
+    if (n == 0) return;
+
+    HRESULT hr = WHvSetVirtualProcessorRegisters(
+        partition_, vp_index_, names, n, values);
+    if (FAILED(hr)) {
+        LOG_WARN("TryInject: set regs(%u) failed: 0x%08lX "
+                 "(vec=%u,window=%d)",
+                 n, hr, have_vector ? vector : 0, want_window ? 1 : 0);
+        // Re-queue the popped vector at the head so the next pass retries.
+        if (have_vector) {
+            std::lock_guard<std::mutex> relk(irq_mutex_);
+            std::queue<uint32_t> q;
+            q.push(vector);
+            while (!pending_irqs_.empty()) {
+                q.push(pending_irqs_.front());
+                pending_irqs_.pop();
+            }
+            pending_irqs_ = std::move(q);
+        }
+        return;
+    }
+
+    if (have_vector) {
+        // We just handed WHPX a vector to consume on the next VM entry, so
+        // the cached "is pending" flag must reflect that until we observe a
+        // fresh post-run snapshot. Otherwise a second TryInjectInterrupt in
+        // the same RunOnce iteration (shouldn't happen today, but defensive)
+        // could try to overwrite the slot.
+        cached_interruption_pending_ = true;
+    }
+    irq_window_active_ = want_window;
 }
 
 void WhvpVCpu::OnThreadInit() {
@@ -442,6 +617,9 @@ bool WhvpVCpu::GetRegisters(const WHV_REGISTER_NAME* names,
 
 void WhvpVCpu::CancelRun() {
     WHvCancelRunVirtualProcessor(partition_, vp_index_, 0);
+    // Soft-APIC path: also wake a halted vCPU that's parked inside
+    // WaitForInterrupt on the condition variable. Harmless on the hard path.
+    irq_cv_.notify_one();
 }
 
 bool WhvpVCpu::SetupBootRegisters(uint8_t* ram) {
@@ -557,7 +735,81 @@ bool WhvpVCpu::SetupBootRegisters(uint8_t* ram) {
     return SetRegisters(names, values, i);
 }
 
+bool WhvpVCpu::NeedsStartupWait() const {
+    // AP threads only need to wait when we're running without an in-partition
+    // LAPIC; otherwise WHPX's xAPIC emulation manages INIT/SIPI itself and
+    // delivers the AP to its startup RIP without Vm::VCpuThread's help.
+    return vm_ && vm_->SoftApic();
+}
+
+void WhvpVCpu::OnStartup(const VCpuStartupState& state) {
+    // Real-mode entry: CS = vector << 8, CS.base = vector << 12, IP = 0.
+    // This mirrors the Intel SDM Vol3 8.4.3 AP startup state after SIPI and
+    // matches HvfVCpu::SetupSipiRegisters on macOS.
+    const uint8_t  vec      = state.sipi_vector;
+    const uint16_t cs_sel   = static_cast<uint16_t>(vec) << 8;
+    const uint64_t cs_base  = static_cast<uint64_t>(vec) << 12;
+
+    WHV_REGISTER_NAME  names[16]{};
+    WHV_REGISTER_VALUE values[16]{};
+    uint32_t n = 0;
+
+    auto SetSeg = [&](WHV_REGISTER_NAME name, uint16_t sel, uint64_t base,
+                      uint16_t attr) {
+        names[n] = name;
+        values[n].Segment.Selector = sel;
+        values[n].Segment.Base = base;
+        values[n].Segment.Limit = 0xFFFF;
+        values[n].Segment.Attributes = attr;
+        n++;
+    };
+    // CS: 16-bit code, RE/A, present (type=0xB, S=1, P=1 → 0x9B)
+    SetSeg(WHvX64RegisterCs, cs_sel, cs_base, 0x9B);
+    // DS/ES/SS/FS/GS: 16-bit data, RW/A, present (type=0x3, S=1, P=1 → 0x93)
+    SetSeg(WHvX64RegisterDs, 0, 0, 0x93);
+    SetSeg(WHvX64RegisterEs, 0, 0, 0x93);
+    SetSeg(WHvX64RegisterSs, 0, 0, 0x93);
+    SetSeg(WHvX64RegisterFs, 0, 0, 0x93);
+    SetSeg(WHvX64RegisterGs, 0, 0, 0x93);
+
+    // CR0: clear PE/PG so we're in real mode. Bit 0x10 (ET) kept for legacy
+    // coprocessor; bit 0x20000000 (NW) + 0x40000000 (CD) mirrors reset state.
+    names[n]        = WHvX64RegisterCr0;
+    values[n].Reg64 = 0x60000010ULL;
+    n++;
+    names[n]        = WHvX64RegisterCr3;
+    values[n].Reg64 = 0;
+    n++;
+    names[n]        = WHvX64RegisterCr4;
+    values[n].Reg64 = 0;
+    n++;
+    names[n]        = WHvX64RegisterEfer;
+    values[n].Reg64 = 0;
+    n++;
+
+    names[n]        = WHvX64RegisterRip;
+    values[n].Reg64 = 0;
+    n++;
+    names[n]        = WHvX64RegisterRflags;
+    values[n].Reg64 = 0x2;
+    n++;
+
+    if (!SetRegisters(names, values, n)) {
+        LOG_ERROR("vCPU %u SIPI register setup failed (vector=0x%X)",
+                  vp_index_, vec);
+        return;
+    }
+    LOG_INFO("vCPU %u SIPI: CS=%04X:0000 (base=0x%" PRIX64 "), real mode",
+             vp_index_, cs_sel, cs_base);
+}
+
 VCpuExitAction WhvpVCpu::RunOnce() {
+    // On the soft-APIC path, drain one pending interrupt into the
+    // WHvRegisterPendingInterruption slot (or request a window exit if the
+    // guest is currently blocking interrupts). No-op when the hypervisor's
+    // in-partition APIC emulation is driving injection.
+    TryInjectInterrupt();
+
     WHV_RUN_VP_EXIT_CONTEXT exit_ctx{};
     HRESULT hr = WHvRunVirtualProcessor(
         partition_, vp_index_, &exit_ctx, sizeof(exit_ctx));
@@ -565,6 +817,18 @@ VCpuExitAction WhvpVCpu::RunOnce() {
         LOG_ERROR("WHvRunVirtualProcessor failed: 0x%08lX", hr);
         return VCpuExitAction::kError;
     }
+
+    // Post-run: snapshot guest interruptibility straight out of the exit
+    // context. ExecutionState.InterruptionPending / InterruptShadow are
+    // written by WHPX at exit time and reflect the TRUE state of the VP —
+    // unlike WHvRegisterPendingInterruption, which is persistent and would
+    // keep returning "pending=1" until the next VM entry actually consumes
+    // it. TryInjectInterrupt on the next iteration reads these caches.
+    cached_interruption_pending_ =
+        exit_ctx.VpContext.ExecutionState.InterruptionPending != 0;
+    cached_interruptable_ =
+        (exit_ctx.VpContext.Rflags & 0x200) != 0 &&
+        exit_ctx.VpContext.ExecutionState.InterruptShadow == 0;
 
     const bool stats = s_stats_enabled_.load(std::memory_order_relaxed);
     if (stats) {
@@ -593,13 +857,28 @@ VCpuExitAction WhvpVCpu::RunOnce() {
 
     case WHvRunVpExitReasonX64Halt: {
         if (stats) s_stats_.hlt.fetch_add(1, std::memory_order_relaxed);
-        WHV_REGISTER_NAME rfl_name = WHvX64RegisterRflags;
-        WHV_REGISTER_VALUE rfl_val{};
-        GetRegisters(&rfl_name, &rfl_val, 1);
-        if (!(rfl_val.Reg64 & 0x200)) {
-            LOG_INFO("CPU halted with interrupts disabled — treating as shutdown");
-            return VCpuExitAction::kShutdown;
+        // On the hardware-APIC path WHPX's in-partition LAPIC will wake the
+        // vCPU out of HLT itself whenever a vector is pending, so seeing a
+        // Halt exit with IF=0 is a strong signal the guest has triple-
+        // faulted into a permanent halt (no external IRQ will resume it).
+        //
+        // On the software-APIC path (pre-1809 / TENBOX_SOFT_APIC) IF=0 is
+        // perfectly legal: Linux's AP trampoline runs in real mode with
+        // IF=0 for a long stretch, and we rely on the generic WaitForInter-
+        // rupt condition variable + CancelRun to break out of HLT once an
+        // IRQ is queued. Killing the VM here aborts SMP bring-up right
+        // after the APs reach their first HLT.
+        if (!vm_ || !vm_->SoftApic()) {
+            if (!(exit_ctx.VpContext.Rflags & 0x200)) {
+                LOG_INFO("CPU halted with interrupts disabled — treating as shutdown");
+                return VCpuExitAction::kShutdown;
+            }
         }
+        // Soft-APIC path needs no special workaround here: the post-run
+        // cache above already recorded ExecutionState.InterruptionPending
+        // correctly (WHPX clears it on the HLT-producing entry once the
+        // previous vector was consumed), so the next TryInjectInterrupt
+        // will happily load a fresh vector from our queue.
         return VCpuExitAction::kHalt;
     }
 
@@ -620,6 +899,10 @@ VCpuExitAction WhvpVCpu::RunOnce() {
 
     case WHvRunVpExitReasonX64InterruptWindow:
         if (stats) s_stats_.irq_wnd.fetch_add(1, std::memory_order_relaxed);
+        // WHPX auto-clears InterruptNotification when it fires the window
+        // exit. Mirror that so our next TryInjectInterrupt won't skip the
+        // re-arm SetRegisters call thinking the notification is still live.
+        irq_window_active_ = false;
         return VCpuExitAction::kContinue;
 
     case WHvRunVpExitReasonUnrecoverableException:
@@ -654,6 +937,23 @@ VCpuExitAction WhvpVCpu::RunOnce() {
             // EBX[31:24] = Initial APIC ID — must match MADT
             vals[1].Reg64 = (vals[1].Reg64 & 0x00FFFFFF) |
                             (static_cast<uint64_t>(apic_id_) << 24);
+        } else if (cpuid.Rax == 7) {
+            // Leaf 7 subleaf 2 advertises the "extended" MSR_IA32_SPEC_CTRL
+            // bits (IPRED_CTRL, RRSBA_CTRL, BHI_CTRL, ...). WHPX passes the
+            // host CPUID through but rejects WRMSR SPEC_CTRL with any of
+            // those new bits — Linux 6.8+ sees IPRED_CTRL=1 on 13th-gen
+            // Intel hosts and writes SPEC_CTRL bit 10 from
+            // common_interrupt_return, which #GPs and kills init. Force
+            // subleaf 2 to all-zero; leaf-0 keeps the static CpuidResultList
+            // override which already strips AVX-512 (and more on soft APIC).
+            if (cpuid.Rcx == 2) {
+                vals[0].Reg64 = 0;
+                vals[1].Reg64 = 0;
+                vals[2].Reg64 = 0;
+                vals[3].Reg64 = 0;
+            }
+            // Subleaves 0 and 1 fall through to DefaultResult* which already
+            // reflects our leaf-7 static override.
         } else if (cpuid.Rax == 0xB || cpuid.Rax == 0x1F) {
             // x2APIC topology leaves: EDX = x2APIC ID
             vals[3].Reg64 = apic_id_;

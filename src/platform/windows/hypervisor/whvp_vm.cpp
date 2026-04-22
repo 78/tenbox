@@ -1,6 +1,7 @@
 #include "platform/windows/hypervisor/whvp_vm.h"
 #include "platform/windows/hypervisor/whvp_vcpu.h"
 #include "platform/windows/hypervisor/whvp_doorbell.h"
+#include "platform/windows/hypervisor/whvp_dyn.h"
 #include <cinttypes>
 #include <intrin.h>
 
@@ -15,7 +16,15 @@ WhvpVm::~WhvpVm() {
 }
 
 std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
+    // Resolve the optional WHPX exports (WHvRequestInterrupt and the
+    // notification-port APIs). Required exports are statically linked and
+    // are guaranteed to be present on any host where WinHvPlatform.dll
+    // loaded at all.
+    dyn::Load();
+
     auto vm = std::unique_ptr<WhvpVm>(new WhvpVm());
+    vm->cpu_count_ = cpu_count;
+    vm->vcpus_.assign(cpu_count, nullptr);
 
     HRESULT hr = WHvCreatePartition(&vm->partition_);
     if (FAILED(hr)) {
@@ -33,14 +42,48 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         return nullptr;
     }
 
-    memset(&prop, 0, sizeof(prop));
-    prop.LocalApicEmulationMode = WHvX64LocalApicEmulationModeXApic;
-    hr = WHvSetPartitionProperty(vm->partition_,
-        WHvPartitionPropertyCodeLocalApicEmulationMode,
-        &prop, sizeof(prop.LocalApicEmulationMode));
-    if (FAILED(hr)) {
-        LOG_WARN("Set APIC emulation failed: 0x%08lX (non-fatal)", hr);
+    // Debug override: TENBOX_SOFT_APIC=1 pretends we are running on a
+    // pre-1809 build (no partition LAPIC + no WHvRequestInterrupt) so the
+    // software fallback can be regression-tested on modern hosts.
+    char env_buf[8]{};
+    DWORD env_len = GetEnvironmentVariableA("TENBOX_SOFT_APIC", env_buf,
+                                            sizeof(env_buf));
+    const bool force_soft = (env_len > 0 && env_len < sizeof(env_buf) &&
+                             (env_buf[0] == '1' || env_buf[0] == 'y' ||
+                              env_buf[0] == 'Y'));
+
+    // Try to enable the in-partition xAPIC emulation. On 1803 this property
+    // is rejected; on 1809+ it succeeds. The result, combined with whether
+    // WHvRequestInterrupt was exported, determines whether we drive the
+    // in-partition APIC (hard path) or the software pending queue + VMCS-
+    // equivalent injection (soft path) at runtime.
+    bool lapic_emu_ok = false;
+    if (!force_soft) {
+        memset(&prop, 0, sizeof(prop));
+        prop.LocalApicEmulationMode = WHvX64LocalApicEmulationModeXApic;
+        hr = WHvSetPartitionProperty(vm->partition_,
+            WHvPartitionPropertyCodeLocalApicEmulationMode,
+            &prop, sizeof(prop.LocalApicEmulationMode));
+        if (SUCCEEDED(hr)) {
+            lapic_emu_ok = true;
+        } else {
+            LOG_WARN("Set APIC emulation failed: 0x%08lX (pre-1809 WHPX?)", hr);
+        }
+    } else {
+        LOG_WARN("TENBOX_SOFT_APIC=1: skipping in-partition LAPIC emulation");
     }
+
+    const bool has_request_irq = !force_soft && dyn::HasRequestInterrupt();
+    // Fall back to the software path if EITHER the partition-level APIC
+    // emulation is missing OR the interrupt-injection export is missing.
+    // The two normally flip together (both absent on 1803, both present on
+    // 1809+), but guard independently to be robust.
+    vm->soft_apic_ = !lapic_emu_ok || !has_request_irq;
+
+    LOG_INFO("WHPX APIC path: %s (lapic_emu=%s, WHvRequestInterrupt=%s)",
+             vm->soft_apic_ ? "software (pending queue)" : "hardware xAPIC",
+             lapic_emu_ok ? "yes" : "no",
+             has_request_irq ? "yes" : "no");
 
     // Query WHVP clock frequencies for diagnostics.
     uint64_t proc_freq = 0, intr_freq = 0;
@@ -62,7 +105,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
     //                     (HYPERCALL + reference counter + VP_INDEX +
     //                      reference TSC page + frequency MSRs +
     //                      invariant-TSC control)
-    WHV_X64_CPUID_RESULT cpuid_overrides[9]{};
+    WHV_X64_CPUID_RESULT cpuid_overrides[10]{};
     int num_overrides = 0;
 
     // CPUID 0x15: TSC / Core Crystal Clock frequency.
@@ -117,40 +160,176 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         o.Edx = 0;
     }
 
-    // Override CPUID leaf 1 to mask features WHVP doesn't support and to
-    // advertise hypervisor presence:
-    //   ECX bit  3: MONITOR/MWAIT   — causes #UD in WHVP (clear)
-    //   ECX bit 21: x2APIC          — WHVP LocalApicEmulationMode is xApic
-    //               only; advertising x2APIC makes Linux run
-    //               __x2apic_enable() which WRMSRs IA32_APIC_BASE (0x1B)
-    //               with the EXTD bit set. WHPX rejects the write (#GP on
-    //               the guest), but Linux proceeds as if x2APIC were live
-    //               and then hangs SMP bring-up at the first x2APIC ICR
-    //               (MSR 0x830) INIT/SIPI. Keep it cleared so the guest
-    //               stays in xAPIC mode, matching the partition config.
-    //   ECX bit 24: TSC-Deadline    — WHVP xAPIC may not fire these (clear)
-    //   ECX bit 31: Hypervisor-present — required for Linux to probe leaf
-    //               0x40000000 and find the Hyper-V signature (set)
-    // Also clear EBX[31:24] (Initial APIC ID) since the partition-level
-    // override carries the host's APIC ID. Per-vCPU APIC ID patching
-    // happens in the CPUID exit handler if WHVP triggers one; if not,
-    // the guest reads the correct ID from the LAPIC register directly.
+    // CPUID leaf-1 / leaf-7 mask strategy
+    // -----------------------------------
+    // We split the feature masks into two groups:
+    //
+    //   A) "Always mask" — features we intentionally hide from the guest on
+    //      EVERY WHPX build, because we cannot or do not want to virtualise
+    //      them regardless of host OS version. These are MWAIT (#UD on exit),
+    //      x2APIC (we only expose xAPIC MMIO), TSC-Deadline (LAPIC timer goes
+    //      through our software path), and the AVX-512 family (macOS HVF
+    //      hides them too, avoids glibc hwcaps picking AVX-512 code paths).
+    //
+    //   B) "Soft-APIC only" — features that modern WHPX (1809+) virtualises
+    //      just fine, so leaving them enabled is a free performance win on
+    //      modern hosts; but WHPX 1803 does NOT implement them, and leaving
+    //      them advertised makes Linux 6.12 issue MSRs / instructions that
+    //      #UD or #GP, killing the kernel. Only mask these when we're on
+    //      the software-APIC fallback path (pre-1809 WHPX or TENBOX_SOFT_APIC
+    //      override). They include:
+    //        - XSAVE/OSXSAVE/AVX/F16C/FMA/AESNI/PCLMULQDQ — 1803 leaves
+    //          CR4.OSXSAVE=0 and returns zeros in CPUID 0xD, so user-space
+    //          XGETBV #UDs and busybox init dies on Debian 6.12.
+    //        - INVPCID — WHPX 1803 #UDs on the instruction itself; Linux
+    //          picks it for native_flush_tlb_global → early exception 0x06
+    //          at boot.
+    //        - IBRS/IBPB/STIBP/SSBD/ARCH_CAPABILITIES/MD_CLEAR/... — 1803
+    //          doesn't expose SPEC_CTRL (MSR 0x48) / PRED_CMD (MSR 0x49) /
+    //          ARCH_CAPABILITIES (MSR 0x10A). Linux writes them from
+    //          switch_mm_irqs_off unconditionally, triggering #GP that
+    //          kills the idle task.
+    //        - PKU/CET/UINTR/RDPID — CR4 bits / instructions 1803 doesn't
+    //          model.
+    //
+    //   ECX.bit 31 Hypervisor-present is always set (leaf 1) so Linux
+    //   probes leaf 0x40000000 and finds our Hyper-V signature.
+    //
+    //   EBX[31:24] (Initial APIC ID) is always cleared so the partition-
+    //   wide static override doesn't leak the host's APIC ID; per-vCPU
+    //   APIC ID patching happens in the CPUID exit handler.
+    const bool soft = vm->soft_apic_;
+
     int cpuid1[4]{};
     __cpuidex(cpuid1, 1, 0);
     {
-        constexpr uint32_t kMaskOutEcx =
-            (1u << 3) | (1u << 21) | (1u << 24);
-        constexpr uint32_t kSetEcx     = (1u << 31);
+        // Group A: hide even on modern WHPX.
+        constexpr uint32_t kMaskOutEcx_Always =
+            (1u <<  3) |   // MONITOR/MWAIT
+            (1u << 21) |   // x2APIC
+            (1u << 24);    // TSC-Deadline
+        // Group B: only hide on pre-1809 WHPX.
+        constexpr uint32_t kMaskOutEcx_SoftOnly =
+            (1u <<  1) |   // PCLMULQDQ
+            (1u << 12) |   // FMA
+            (1u << 25) |   // AESNI
+            (1u << 26) |   // XSAVE
+            (1u << 27) |   // OSXSAVE
+            (1u << 28) |   // AVX
+            (1u << 29);    // F16C
+        constexpr uint32_t kSetEcx = (1u << 31);
+
+        uint32_t mask_ecx = kMaskOutEcx_Always |
+                            (soft ? kMaskOutEcx_SoftOnly : 0u);
         auto& o = cpuid_overrides[num_overrides++];
         o.Function = 1;
         o.Eax = static_cast<uint32_t>(cpuid1[0]);
         o.Ebx = static_cast<uint32_t>(cpuid1[1]) & 0x00FFFFFFu;
-        o.Ecx = (static_cast<uint32_t>(cpuid1[2]) & ~kMaskOutEcx) | kSetEcx;
+        o.Ecx = (static_cast<uint32_t>(cpuid1[2]) & ~mask_ecx) | kSetEcx;
         o.Edx = static_cast<uint32_t>(cpuid1[3]);
         LOG_INFO("CPUID 1 override: ECX 0x%08X -> 0x%08X "
-                 "(masked MWAIT+x2APIC+TSC-deadline, set HV_PRESENT)",
-                 static_cast<uint32_t>(cpuid1[2]), o.Ecx);
+                 "(%s, set HV_PRESENT)",
+                 static_cast<uint32_t>(cpuid1[2]), o.Ecx,
+                 soft
+                    ? "masked MWAIT+x2APIC+TSC-deadline+XSAVE/OSXSAVE/AVX/"
+                      "F16C/FMA/AESNI/PCLMULQDQ"
+                    : "masked MWAIT+x2APIC+TSC-deadline");
     }
+
+    int cpuid7[4]{};
+    __cpuidex(cpuid7, 7, 0);
+    {
+        // Group A: AVX-512 family — always clear so glibc hwcaps never picks
+        // an AVX-512 code path (performance neutral — WHPX 1809+ exposes
+        // AVX-512 on newer Windows builds only, but we prefer to avoid the
+        // guest-side code-path divergence).
+        constexpr uint32_t kMaskOutEbx7_Always =
+            (1u << 16) |   // AVX-512 Foundation
+            (1u << 17) |   // AVX-512 DQ
+            (1u << 21) |   // AVX-512 IFMA
+            (1u << 28) |   // AVX-512 CD
+            (1u << 30) |   // AVX-512 BW
+            (1u << 31);    // AVX-512 VL
+        constexpr uint32_t kMaskOutEcx7_Always =
+            (1u <<  1) |   // AVX-512 VBMI
+            (1u <<  6) |   // AVX-512 VBMI2
+            (1u << 11) |   // AVX-512 VNNI
+            (1u << 12) |   // AVX-512 BITALG
+            (1u << 14);    // AVX-512 VPOPCNTDQ
+        constexpr uint32_t kMaskOutEdx7_Always =
+            (1u <<  2) |   // AVX-512 4VNNIW
+            (1u <<  3) |   // AVX-512 4FMAPS
+            (1u <<  8) |   // AVX-512 VP2INTERSECT
+            // Spectre / side-channel mitigation MSRs. Empirically WHPX does
+            // NOT virtualise MSR_IA32_SPEC_CTRL (0x48), PRED_CMD (0x49),
+            // FLUSH_CMD (0x10B), ARCH_CAPABILITIES (0x10A), CORE_CAPABILITIES
+            // (0xCF) on ANY Windows version we've tested (1803 through Win11
+            // 22H2+). Linux 6.x writes SPEC_CTRL from common_interrupt_return
+            // unconditionally when it thinks IBRS/IBPB is available, so the
+            // first WRMSR 0x48 #GPs and kills PID 1 with exitcode 0x0B.
+            // Keep these cleared on ALL paths — we can't rely on host-
+            // specific behaviour here.
+            (1u << 10) |   // MD_CLEAR
+            (1u << 11) |   // RTM_ALWAYS_ABORT
+            (1u << 13) |   // TSX_FORCE_ABORT
+            (1u << 14) |   // SERIALIZE
+            (1u << 18) |   // PCONFIG
+            (1u << 26) |   // IBRS / IBPB   (MSR 0x48 / 0x49)
+            (1u << 27) |   // STIBP         (MSR 0x48 bit 1)
+            (1u << 28) |   // FLUSH_L1D     (MSR 0x10B)
+            (1u << 29) |   // ARCH_CAPABILITIES (MSR 0x10A)
+            (1u << 30) |   // CORE_CAPABILITIES (MSR 0xCF)
+            (1u << 31);    // SSBD          (MSR 0x48 bit 2)
+
+        // Group B: WHPX 1803 specific blow-ups.
+        constexpr uint32_t kMaskOutEbx7_SoftOnly =
+            (1u <<  5) |   // AVX2 (needs XSAVE)
+            (1u << 10);    // INVPCID — instruction #UD on 1803
+        constexpr uint32_t kMaskOutEcx7_SoftOnly =
+            (1u <<  3) |   // PKU       — CR4.PKE not on 1803
+            (1u <<  4) |   // OSPKE
+            (1u <<  7) |   // CET_SS    — CR4.CET not on 1803
+            (1u << 10) |   // VPCLMULQDQ (needs XSAVE)
+            (1u << 22) |   // RDPID (#UD on 1803)
+            (1u << 31);    // PKS
+        constexpr uint32_t kMaskOutEdx7_SoftOnly =
+            (1u <<  5) |   // UINTR       — CR4.UINTR not supported
+            (1u << 20);    // CET_IBT
+
+        uint32_t mask_ebx = kMaskOutEbx7_Always |
+                            (soft ? kMaskOutEbx7_SoftOnly : 0u);
+        uint32_t mask_ecx = kMaskOutEcx7_Always |
+                            (soft ? kMaskOutEcx7_SoftOnly : 0u);
+        uint32_t mask_edx = kMaskOutEdx7_Always |
+                            (soft ? kMaskOutEdx7_SoftOnly : 0u);
+        auto& o = cpuid_overrides[num_overrides++];
+        o.Function = 7;
+        o.Eax = static_cast<uint32_t>(cpuid7[0]);
+        o.Ebx = static_cast<uint32_t>(cpuid7[1]) & ~mask_ebx;
+        o.Ecx = static_cast<uint32_t>(cpuid7[2]) & ~mask_ecx;
+        o.Edx = static_cast<uint32_t>(cpuid7[3]) & ~mask_edx;
+        LOG_INFO("CPUID 7.0 override: EBX 0x%08X -> 0x%08X, "
+                 "ECX 0x%08X -> 0x%08X, EDX 0x%08X -> 0x%08X (%s)",
+                 static_cast<uint32_t>(cpuid7[1]), o.Ebx,
+                 static_cast<uint32_t>(cpuid7[2]), o.Ecx,
+                 static_cast<uint32_t>(cpuid7[3]), o.Edx,
+                 soft
+                    ? "masked AVX-512 + AVX2/INVPCID/PKU/CET/UINTR/RDPID + "
+                      "IBRS/IBPB/STIBP/SSBD/ARCH_CAP (soft APIC)"
+                    : "masked AVX-512 + IBRS/IBPB/STIBP/SSBD/ARCH_CAP "
+                      "(hard APIC; WHPX does not virtualise SPEC_CTRL MSRs)");
+    }
+
+    // Note: CPUID leaf 7 subleaf 2 (SPEC_CTRL extended bits — IPRED_CTRL,
+    // RRSBA_CTRL, BHI_CTRL, ...) cannot be overridden via CpuidResultList
+    // because WHV_X64_CPUID_RESULT has no subleaf field and our leaf-1 entry
+    // above matches ALL subleaves of leaf 7. Instead we add leaf 7 to the
+    // CpuidExitList below and clear the 7.2 extended-SPEC_CTRL bits in the
+    // exit handler. See whvp_vcpu.cpp, WHvRunVpExitReasonX64Cpuid.
+    //
+    // (The leaf-7 static override we set here still gets applied to the
+    // subleaf-0 exit via exit_ctx.CpuidAccess.DefaultResult*, so subleaf 0
+    // is still fast-pathed through the hypervisor's filter.)
 
     // Hyper-V enlightenment signature (leaves 0x40000000..0x40000006).
     // We advertise: signature + HYPERCALL + reference counter + VP_INDEX
@@ -297,7 +476,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         }
     }
 
-    UINT32 cpuid_exit_list[] = { 1, 0xB, 0x1F };
+    UINT32 cpuid_exit_list[] = { 1, 7, 0xB, 0x1F };
     hr = WHvSetPartitionProperty(vm->partition_,
         WHvPartitionPropertyCodeCpuidExitList,
         cpuid_exit_list, sizeof(cpuid_exit_list));
@@ -365,7 +544,48 @@ std::unique_ptr<HypervisorVCpu> WhvpVm::CreateVCpu(
     return WhvpVCpu::Create(*this, index, addr_space);
 }
 
+void WhvpVm::OnVCpuCreated(uint32_t index, WhvpVCpu* vcpu) {
+    std::lock_guard<std::mutex> lk(vcpu_mutex_);
+    if (index < vcpus_.size()) {
+        vcpus_[index] = vcpu;
+    }
+}
+
+void WhvpVm::OnVCpuDestroyed(uint32_t index) {
+    std::lock_guard<std::mutex> lk(vcpu_mutex_);
+    if (index < vcpus_.size()) {
+        vcpus_[index] = nullptr;
+    }
+}
+
 void WhvpVm::RequestInterrupt(const InterruptRequest& req) {
+    if (soft_apic_) {
+        // Software path: fan out to the target vCPU(s) and yank them out of
+        // WHvRunVirtualProcessor so TryInjectInterrupt on the next RunOnce
+        // pass drains the freshly queued vector into WHvRegisterPending-
+        // Interruption.
+        std::lock_guard<std::mutex> lk(vcpu_mutex_);
+        if (req.logical_destination) {
+            // Flat-model logical destination: bitmask, bit N = APIC ID N.
+            uint32_t mask = req.destination;
+            for (uint32_t i = 0; i < cpu_count_; i++) {
+                if ((mask & (1u << i)) && i < vcpus_.size() && vcpus_[i]) {
+                    vcpus_[i]->QueueInterrupt(req.vector);
+                    vcpus_[i]->CancelRun();
+                }
+            }
+        } else {
+            uint32_t dest = req.destination;
+            if (dest >= cpu_count_) dest = 0;
+            if (dest < vcpus_.size() && vcpus_[dest]) {
+                vcpus_[dest]->QueueInterrupt(req.vector);
+                vcpus_[dest]->CancelRun();
+            }
+        }
+        return;
+    }
+
+    // Hard path (1809+): hand the interrupt off to WHPX's in-partition APIC.
     WHV_INTERRUPT_CONTROL ctrl{};
     ctrl.Type = WHvX64InterruptTypeFixed;
     ctrl.DestinationMode = req.logical_destination
@@ -377,7 +597,30 @@ void WhvpVm::RequestInterrupt(const InterruptRequest& req) {
     ctrl.Destination = req.destination;
     ctrl.Vector = req.vector;
 
-    WHvRequestInterrupt(partition_, &ctrl, sizeof(ctrl));
+    HRESULT hr = dyn::RequestInterrupt(partition_, &ctrl, sizeof(ctrl));
+    if (FAILED(hr)) {
+        LOG_WARN("WHvRequestInterrupt(vec=%u, dest=%u) failed: 0x%08lX",
+                 req.vector, req.destination, hr);
+    }
+}
+
+void WhvpVm::QueueInterrupt(uint32_t vector, uint32_t dest_vcpu) {
+    if (soft_apic_) {
+        std::lock_guard<std::mutex> lk(vcpu_mutex_);
+        if (dest_vcpu < vcpus_.size() && vcpus_[dest_vcpu]) {
+            vcpus_[dest_vcpu]->QueueInterrupt(vector);
+            vcpus_[dest_vcpu]->CancelRun();
+        }
+        return;
+    }
+
+    // Hard path: single-vCPU physical unicast through WHvRequestInterrupt.
+    InterruptRequest req{};
+    req.vector = vector;
+    req.destination = dest_vcpu;
+    req.logical_destination = false;
+    req.level_triggered = false;
+    RequestInterrupt(req);
 }
 
 } // namespace whvp

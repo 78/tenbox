@@ -152,9 +152,29 @@ static HvStatus CheckHypervisorStatus() {
     struct { BOOL HypervisorPresent; } cap{};
     UINT32 written = 0;
     HRESULT hr = pGetCap(0, &cap, sizeof(cap), &written);
+
+    // Probe WHvRequestInterrupt up front so we can log the expected
+    // interrupt-injection path before the VM backend even spins up. On
+    // Windows 10 1803 this symbol is absent and the backend falls back to
+    // a software pending queue + WHvRegisterPendingInterruption. 1809+ has
+    // it and uses the in-partition xAPIC emulation.
+    const bool has_request_irq =
+        GetProcAddress(hMod, "WHvRequestInterrupt") != nullptr;
+
     FreeLibrary(hMod);
-    if (SUCCEEDED(hr) && cap.HypervisorPresent)
+    if (SUCCEEDED(hr) && cap.HypervisorPresent) {
+        if (!has_request_irq) {
+            fprintf(stderr,
+                    "[WHPX] WHvRequestInterrupt export not found "
+                    "(Windows 10 1803 or similar); VM backend will use the "
+                    "software APIC fallback path for interrupt injection.\n");
+        } else {
+            fprintf(stderr,
+                    "[WHPX] WHvRequestInterrupt available (1809+), using "
+                    "in-partition xAPIC emulation.\n");
+        }
         return HvStatus::kAvailable;
+    }
     return HvStatus::kNotEnabled;
 }
 

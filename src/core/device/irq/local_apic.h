@@ -1,15 +1,16 @@
 #pragma once
 
 #include "core/device/device.h"
+#include "core/util/hires_timer.h"
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <vector>
 
-#ifdef __APPLE__
-#include <dispatch/dispatch.h>
-#endif
+class VmIoLoop;
 
 class LocalApic : public Device {
 public:
@@ -29,6 +30,12 @@ public:
 
     void Init(uint32_t cpu_count);
     void SetApicIds(const std::vector<uint32_t>& ids);
+
+    // Wire the per-VM libuv event loop used to drive per-vCPU LAPIC timer
+    // firings. Must be called before any guest write enables a timer (in
+    // practice, during machine setup right after Init). No-op if null —
+    // LAPIC timer IRQs just won't fire (legacy PIT / HPET still work).
+    void SetIoLoop(VmIoLoop* loop) { io_loop_ = loop; }
 
     void SetIrqInjectCallback(IrqInjectFunc cb) { inject_irq_ = std::move(cb); }
     void SetSipiCallback(SipiFunc cb) { sipi_callback_ = std::move(cb); }
@@ -95,9 +102,17 @@ private:
         uint64_t timer_load_time_ns = 0;
         uint64_t timer_period_ns = 0;
 
-#ifdef __APPLE__
-        dispatch_source_t dispatch_timer = nullptr;
-#endif
+        // Per-vCPU high-resolution timer. Replaces the earlier VmIoLoop
+        // AddTimer id: we need sub-ms precision on the software-APIC
+        // fallback path (WHPX pre-1809) because Linux programs the LAPIC
+        // timer at ~150 μs periods.
+        std::unique_ptr<HiResTimer> hires_timer;
+
+        // True while the hires timer is logically armed. Guarded by the
+        // outer mutex_ — lets FireTimer decide whether to re-arm itself
+        // for the next periodic tick without racing with a concurrent
+        // StopTimer / ArmTimer on the vCPU thread.
+        bool timer_armed = false;
     };
 
     static thread_local uint32_t current_cpu_;
@@ -116,9 +131,7 @@ private:
     uint64_t GetTimeNs() const;
     void ArmTimer(uint32_t cpu_idx);
     void StopTimer(uint32_t cpu_idx);
-    void FireTimer(uint32_t cpu_idx);
+    uint64_t FireTimer(uint32_t cpu_idx);
 
-#ifdef __APPLE__
-    dispatch_queue_t dispatch_queue_ = nullptr;
-#endif
+    VmIoLoop* io_loop_ = nullptr;
 };

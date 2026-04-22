@@ -1,5 +1,6 @@
 if(WIN32)
     add_library(tenbox_platform STATIC
+        ${CMAKE_SOURCE_DIR}/src/platform/windows/hypervisor/whvp_dyn.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/windows/hypervisor/whvp_platform.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/windows/hypervisor/whvp_vm.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/windows/hypervisor/whvp_doorbell.cpp
@@ -15,6 +16,12 @@ if(WIN32)
             ${CMAKE_BINARY_DIR}
     )
 
+    # WHPX mandatory exports (present since Windows 10 1803) are linked
+    # via the standard import libs. Optional exports that only appear on
+    # 1809+ (WHvRequestInterrupt, WHvCreate/DeleteNotificationPort) are
+    # resolved at runtime via whvp_dyn.cpp, so code MUST NOT reference
+    # them directly — otherwise the loader will reject the EXE on 1803
+    # with "entry point not found".
     target_link_libraries(tenbox_platform
         PUBLIC
             tenbox_core

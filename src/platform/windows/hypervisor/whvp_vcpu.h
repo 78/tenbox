@@ -4,6 +4,9 @@
 #include "core/vmm/address_space.h"
 #include "core/vmm/hypervisor_vcpu.h"
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
 
 namespace whvp {
 
@@ -22,8 +25,24 @@ public:
 
     // Thread-local LAPIC CPU index must be set on the worker thread.
     void OnThreadInit() override;
-    // WHVP xAPIC emulation handles INIT/SIPI internally; no generic wait needed.
-    bool NeedsStartupWait() const override { return false; }
+    // On the hard-APIC path WHPX's built-in xAPIC emulation puts APs into
+    // wait-for-SIPI at partition start and handles INIT/SIPI IPIs itself.
+    // On the soft-APIC path (pre-1809 WHPX or TENBOX_SOFT_APIC=1) the
+    // partition has no LAPIC, so APs would otherwise start executing the
+    // reset vector immediately. Gate AP worker threads on the generic
+    // init+SIPI CV and set CS:IP = (vector<<12):0 in OnStartup.
+    bool NeedsStartupWait() const override;
+    void OnStartup(const VCpuStartupState& state) override;
+
+    // Soft-APIC path: queue an external interrupt for this vCPU. Wakes the
+    // interrupt condition variable so a halted vCPU exits WaitForInterrupt.
+    // Unlike CancelRun() we do NOT synchronously yank the vCPU out of
+    // WHvRunVirtualProcessor here — the caller (WhvpVm) is expected to do
+    // that after posting the vector so a single queued IRQ can target
+    // multiple vCPUs with a single CancelRun each.
+    void QueueInterrupt(uint32_t vector);
+    bool HasPendingInterrupt();
+    bool WaitForInterrupt(uint32_t timeout_ms) override;
 
     bool SetRegisters(const WHV_REGISTER_NAME* names,
                       const WHV_REGISTER_VALUE* values, uint32_t count);
@@ -74,6 +93,16 @@ private:
 
     bool CreateEmulator();
 
+    // Soft-APIC path: inspect guest RFLAGS.IF / InterruptState, inject one
+    // pending vector via WHvRegisterPendingInterruption if the guest is
+    // ready, otherwise request an interrupt-window exit via
+    // WHvX64RegisterDeliverability so we get called back as soon as the
+    // guest re-enables interrupts. No-op on the hard-APIC path.
+    // Must be called on the vCPU worker thread immediately before each
+    // WHvRunVirtualProcessor.
+    void TryInjectInterrupt();
+    void SetInterruptWindowRequested(bool on);
+
     VCpuExitAction HandleIoPort(const WHV_VP_EXIT_CONTEXT& vp_ctx,
                                  const WHV_X64_IO_PORT_ACCESS_CONTEXT& io);
     VCpuExitAction HandleMmio(const WHV_VP_EXIT_CONTEXT& vp_ctx,
@@ -95,11 +124,29 @@ private:
         WHV_TRANSLATE_GVA_RESULT_CODE* result,
         WHV_GUEST_PHYSICAL_ADDRESS* gpa);
 
+    WhvpVm* vm_ = nullptr;
     WHV_PARTITION_HANDLE partition_ = nullptr;
     uint32_t vp_index_ = 0;
     uint32_t apic_id_ = 0;
     AddressSpace* addr_space_ = nullptr;
     WHV_EMULATOR_HANDLE emulator_ = nullptr;
+
+    // Soft-APIC interrupt plumbing (ignored on the hard-APIC path).
+    std::mutex irq_mutex_;
+    std::condition_variable irq_cv_;
+    std::queue<uint32_t> pending_irqs_;
+    bool irq_window_active_ = false;
+
+    // Cached from exit_ctx.VpContext.ExecutionState after every
+    // WHvRunVirtualProcessor. TryInjectInterrupt consults these instead of
+    // calling WHvGetVirtualProcessorRegisters, which would otherwise return
+    // the stale snapshot of WHvRegisterPendingInterruption (that register
+    // only changes on actual VM entry — between exits and our re-entry it
+    // keeps whatever value we wrote last time, falsely reporting
+    // "InterruptionPending=1" and blocking all further injections). This
+    // mirrors whpx_vcpu_post_run() / whpx_vcpu_pre_run() in QEMU.
+    bool cached_interruption_pending_ = false;
+    bool cached_interruptable_ = true;  // RFLAGS.IF=1 && !InterruptShadow
 };
 
 // ---------------------------------------------------------------------------

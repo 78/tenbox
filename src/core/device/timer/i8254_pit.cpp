@@ -1,4 +1,5 @@
 #include "core/device/timer/i8254_pit.h"
+#include "core/vmm/vm_io_loop.h"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -68,55 +69,41 @@ uint64_t I8254Pit::MeasureTscFrequency() {
     return freq;
 }
 
-I8254Pit::I8254Pit() : tsc_freq_(MeasureTscFrequency()) {
-#ifdef __APPLE__
-    ch0_queue_ = dispatch_queue_create("pit.ch0", DISPATCH_QUEUE_SERIAL);
-#endif
-}
+I8254Pit::I8254Pit() : tsc_freq_(MeasureTscFrequency()) {}
 
 I8254Pit::~I8254Pit() {
     StopChannel0Timer();
-#ifdef __APPLE__
-    if (ch0_queue_) {
-        dispatch_release(ch0_queue_);
-        ch0_queue_ = nullptr;
-    }
-#endif
 }
 
 void I8254Pit::StopChannel0Timer() {
-#ifdef __APPLE__
-    if (ch0_timer_) {
-        dispatch_source_cancel(ch0_timer_);
-        dispatch_release(ch0_timer_);
-        ch0_timer_ = nullptr;
+    uint64_t id = ch0_timer_id_;
+    ch0_timer_id_ = 0;
+    if (id && io_loop_) {
+        io_loop_->RemoveTimer(id);
     }
-#endif
 }
 
 void I8254Pit::ArmChannel0Timer() {
-#ifdef __APPLE__
     StopChannel0Timer();
     auto& ch = channels_[0];
+    if (!io_loop_) return;
     if (!ch.armed || ch.reload == 0) return;
     if (ch.mode != 2 && ch.mode != 3) return;
 
     uint32_t reload = (ch.reload == 0) ? 65536u : static_cast<uint32_t>(ch.reload);
-    // Period in nanoseconds: reload / 1193182 Hz * 1e9
+    // Period in nanoseconds: reload / 1193182 Hz * 1e9. Floor to 1 ms since
+    // VmIoLoop works in milliseconds; a 1 ms tick is plenty for Linux which
+    // stops using the PIT IRQ after LAPIC timer takeover.
     uint64_t period_ns = static_cast<uint64_t>(
         static_cast<double>(reload) / kPitFrequencyHz * 1e9);
-    if (period_ns < 100000) period_ns = 100000; // floor at 100us
+    uint64_t period_ms = period_ns / 1'000'000ULL;
+    if (period_ms == 0) period_ms = 1;
 
-    ch0_timer_ = dispatch_source_create(
-        DISPATCH_SOURCE_TYPE_TIMER, 0, 0, ch0_queue_);
-    dispatch_source_set_timer(ch0_timer_,
-        dispatch_time(DISPATCH_TIME_NOW, (int64_t)period_ns),
-        period_ns, 0);
-    dispatch_source_set_event_handler(ch0_timer_, ^{
-        if (irq_callback_) irq_callback_();
-    });
-    dispatch_resume(ch0_timer_);
-#endif
+    ch0_timer_id_ = io_loop_->AddTimer(period_ms,
+        [this, period_ms]() -> uint64_t {
+            if (irq_callback_) irq_callback_();
+            return period_ms;
+        });
 }
 
 uint64_t I8254Pit::ElapsedPitTicks(int ch) const {

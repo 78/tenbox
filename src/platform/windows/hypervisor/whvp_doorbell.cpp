@@ -1,4 +1,5 @@
 #include "platform/windows/hypervisor/whvp_doorbell.h"
+#include "platform/windows/hypervisor/whvp_dyn.h"
 #include "core/vmm/types.h"
 
 #include <cstring>
@@ -10,21 +11,6 @@ namespace {
 constexpr DWORD kMaxDoorbellSlots =
     MAXIMUM_WAIT_OBJECTS > 0 ? static_cast<DWORD>(MAXIMUM_WAIT_OBJECTS) - 1u : 63u;
 
-// WHvCreateNotificationPort / WHvDeleteNotificationPort (notification-port
-// API, 1809+) are not present on earlier Windows 10 builds. Referencing them
-// directly would add static imports to WinHvPlatform.dll that cause the
-// loader to reject the EXE on 1803 with "entry point not found" before
-// main() runs. Resolve them dynamically and call through these function
-// pointers instead.
-using PFN_WHvCreateNotificationPort = HRESULT(WINAPI*)(
-    WHV_PARTITION_HANDLE, const WHV_NOTIFICATION_PORT_PARAMETERS*, HANDLE,
-    WHV_NOTIFICATION_PORT_HANDLE*);
-using PFN_WHvDeleteNotificationPort = HRESULT(WINAPI*)(
-    WHV_PARTITION_HANDLE, WHV_NOTIFICATION_PORT_HANDLE);
-
-static PFN_WHvCreateNotificationPort g_pfnCreateNotificationPort = nullptr;
-static PFN_WHvDeleteNotificationPort g_pfnDeleteNotificationPort = nullptr;
-
 void FillDoorbellMatch(WHV_DOORBELL_MATCH_DATA* m, uint64_t mmio_addr, uint32_t len,
                        uint32_t datamatch) {
     memset(m, 0, sizeof(*m));
@@ -35,28 +21,12 @@ void FillDoorbellMatch(WHV_DOORBELL_MATCH_DATA* m, uint64_t mmio_addr, uint32_t 
     m->MatchOnLength = 1;
 }
 
-// Resolve WHvCreateNotificationPort / WHvDeleteNotificationPort from the
-// already-loaded WinHvPlatform.dll. Returns true only when both symbols are
-// present. The legacy WHvRegisterPartitionDoorbellEvent API is intentionally
-// ignored: it has shipped broken on several pre-19H1 builds and can crash
-// the caller inside vmcompute.dll when doorbells are registered across
-// different guest physical addresses.
+// Notification port APIs (1809+) are routed through the whvp::dyn loader.
+// WHvRegisterPartitionDoorbellEvent is intentionally ignored: it has shipped
+// broken on several pre-19H1 builds and can crash the caller inside
+// vmcompute.dll when doorbells are registered across different GPAs.
 static bool WhvDoorbellApisAvailable() {
-    HMODULE whv = GetModuleHandleW(L"WinHvPlatform.dll");
-    if (!whv) {
-        whv = LoadLibraryW(L"WinHvPlatform.dll");
-    }
-    if (!whv) return false;
-
-    auto pCreate = reinterpret_cast<PFN_WHvCreateNotificationPort>(
-        GetProcAddress(whv, "WHvCreateNotificationPort"));
-    auto pDelete = reinterpret_cast<PFN_WHvDeleteNotificationPort>(
-        GetProcAddress(whv, "WHvDeleteNotificationPort"));
-    if (!pCreate || !pDelete) return false;
-
-    g_pfnCreateNotificationPort = pCreate;
-    g_pfnDeleteNotificationPort = pDelete;
-    return true;
+    return dyn::HasCreateNotificationPort() && dyn::HasDeleteNotificationPort();
 }
 
 } // namespace
@@ -117,7 +87,7 @@ bool WhvpDoorbellRegistrar::Register(uint64_t mmio_addr, uint32_t len, uint32_t 
     params.Doorbell = match;
 
     WHV_NOTIFICATION_PORT_HANDLE port = nullptr;
-    HRESULT hr = g_pfnCreateNotificationPort(partition_, &params, ev, &port);
+    HRESULT hr = dyn::CreateNotificationPort(partition_, &params, ev, &port);
     if (FAILED(hr)) {
         CloseHandle(ev);
         LOG_WARN("WHPX doorbell: register failed (gpa=0x%llX q=%u): 0x%08lX",
@@ -155,8 +125,8 @@ void WhvpDoorbellRegistrar::Shutdown() {
     std::lock_guard<std::mutex> lk(mu_);
     for (auto& up : slots_) {
         if (!up) continue;
-        if (up->port_handle && g_pfnDeleteNotificationPort) {
-            HRESULT hr = g_pfnDeleteNotificationPort(partition_, up->port_handle);
+        if (up->port_handle && dyn::HasDeleteNotificationPort()) {
+            HRESULT hr = dyn::DeleteNotificationPort(partition_, up->port_handle);
             if (FAILED(hr)) {
                 LOG_WARN("WHPX doorbell: WHvDeleteNotificationPort failed: 0x%08lX", hr);
             }

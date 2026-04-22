@@ -25,7 +25,18 @@ set(TENBOX_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/net/net_nat.cpp
     ${CMAKE_SOURCE_DIR}/src/core/net/net_icmp.cpp
     ${CMAKE_SOURCE_DIR}/src/core/net/net_port_forward.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/util/hires_timer_uv.cpp
 )
+
+if(WIN32)
+    list(APPEND TENBOX_CORE_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/core/util/hires_timer_win.cpp
+    )
+elseif(APPLE)
+    list(APPEND TENBOX_CORE_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/core/util/hires_timer_mac.cpp
+    )
+endif()
 
 # Architecture-specific sources
 if(WIN32 OR CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")

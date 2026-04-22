@@ -1,5 +1,6 @@
 #include "core/device/irq/local_apic.h"
 #include "core/vmm/types.h"
+#include "core/vmm/vm_io_loop.h"
 
 thread_local uint32_t LocalApic::current_cpu_ = 0;
 
@@ -13,6 +14,7 @@ void LocalApic::Init(uint32_t cpu_count) {
     cpu_count_ = cpu_count;
     for (uint32_t i = 0; i < cpu_count && i < kMaxCpus; i++) {
         cpus_[i].id = i;
+        cpus_[i].hires_timer = MakeHiResTimer(io_loop_);
     }
 }
 
@@ -33,22 +35,14 @@ LocalApic::CpuApicState& LocalApic::CurrentCpu() {
 }
 
 void LocalApic::Start() {
-#ifdef __APPLE__
-    if (dispatch_queue_) return;
-    dispatch_queue_ = dispatch_queue_create("lapic.timer", DISPATCH_QUEUE_SERIAL);
-#endif
+    // No-op. VmIoLoop is expected to already be running by the time the
+    // guest arms any LAPIC timer; ArmTimer posts onto it directly.
 }
 
 void LocalApic::Stop() {
-#ifdef __APPLE__
     for (uint32_t i = 0; i < cpu_count_ && i < kMaxCpus; i++) {
         StopTimer(i);
     }
-    if (dispatch_queue_) {
-        dispatch_release(dispatch_queue_);
-        dispatch_queue_ = nullptr;
-    }
-#endif
 }
 
 uint32_t LocalApic::GetDivider(const CpuApicState& cpu) const {
@@ -58,65 +52,66 @@ uint32_t LocalApic::GetDivider(const CpuApicState& cpu) const {
 }
 
 void LocalApic::StopTimer(uint32_t cpu_idx) {
-#ifdef __APPLE__
     if (cpu_idx >= kMaxCpus) return;
     auto& cpu = cpus_[cpu_idx];
-    if (cpu.dispatch_timer) {
-        dispatch_source_cancel(cpu.dispatch_timer);
-        dispatch_release(cpu.dispatch_timer);
-        cpu.dispatch_timer = nullptr;
-    }
-#endif
+    // Note: HiResTimer::Stop is thread-safe and re-entrant. We clear the
+    // armed flag so FireTimer (which may be executing concurrently on the
+    // timer thread) stops re-arming itself.
+    cpu.timer_armed = false;
+    if (cpu.hires_timer) cpu.hires_timer->Stop();
 }
 
 void LocalApic::ArmTimer(uint32_t cpu_idx) {
-#ifdef __APPLE__
     if (cpu_idx >= kMaxCpus) return;
-    StopTimer(cpu_idx);
     auto& cpu = cpus_[cpu_idx];
-    if (!dispatch_queue_ || cpu.timer_init_count == 0) return;
+    if (!cpu.hires_timer || cpu.timer_init_count == 0) return;
 
-    uint64_t period_ns = (uint64_t)cpu.timer_init_count * cpu.timer_divider;
+    // Stop any prior schedule. HiResTimer::Arm() also does this internally,
+    // but resetting timer_armed first keeps a concurrent FireTimer from
+    // re-arming between Stop() and the new Arm().
+    cpu.timer_armed = false;
+    cpu.hires_timer->Stop();
+
+    // Bus frequency is 1 GHz (kBusFreqHz), so one tick = 1 ns.
+    // Period in ns = init_count * divider.
+    uint64_t period_ns = static_cast<uint64_t>(cpu.timer_init_count) * cpu.timer_divider;
     if (period_ns == 0) return;
+
+    // Floor at 50 μs so we don't spin the host thread on pathologically small
+    // init_count values. Linux normally programs ~150 μs on modern configs
+    // (init_count=0x2580, div=16 → 153.6 μs). Going below 50 μs would give
+    // tick rates beyond what any reasonable guest needs and starve the
+    // callback thread.
+    if (period_ns < 50'000) period_ns = 50'000;
 
     cpu.timer_load_time_ns = GetTimeNs();
     cpu.timer_period_ns = period_ns;
+    cpu.timer_armed = true;
 
-    uint32_t mode = (cpu.lvt_timer >> 17) & 0x3;
-
-    cpu.dispatch_timer = dispatch_source_create(
-        DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_queue_);
-
-    if (mode == kTimerPeriodic) {
-        dispatch_source_set_timer(cpu.dispatch_timer,
-            dispatch_time(DISPATCH_TIME_NOW, (int64_t)period_ns),
-            period_ns, 0);
-    } else {
-        dispatch_source_set_timer(cpu.dispatch_timer,
-            dispatch_time(DISPATCH_TIME_NOW, (int64_t)period_ns),
-            DISPATCH_TIME_FOREVER, 0);
-    }
-
-    uint32_t ci = cpu_idx;
-    dispatch_source_set_event_handler(cpu.dispatch_timer, ^{
-        FireTimer(ci);
+    cpu.hires_timer->Arm(period_ns, [this, cpu_idx]() -> uint64_t {
+        return FireTimer(cpu_idx);
     });
-
-    dispatch_resume(cpu.dispatch_timer);
-#endif
 }
 
-void LocalApic::FireTimer(uint32_t cpu_idx) {
+uint64_t LocalApic::FireTimer(uint32_t cpu_idx) {
     uint32_t vector = 0;
     uint32_t target_cpu = 0;
     bool should_inject = false;
+    uint64_t next_ns = 0;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (cpu_idx >= kMaxCpus) return;
+        if (cpu_idx >= kMaxCpus) return 0;
         auto& cpu = cpus_[cpu_idx];
 
-        if (cpu.timer_init_count == 0 || (cpu.lvt_timer & 0x10000)) return;
+        // If StopTimer raced us between the wait returning and here,
+        // don't re-arm. The mask bit (LVT bit 16) is also a stop signal.
+        if (!cpu.timer_armed ||
+            cpu.timer_init_count == 0 ||
+            (cpu.lvt_timer & 0x10000)) {
+            cpu.timer_armed = false;
+            return 0;
+        }
 
         vector = cpu.lvt_timer & 0xFF;
         target_cpu = cpu_idx;
@@ -125,14 +120,18 @@ void LocalApic::FireTimer(uint32_t cpu_idx) {
         uint32_t mode = (cpu.lvt_timer >> 17) & 0x3;
         if (mode == kTimerOneShot) {
             cpu.timer_init_count = 0;
+            cpu.timer_armed = false;
+            next_ns = 0;
         } else {
             cpu.timer_load_time_ns += cpu.timer_period_ns;
+            next_ns = cpu.timer_period_ns;
         }
     }
 
     if (should_inject) {
         inject_irq_(vector, target_cpu);
     }
+    return next_ns;
 }
 
 uint64_t LocalApic::GetTimeNs() const {
@@ -198,6 +197,18 @@ struct TimerAction {
     uint32_t cpu_idx = 0;
 };
 
+// NOTE: kRegEOI, kRegIRR_Base and kRegISR_Base are intentionally *not*
+// tracked as register-level state here. The two injection backends we talk
+// to — HVF (VMCS VMENTRY_IRQ_INFO) and the soft-APIC path on WHPX
+// (WhvpVCpu::pending_irqs_ + WHvRegisterPendingInterruption) — each keep
+// their own per-vCPU FIFO that effectively plays the IRR's role at the
+// granularity the hypervisor needs. EOI is likewise handled inside the
+// backend's injection state machine (HVF auto-clears the inject slot;
+// WHPX pops the FIFO head into PendingInterruption on the next entry).
+// For the hard path on 1809+, WHPX's in-partition xAPIC maintains the
+// real IRR/ISR for us. Future work: add real IRR/ISR bit tracking so we
+// can honour TPR / priority arbitration across the FIFO head instead of
+// delivering strictly in-order (see HvfVCpu comment for the same TODO).
 void LocalApic::MmioWrite(uint64_t offset, uint8_t /*size*/, uint64_t value) {
     TimerAction timer_action;
 
@@ -323,7 +334,7 @@ void LocalApic::MmioWrite(uint64_t offset, uint8_t /*size*/, uint64_t value) {
             break;
         }
     }
-    // mutex_ released — safe to call dispatch APIs and external callbacks
+    // mutex_ released — safe to call VmIoLoop APIs and external callbacks.
 
     if (timer_action.type == TimerAction::kArm) {
         ArmTimer(timer_action.cpu_idx);
