@@ -1,18 +1,18 @@
 {
-  "latest_version": "0.7.3",
+  "latest_version": "0.7.4",
   "min_supported_version": "0.1.0",
-  "release_notes": "- 修复部分电脑上出现的黑屏和崩溃问题\n- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
-  "release_date": "2026-04-21",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.3.msi",
-  "sha256": "7cb704486f6ebbecfdec3eb3bf8f6af91c29b2d380fdf4e4341aa31bf2589f8c",
+  "release_notes": "- 通过用户态APIC来兼容Windows 1803\n- 修复部分电脑上出现的黑屏和崩溃问题\n- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+  "release_date": "2026-04-22",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.4.msi",
+  "sha256": "f707ca656d5f439cc79980ce6f1434ec8c15585b906f5938ddd72ed1b51cf131",
   "platforms": {
     "windows": {
-      "latest_version": "0.7.3",
-      "release_notes": "- 修复部分电脑上出现的黑屏和崩溃问题\n- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
-      "release_date": "2026-04-21",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.3.msi",
-      "sha256": "7cb704486f6ebbecfdec3eb3bf8f6af91c29b2d380fdf4e4341aa31bf2589f8c",
-      "size": 3256320,
+      "latest_version": "0.7.4",
+      "release_notes": "- 通过用户态APIC来兼容Windows 1803\n- 修复部分电脑上出现的黑屏和崩溃问题\n- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
+      "release_date": "2026-04-22",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.4.msi",
+      "sha256": "f707ca656d5f439cc79980ce6f1434ec8c15585b906f5938ddd72ed1b51cf131",
+      "size": 3268608,
       "min_os": "Windows 10"
     },
     "macos": {

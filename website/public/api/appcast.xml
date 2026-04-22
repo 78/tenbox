@@ -6,9 +6,10 @@
     <description>TenBox Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.7.3</title>
+      <title>Version 0.7.4</title>
       <description><![CDATA[
         <ul>
+          <li>- 通过用户态APIC来兼容Windows 1803</li>
           <li>- 修复部分电脑上出现的黑屏和崩溃问题</li>
           <li>- 虚拟机平台表述改为 Windows 虚拟机监控程序平台</li>
           <li>- 菜单中增加帮助文档</li>
@@ -16,15 +17,15 @@
           <li>- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据</li>
         </ul>
       ]]></description>
-      <pubDate>Tue, 21 Apr 2026 00:00:00 -0000</pubDate>
+      <pubDate>Wed, 22 Apr 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>10</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.3.msi"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.4.msi"
         sparkle:os="windows"
-        sparkle:version="0.7.3"
-        sparkle:shortVersionString="0.7.3"
+        sparkle:version="0.7.4"
+        sparkle:shortVersionString="0.7.4"
         sparkle:installerArguments="/passive"
-        length="3256320"
+        length="3268608"
         type="application/octet-stream"
       />
     </item>
