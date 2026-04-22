@@ -244,6 +244,18 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         // AVX-512 on newer Windows builds only, but we prefer to avoid the
         // guest-side code-path divergence).
         constexpr uint32_t kMaskOutEbx7_Always =
+            // TSX (HLE + RTM): Intel disabled TSX via microcode on most 10th-
+            // 14th-gen desktop/mobile chips (TAA mitigation); CPUID still
+            // advertises the bits, but any XBEGIN/HLE-prefixed lock aborts
+            // and falls back slowly. Some kernel probes also read MSR 0x10F
+            // (TSX_FORCE_ABORT) which WHPX doesn't virtualise. Hide both to
+            // avoid confusing glibc's hwcaps / kernel TSX code paths.
+            (1u <<  4) |   // HLE
+            (1u << 11) |   // RTM
+            // Intel Processor Trace: perf/ftrace tries to enable PT by
+            // writing IA32_RTIT_CTL (0x570) + friends. WHPX doesn't pass
+            // those MSRs → first WRMSR #GPs. Not useful in a guest anyway.
+            (1u << 25) |   // Intel PT
             (1u << 16) |   // AVX-512 Foundation
             (1u << 17) |   // AVX-512 DQ
             (1u << 21) |   // AVX-512 IFMA
@@ -252,7 +264,13 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
             (1u << 31);    // AVX-512 VL
         constexpr uint32_t kMaskOutEcx7_Always =
             (1u <<  1) |   // AVX-512 VBMI
+            // WAITPKG (UMONITOR/UMWAIT/TPAUSE): guest writes IA32_UMWAIT_
+            // CONTROL (MSR 0xE1) to tune the maximum wait time; WHPX does
+            // not virtualise that MSR, so the first WRMSR #GPs. Same
+            // CPUID-leaks-MSR-that-isn't-there pattern as CET/Intel PT.
+            (1u <<  5) |   // WAITPKG
             (1u <<  6) |   // AVX-512 VBMI2
+            (1u <<  7) |   // CET_SS — see CET note below
             (1u << 11) |   // AVX-512 VNNI
             (1u << 12) |   // AVX-512 BITALG
             (1u << 14);    // AVX-512 VPOPCNTDQ
@@ -260,6 +278,26 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
             (1u <<  2) |   // AVX-512 4VNNIW
             (1u <<  3) |   // AVX-512 4FMAPS
             (1u <<  8) |   // AVX-512 VP2INTERSECT
+            // HYBRID: host (e.g. Alder Lake i7-12700H) has mixed P/E cores.
+            // If CPUID advertises HYBRID, Linux reads leaf 0x1A to classify
+            // each vCPU as a specific core type; without a matching 0x1A
+            // override WHPX exposes the host's thread-local value, which can
+            // make the guest scheduler see every vCPU as an E-core (or mix
+            // types across reboots depending on which host CPU runs CPUID
+            // first). Easiest to hide HYBRID entirely — guest treats every
+            // vCPU identically, which is what it should do since we don't
+            // model host CPU affinity anyway.
+            (1u << 15) |   // HYBRID
+            // CET (Control-flow Enforcement Technology): CR4.CET (bit 23) is
+            // not virtualised by WHPX on any shipping Windows build through
+            // Win11 22H2, even on CET-capable hosts like Alder Lake+. If
+            // CPUID advertises CET_SS (ECX[7]) or CET_IBT (EDX[20]), Linux
+            // 6.6+ setup_cet() unconditionally does cr4_set_bits(X86_CR4_CET)
+            // from identify_cpu(), which #GPs in native_write_cr4 and kernel-
+            // panics before userspace starts. Keep both bits masked on every
+            // WHPX path (the feature is pinned in cr4_pinned_mask once set,
+            // so a run-time mitigation is not an option).
+            (1u << 20) |   // CET_IBT
             // Spectre / side-channel mitigation MSRs. Empirically WHPX does
             // NOT virtualise MSR_IA32_SPEC_CTRL (0x48), PRED_CMD (0x49),
             // FLUSH_CMD (0x10B), ARCH_CAPABILITIES (0x10A), CORE_CAPABILITIES
@@ -288,13 +326,11 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         constexpr uint32_t kMaskOutEcx7_SoftOnly =
             (1u <<  3) |   // PKU       — CR4.PKE not on 1803
             (1u <<  4) |   // OSPKE
-            (1u <<  7) |   // CET_SS    — CR4.CET not on 1803
             (1u << 10) |   // VPCLMULQDQ (needs XSAVE)
             (1u << 22) |   // RDPID (#UD on 1803)
             (1u << 31);    // PKS
         constexpr uint32_t kMaskOutEdx7_SoftOnly =
-            (1u <<  5) |   // UINTR       — CR4.UINTR not supported
-            (1u << 20);    // CET_IBT
+            (1u <<  5);    // UINTR     — CR4.UINTR not supported
 
         uint32_t mask_ebx = kMaskOutEbx7_Always |
                             (soft ? kMaskOutEbx7_SoftOnly : 0u);
@@ -314,10 +350,13 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
                  static_cast<uint32_t>(cpuid7[2]), o.Ecx,
                  static_cast<uint32_t>(cpuid7[3]), o.Edx,
                  soft
-                    ? "masked AVX-512 + AVX2/INVPCID/PKU/CET/UINTR/RDPID + "
+                    ? "masked AVX-512 + CET + TSX + IntelPT + WAITPKG + "
+                      "HYBRID + AVX2/INVPCID/PKU/UINTR/RDPID + "
                       "IBRS/IBPB/STIBP/SSBD/ARCH_CAP (soft APIC)"
-                    : "masked AVX-512 + IBRS/IBPB/STIBP/SSBD/ARCH_CAP "
-                      "(hard APIC; WHPX does not virtualise SPEC_CTRL MSRs)");
+                    : "masked AVX-512 + CET + TSX + IntelPT + WAITPKG + "
+                      "HYBRID + IBRS/IBPB/STIBP/SSBD/ARCH_CAP (hard APIC; "
+                      "WHPX does not virtualise CR4.CET nor SPEC_CTRL / "
+                      "RTIT_CTL / UMWAIT_CONTROL MSRs)");
     }
 
     // Note: CPUID leaf 7 subleaf 2 (SPEC_CTRL extended bits — IPRED_CTRL,

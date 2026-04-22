@@ -6,9 +6,11 @@
     <description>TenBox Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.7.4</title>
+      <title>Version 0.7.5</title>
       <description><![CDATA[
         <ul>
+          <li>- 禁用一些CPUID特征</li>
+          <li>- 显示器关闭时使用黑屏</li>
           <li>- 通过用户态APIC来兼容Windows 1803</li>
           <li>- 修复部分电脑上出现的黑屏和崩溃问题</li>
           <li>- 虚拟机平台表述改为 Windows 虚拟机监控程序平台</li>
@@ -20,12 +22,12 @@
       <pubDate>Wed, 22 Apr 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>10</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.4.msi"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.5.msi"
         sparkle:os="windows"
-        sparkle:version="0.7.4"
-        sparkle:shortVersionString="0.7.4"
+        sparkle:version="0.7.5"
+        sparkle:shortVersionString="0.7.5"
         sparkle:installerArguments="/passive"
-        length="3268608"
+        length="3272704"
         type="application/octet-stream"
       />
     </item>
