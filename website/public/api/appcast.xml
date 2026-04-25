@@ -6,7 +6,7 @@
     <description>TenBox Updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Version 0.7.5</title>
+      <title>Version 0.7.6</title>
       <description><![CDATA[
         <ul>
           <li>- 禁用一些CPUID特征</li>
@@ -19,13 +19,13 @@
           <li>- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据</li>
         </ul>
       ]]></description>
-      <pubDate>Wed, 22 Apr 2026 00:00:00 -0000</pubDate>
+      <pubDate>Sat, 25 Apr 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>10</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.5.msi"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.6.msi"
         sparkle:os="windows"
-        sparkle:version="0.7.5"
-        sparkle:shortVersionString="0.7.5"
+        sparkle:version="0.7.6"
+        sparkle:shortVersionString="0.7.6"
         sparkle:installerArguments="/passive"
         length="3272704"
         type="application/octet-stream"

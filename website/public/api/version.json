@@ -1,17 +1,17 @@
 {
-  "latest_version": "0.7.5",
+  "latest_version": "0.7.6",
   "min_supported_version": "0.1.0",
   "release_notes": "- 禁用一些CPUID特征\n- 显示器关闭时使用黑屏\n- 通过用户态APIC来兼容Windows 1803\n- 修复部分电脑上出现的黑屏和崩溃问题\n- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
-  "release_date": "2026-04-22",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.5.msi",
-  "sha256": "bd501a7b8a179d19a3f7fca9f70a4c658d34d8d1cbf707b753e1f6fa287eb366",
+  "release_date": "2026-04-25",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.6.msi",
+  "sha256": "2e65c9e81d65dc3c12aa2b84298b89a161aa11cf745cca32c64e1b528fbbceb4",
   "platforms": {
     "windows": {
-      "latest_version": "0.7.5",
+      "latest_version": "0.7.6",
       "release_notes": "- 禁用一些CPUID特征\n- 显示器关闭时使用黑屏\n- 通过用户态APIC来兼容Windows 1803\n- 修复部分电脑上出现的黑屏和崩溃问题\n- 虚拟机平台表述改为 Windows 虚拟机监控程序平台\n- 菜单中增加帮助文档\n- 优化性能\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
-      "release_date": "2026-04-22",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.5.msi",
-      "sha256": "bd501a7b8a179d19a3f7fca9f70a4c658d34d8d1cbf707b753e1f6fa287eb366",
+      "release_date": "2026-04-25",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.7.6.msi",
+      "sha256": "2e65c9e81d65dc3c12aa2b84298b89a161aa11cf745cca32c64e1b528fbbceb4",
       "size": 3272704,
       "min_os": "Windows 10"
     },

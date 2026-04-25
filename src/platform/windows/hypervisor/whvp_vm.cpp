@@ -264,6 +264,22 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
             (1u << 31);    // AVX-512 VL
         constexpr uint32_t kMaskOutEcx7_Always =
             (1u <<  1) |   // AVX-512 VBMI
+            // UMIP (User-Mode Instruction Prevention): Windows 10 1809 /
+            // LTSC 2019 WHPX does NOT allow the guest to set CR4.UMIP even
+            // when the underlying host CPU supports UMIP in hardware —
+            // WHPX's allowed-CR4-bits mask was not updated to include
+            // CR4.UMIP until later builds. Linux's identify_cpu ->
+            // setup_umip() unconditionally does cr4_set_bits(X86_CR4_UMIP)
+            // whenever CPUID 7.0 ECX[2] is advertised, which then #GPs in
+            // native_write_cr4 and kernel-panics the swapper task during
+            // arch_cpu_finalize_init (observed value 0x3008b0 = PSE | PAE |
+            // PGE | UMIP | SMEP | SMAP).
+            //
+            // UMIP only blocks ring-3 reads of SGDT/SIDT/SLDT/SMSW/STR, so
+            // hiding it has no functional impact on realistic guests. Hide
+            // on every WHPX path to avoid the bug on old Windows 10 builds
+            // while remaining forward-compatible with modern WHPX.
+            (1u <<  2) |   // UMIP
             // WAITPKG (UMONITOR/UMWAIT/TPAUSE): guest writes IA32_UMWAIT_
             // CONTROL (MSR 0xE1) to tune the maximum wait time; WHPX does
             // not virtualise that MSR, so the first WRMSR #GPs. Same
@@ -350,13 +366,15 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
                  static_cast<uint32_t>(cpuid7[2]), o.Ecx,
                  static_cast<uint32_t>(cpuid7[3]), o.Edx,
                  soft
-                    ? "masked AVX-512 + CET + TSX + IntelPT + WAITPKG + "
-                      "HYBRID + AVX2/INVPCID/PKU/UINTR/RDPID + "
+                    ? "masked AVX-512 + CET + UMIP + TSX + IntelPT + "
+                      "WAITPKG + HYBRID + AVX2/INVPCID/PKU/UINTR/RDPID + "
                       "IBRS/IBPB/STIBP/SSBD/ARCH_CAP (soft APIC)"
-                    : "masked AVX-512 + CET + TSX + IntelPT + WAITPKG + "
-                      "HYBRID + IBRS/IBPB/STIBP/SSBD/ARCH_CAP (hard APIC; "
-                      "WHPX does not virtualise CR4.CET nor SPEC_CTRL / "
-                      "RTIT_CTL / UMWAIT_CONTROL MSRs)");
+                    : "masked AVX-512 + CET + UMIP + TSX + IntelPT + "
+                      "WAITPKG + HYBRID + IBRS/IBPB/STIBP/SSBD/ARCH_CAP "
+                      "(hard APIC; WHPX does not virtualise CR4.UMIP on "
+                      "Windows 10 1809 / LTSC 2019, nor CR4.CET nor "
+                      "SPEC_CTRL / RTIT_CTL / UMWAIT_CONTROL MSRs on any "
+                      "shipping Windows build)");
     }
 
     // Note: CPUID leaf 7 subleaf 2 (SPEC_CTRL extended bits — IPRED_CTRL,
