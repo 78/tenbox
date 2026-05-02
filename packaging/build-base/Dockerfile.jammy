@@ -56,7 +56,13 @@ ENV CXXFLAGS="-O2 -fPIC"
 # Pin upstream versions so build outputs are reproducible across runs.
 ARG X264_REF=stable
 ARG OPUS_VERSION=1.5.2
-ARG LIBYUV_REF=stable
+# libyuv: pin to a specific commit on main rather than tracking the
+# `stable` branch. The stable branch occasionally ships NEON inline
+# assembly that jammy's binutils 2.38 rejects (e.g. `ld1 {v4.16b},
+# [x3, 80]` without the required `#` on the immediate offset), which
+# breaks the arm64 build-base. Pinning a known-good main commit also
+# makes the static archive bit-for-bit reproducible across runs.
+ARG LIBYUV_REF=b438739c8b08eba2c562a62ea5961f6215d525ed
 ARG FFMPEG_VERSION=6.1.1
 # libcurl is statically linked into tenboxd. Pinning the version here
 # (instead of pulling whatever apt has) means the LLM proxy's HTTP
@@ -94,7 +100,8 @@ RUN curl -fsSL "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.ta
 # cmake_minimum_required is older than what cmake 4 will accept by
 # default. The flag tells cmake "treat this project as if it asked for
 # at least 3.5 policy semantics" without us having to fork upstream.
-RUN git clone --depth 1 --branch ${LIBYUV_REF} https://chromium.googlesource.com/libyuv/libyuv \
+RUN git clone https://chromium.googlesource.com/libyuv/libyuv \
+    && git -C libyuv checkout ${LIBYUV_REF} \
     && cmake -S libyuv -B libyuv/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=$DEPS_PREFIX \
