@@ -98,7 +98,7 @@ struct ContentView: View {
                         ToolbarBadgeLabel(
                             title: "Port Forwards",
                             systemImage: "network.badge.shield.half.filled",
-                            count: vm.portForwards.count + vm.guestForwards.count
+                            count: vm.hostForwards.count + vm.guestForwards.count
                         )
                     }
                     .help("Manage port forwards")
@@ -185,9 +185,9 @@ struct ContentView: View {
         } message: {
             Text(appState.startVmError ?? "")
         }
-        .onChange(of: appState.portForwardError) { error in
+        .onChange(of: appState.hostForwardError) { error in
             guard let msg = error else { return }
-            appState.portForwardError = nil
+            appState.hostForwardError = nil
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Port Forward Error"

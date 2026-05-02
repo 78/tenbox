@@ -107,12 +107,12 @@ class TenBoxBridgeWrapper {
 
     // MARK: - Port Forwards
 
-    func addPortForward(_ pf: PortForward, toVm vmId: String) -> Bool {
-        configStore.addPortForward(pf, toVm: vmId)
+    func addHostForward(_ pf: HostForward, toVm vmId: String) -> Bool {
+        configStore.addHostForward(pf, toVm: vmId)
     }
 
-    func removePortForward(hostPort: UInt16, fromVm vmId: String) -> Bool {
-        configStore.removePortForward(hostPort: hostPort, fromVm: vmId)
+    func removeHostForward(hostPort: UInt16, fromVm vmId: String) -> Bool {
+        configStore.removeHostForward(hostPort: hostPort, fromVm: vmId)
     }
 
     // MARK: - Guest Forwards

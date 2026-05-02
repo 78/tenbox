@@ -19,6 +19,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
 # Put all executables in build root (e.g. x64-debug/) instead of deep src/... paths
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -140,6 +141,12 @@ add_subdirectory(src/core)
 add_subdirectory(src/platform)
 add_subdirectory(src/ipc)
 add_subdirectory(src/runtime)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(src/client)
+    add_subdirectory(src/daemon)
+    add_subdirectory(src/cli)
+endif()
 
 if(WIN32)
     add_subdirectory(src/manager)

@@ -1,0 +1,26 @@
+#!/bin/sh
+# `purge` removes /etc/tenbox (env + tls), but never /var/lib/tenbox -
+# that holds VM disks the operator may want to keep across a reinstall.
+# `remove` keeps both intact; `purge` is opt-in (apt-get purge tenbox).
+
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /etc/tenbox || true
+        # Drop the tenbox system user/group created in postinst.
+        # /var/lib/tenbox is intentionally NOT removed (VM disks may
+        # outlive a reinstall), so deluser would normally complain
+        # about the home dir still existing — --remove-home is OFF
+        # for that reason. Order matters: user before group.
+        if getent passwd tenbox >/dev/null; then
+            deluser --quiet --system tenbox >/dev/null 2>&1 || true
+        fi
+        if getent group tenbox >/dev/null; then
+            delgroup --quiet --system --only-if-empty tenbox >/dev/null 2>&1 || true
+        fi
+        systemctl daemon-reload || true
+        ;;
+esac
+
+exit 0

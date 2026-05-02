@@ -505,7 +505,7 @@ static int GetBadgeCount(Impl* p, UINT cmd_id) {
     if (cmd_id == IDM_SHARED_FOLDERS)
         return static_cast<int>(spec.shared_folders.size());
     if (cmd_id == IDM_PORT_FORWARDS)
-        return static_cast<int>(spec.port_forwards.size() + spec.guest_forwards.size());
+        return static_cast<int>(spec.host_forwards.size() + spec.guest_forwards.size());
     return 0;
 }
 
@@ -1764,7 +1764,7 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
             });
         });
 
-    manager_.SetPortForwardErrorCallback(
+    manager_.SetHostForwardErrorCallback(
         [this](const std::string& vm_id, const std::vector<std::string>& failed_mappings) {
             (void)vm_id;
             InvokeOnUiThread([this, failed_mappings]() {
@@ -1795,7 +1795,7 @@ Win32UiShell::~Win32UiShell() {
     manager_.SetClipboardRequestCallback(nullptr);
     manager_.SetAudioPcmCallback(nullptr);
     manager_.SetGuestAgentStateCallback(nullptr);
-    manager_.SetPortForwardErrorCallback(nullptr);
+    manager_.SetHostForwardErrorCallback(nullptr);
 
     // Stop all VMs and join their read threads so no background thread
     // can still be executing a previously-copied callback closure that

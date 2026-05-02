@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 #include <unordered_set>
 
 void ManagedConsolePort::Write(const uint8_t* data, size_t size) {
@@ -659,7 +660,7 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
             vm_->SetNetLinkUp(it_link->second == "true");
         }
 
-        std::vector<PortForward> forwards;
+        std::vector<HostForward> forwards;
         auto it_count = message.fields.find("forward_count");
         if (it_count != message.fields.end()) {
             int count = 0;
@@ -670,8 +671,8 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
                 for (int i = 0; i < count; ++i) {
                     auto it_f = message.fields.find("forward_" + std::to_string(i));
                     if (it_f == message.fields.end()) continue;
-                    PortForward pf;
-                    if (PortForward::FromHostfwd(it_f->second.c_str(), pf)) {
+                    HostForward pf;
+                    if (HostForward::FromHostfwd(it_f->second.c_str(), pf)) {
                         forwards.push_back(pf);
                     }
                 }
@@ -702,7 +703,7 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
         }
 
         uint64_t req_id = message.request_id;
-        vm_->UpdatePortForwards(forwards, [this, req_id](std::vector<uint16_t> failed_ports) {
+        vm_->UpdateHostForwards(forwards, [this, req_id](std::vector<uint16_t> failed_ports) {
             ipc::Message resp;
             resp.kind = ipc::Kind::kResponse;
             resp.channel = ipc::Channel::kControl;
@@ -785,21 +786,42 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
             new_folders.push_back(std::move(spec));
         }
 
-        std::vector<std::string> current_tags = vm_->GetSharedFolderTags();
+        // Build a tag -> {host_path, readonly} map of currently mounted shares
+        // so we can detect not just additions/removals but also config changes
+        // (host_path or readonly toggled on an existing tag).
+        auto current_folders = vm_->GetSharedFolders();
+        std::unordered_map<std::string, FolderSpec> current_map;
+        current_map.reserve(current_folders.size());
+        for (const auto& f : current_folders) {
+            FolderSpec cs;
+            cs.tag = f.tag;
+            cs.host_path = f.host_path;
+            cs.readonly = f.readonly;
+            current_map.emplace(f.tag, std::move(cs));
+        }
+
         std::unordered_set<std::string> new_tags;
+        new_tags.reserve(new_folders.size());
         for (const auto& f : new_folders) {
             new_tags.insert(f.tag);
         }
 
-        for (const auto& tag : current_tags) {
-            if (new_tags.find(tag) == new_tags.end()) {
-                vm_->RemoveSharedFolder(tag);
+        // Drop tags absent from the new list, plus tags whose backing path or
+        // readonly attribute changed (so we can recreate them with the new
+        // settings further down).
+        for (const auto& cf : current_folders) {
+            auto nit = std::find_if(new_folders.begin(), new_folders.end(),
+                                    [&](const FolderSpec& n) { return n.tag == cf.tag; });
+            if (nit == new_folders.end() ||
+                nit->host_path != cf.host_path ||
+                nit->readonly != cf.readonly) {
+                vm_->RemoveSharedFolder(cf.tag);
+                current_map.erase(cf.tag);
             }
         }
 
-        std::unordered_set<std::string> current_set(current_tags.begin(), current_tags.end());
         for (const auto& f : new_folders) {
-            if (current_set.find(f.tag) == current_set.end()) {
+            if (current_map.find(f.tag) == current_map.end()) {
                 vm_->AddSharedFolder(f.tag, f.host_path, f.readonly);
             }
         }
@@ -1049,6 +1071,10 @@ void RuntimeControlService::OnConsoleCoalesce(uv_timer_t* handle) {
     auto* self = static_cast<RuntimeControlService*>(handle->data);
     self->coalesce_running_ = false;
     self->FlushConsoleData();
+    if (self->console_port_->HasPending() && self->running_) {
+        uv_timer_start(&self->console_coalesce_timer_, OnConsoleCoalesce, 20, 0);
+        self->coalesce_running_ = true;
+    }
 }
 
 static void RtcCloseWalkCb(uv_handle_t* handle, void*) {

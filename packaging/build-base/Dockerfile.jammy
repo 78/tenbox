@@ -1,0 +1,173 @@
+# TenBox release build base image.
+#
+# Pinned to Ubuntu 22.04 ("jammy") because that is the lowest glibc version
+# (2.35) we want to ship against. Building on a newer base would silently
+# raise the supported floor and break Debian 12 / Ubuntu 22.04 hosts.
+#
+# This image only carries the static dependencies and a build environment;
+# the actual tenbox sources are bind-mounted in by the release workflow.
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Toolchain + build deps. We deliberately do NOT pull libavcodec-dev /
+# libopus-dev / libyuv-dev from apt: we are about to compile static
+# replacements with our own configure flags. ca-certificates / git / curl
+# are needed to pull the upstream sources, libssl-dev stays dynamic.
+#
+# CMake comes from kitware's apt repo (jammy ships 3.22 which can't parse
+# the single-URL FetchContent_Declare blocks in the top-level
+# CMakeLists.txt — bumping to 3.24+ avoids monkey-patching every
+# FetchContent call site).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release \
+    && curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc \
+        | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main" \
+        > /etc/apt/sources.list.d/kitware.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        dpkg-dev \
+        file \
+        git \
+        gzip \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        ninja-build \
+        nasm \
+        pkg-config \
+        python3 \
+        tar \
+        xz-utils \
+        yasm \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV DEPS_PREFIX=/opt/tenbox-deps
+ENV PKG_CONFIG_PATH=$DEPS_PREFIX/lib/pkgconfig
+ENV CFLAGS="-O2 -fPIC"
+ENV CXXFLAGS="-O2 -fPIC"
+
+# Pin upstream versions so build outputs are reproducible across runs.
+ARG X264_REF=stable
+ARG OPUS_VERSION=1.5.2
+ARG LIBYUV_REF=stable
+ARG FFMPEG_VERSION=6.1.1
+# libcurl is statically linked into tenboxd. Pinning the version here
+# (instead of pulling whatever apt has) means the LLM proxy's HTTP
+# stack behaves identically across distros, and pre-empts the
+# Debian 13 libcurl4 -> libcurl4t64 rename that would otherwise force
+# every downstream user to chase the new package name.
+ARG CURL_VERSION=8.10.1
+
+WORKDIR /tmp/build
+
+# x264 (GPL): static encoder for libavcodec to wrap. tenbox is GPLv3 so
+# the static link is fine; switching to OpenH264 only makes sense if the
+# project relicenses, which is explicitly not in scope.
+RUN git clone --depth 1 --branch ${X264_REF} https://code.videolan.org/videolan/x264.git \
+    && cd x264 \
+    && ./configure --prefix=$DEPS_PREFIX --enable-static --enable-pic --disable-cli \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd .. && rm -rf x264
+
+# opus (BSD): static encoder + decoder for the Opus audio path.
+RUN curl -fsSL "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz" \
+        | tar xz \
+    && cd opus-${OPUS_VERSION} \
+    && ./configure --prefix=$DEPS_PREFIX --enable-static --disable-shared --with-pic \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd .. && rm -rf opus-${OPUS_VERSION}
+
+# libyuv (BSD): tenbox's BGRA -> YUV fast path. Upstream uses gn/ninja or
+# cmake; we go through cmake for portability and to keep the static .a in
+# the same prefix.
+#
+# CMAKE_POLICY_VERSION_MINIMUM=3.5 is required because libyuv's
+# cmake_minimum_required is older than what cmake 4 will accept by
+# default. The flag tells cmake "treat this project as if it asked for
+# at least 3.5 policy semantics" without us having to fork upstream.
+RUN git clone --depth 1 --branch ${LIBYUV_REF} https://chromium.googlesource.com/libyuv/libyuv \
+    && cmake -S libyuv -B libyuv/build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=$DEPS_PREFIX \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    && cmake --build libyuv/build --target install \
+    && rm -rf libyuv
+
+# FFmpeg: only the codecs tenbox actually uses (libx264 encode, h264
+# decode, libopus encode/decode). everything else off, static-only.
+RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+        | tar xJ \
+    && cd ffmpeg-${FFMPEG_VERSION} \
+    && ./configure \
+        --prefix=$DEPS_PREFIX \
+        --pkg-config-flags=--static \
+        --extra-cflags="-fPIC -I$DEPS_PREFIX/include" \
+        --extra-ldflags="-L$DEPS_PREFIX/lib" \
+        --enable-static --disable-shared --enable-pic \
+        --disable-everything \
+        --disable-doc --disable-programs \
+        --disable-network --disable-iconv --disable-bzlib --disable-lzma \
+        --disable-xlib --disable-vaapi --disable-vdpau \
+        --enable-protocol=file --enable-protocol=pipe \
+        --enable-muxer=null --enable-demuxer=null \
+        --enable-encoder=libx264 --enable-decoder=h264 \
+        --enable-encoder=libopus --enable-decoder=opus \
+        --enable-libx264 --enable-libopus \
+        --enable-gpl \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd .. && rm -rf ffmpeg-${FFMPEG_VERSION}
+
+# libcurl (MIT-style): tenboxd uses it only for the in-process LLM
+# proxy (llm_proxy.cpp) which forwards OpenAI-compatible JSON + SSE.
+# Static linkage means we can drop libcurl4 from the deb's Depends:
+# and avoid the Debian 13 libcurl4 -> libcurl4t64 rename that breaks
+# `apt install` on trixie/noble. We also disable every protocol /
+# codec / auth scheme tenbox doesn't use, which keeps the static
+# .a small (~700 KB) and shrinks the attack surface — fewer features
+# = fewer CVEs we have to chase via tenbox releases. TLS still defers
+# to the system's OpenSSL (libssl3/libssl3t64 stays a deb dep) so
+# CVE updates flow through the distro security team rather than us.
+RUN curl -fsSL "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" \
+        | tar xJ \
+    && cd curl-${CURL_VERSION} \
+    && ./configure \
+        --prefix=$DEPS_PREFIX \
+        --enable-static --disable-shared \
+        --with-pic \
+        --with-openssl \
+        --without-libpsl --without-zstd --without-brotli \
+        --without-libidn2 --without-librtmp --without-nghttp2 \
+        --without-libssh2 --without-libssh --without-zlib \
+        --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
+        --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
+        --disable-smb --disable-smtp --disable-gopher --disable-mqtt \
+        --disable-ftp --disable-file --disable-manual --disable-docs \
+        --disable-ntlm --disable-ntlm-wb --disable-tls-srp \
+        --disable-unix-sockets --disable-cookies --disable-progress-meter \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd .. && rm -rf curl-${CURL_VERSION}
+
+# Sanity check: every static archive we ship must actually exist.
+RUN test -f $DEPS_PREFIX/lib/libavcodec.a \
+    && test -f $DEPS_PREFIX/lib/libavformat.a \
+    && test -f $DEPS_PREFIX/lib/libavutil.a \
+    && test -f $DEPS_PREFIX/lib/libswresample.a \
+    && test -f $DEPS_PREFIX/lib/libx264.a \
+    && test -f $DEPS_PREFIX/lib/libopus.a \
+    && test -f $DEPS_PREFIX/lib/libyuv.a \
+    && test -f $DEPS_PREFIX/lib/libcurl.a
+
+WORKDIR /src

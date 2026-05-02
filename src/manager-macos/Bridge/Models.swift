@@ -44,7 +44,7 @@ struct SharedFolder: Identifiable, Codable, Equatable {
     }
 }
 
-struct PortForward: Identifiable, Codable, Equatable {
+struct HostForward: Identifiable, Codable, Equatable {
     var id: String { "\(effectiveHostIp):\(hostPort):\(guestPort)" }
     let hostPort: UInt16
     let guestPort: UInt16
@@ -76,7 +76,7 @@ struct VmInfo: Identifiable, Codable {
     let state: VmState
     let netEnabled: Bool
     let sharedFolders: [SharedFolder]
-    let portForwards: [PortForward]
+    let hostForwards: [HostForward]
     let guestForwards: [GuestForward]
     let displayScale: Int
     let debugMode: Bool
@@ -162,7 +162,7 @@ struct SharedFolderConfig: Codable, Equatable {
     }
 }
 
-struct PortForwardConfig: Codable, Equatable {
+struct HostForwardConfig: Codable, Equatable {
     var hostPort: UInt16
     var guestPort: UInt16
     var hostIp: String?
@@ -177,7 +177,7 @@ struct PortForwardConfig: Codable, Equatable {
         case lan
     }
 
-    func toPortForward() -> PortForward {
+    func toHostForward() -> HostForward {
         let resolvedHostIp: String
         if let hip = hostIp {
             resolvedHostIp = hip
@@ -186,12 +186,12 @@ struct PortForwardConfig: Codable, Equatable {
         } else {
             resolvedHostIp = "127.0.0.1"
         }
-        return PortForward(hostPort: hostPort, guestPort: guestPort,
+        return HostForward(hostPort: hostPort, guestPort: guestPort,
                            hostIp: resolvedHostIp, guestIp: guestIp ?? "")
     }
 
-    static func from(_ pf: PortForward) -> PortForwardConfig {
-        var cfg = PortForwardConfig(hostPort: pf.hostPort, guestPort: pf.guestPort)
+    static func from(_ pf: HostForward) -> HostForwardConfig {
+        var cfg = HostForwardConfig(hostPort: pf.hostPort, guestPort: pf.guestPort)
         if !pf.hostIp.isEmpty && pf.hostIp != "127.0.0.1" {
             cfg.hostIp = pf.hostIp
         }
@@ -241,7 +241,7 @@ struct VmConfig: Codable {
     var debugMode: Bool
     var displayScale: Int
     var sharedFolders: [SharedFolderConfig]
-    var portForwards: [PortForwardConfig]
+    var hostForwards: [HostForwardConfig]
     var guestForwards: [GuestForwardConfig]
 
     enum CodingKeys: String, CodingKey {
@@ -255,15 +255,25 @@ struct VmConfig: Codable {
         case debugMode = "debug_mode"
         case displayScale = "display_scale"
         case sharedFolders = "shared_folders"
-        case portForwards = "port_forwards"
+        case hostForwards = "host_forwards"
         case guestForwards = "guest_forwards"
+    }
+
+    // Legacy key accepted on decode for backward compatibility with pre-rename
+    // config.json files (which used `port_forwards` for the H->G list).
+    private struct LegacyCodingKeys: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+        static let portForwards = LegacyCodingKeys(stringValue: "port_forwards")
     }
 
     init(name: String = "", kernelPath: String = "", initrdPath: String = "",
          diskPath: String = "", memoryMb: Int = 512, cpuCount: Int = 2,
          state: String = "stopped", netEnabled: Bool = false, debugMode: Bool = false,
          displayScale: Int = 1, sharedFolders: [SharedFolderConfig] = [],
-         portForwards: [PortForwardConfig] = [], guestForwards: [GuestForwardConfig] = []) {
+         hostForwards: [HostForwardConfig] = [], guestForwards: [GuestForwardConfig] = []) {
         self.name = name
         self.kernelPath = kernelPath
         self.initrdPath = initrdPath
@@ -275,7 +285,7 @@ struct VmConfig: Codable {
         self.debugMode = debugMode
         self.displayScale = displayScale
         self.sharedFolders = sharedFolders
-        self.portForwards = portForwards
+        self.hostForwards = hostForwards
         self.guestForwards = guestForwards
     }
 
@@ -292,7 +302,14 @@ struct VmConfig: Codable {
         debugMode = try c.decodeIfPresent(Bool.self, forKey: .debugMode) ?? false
         displayScale = try c.decodeIfPresent(Int.self, forKey: .displayScale) ?? 1
         sharedFolders = try c.decodeIfPresent([SharedFolderConfig].self, forKey: .sharedFolders) ?? []
-        portForwards = try c.decodeIfPresent([PortForwardConfig].self, forKey: .portForwards) ?? []
+        // Prefer the new `host_forwards` key, falling back to the legacy
+        // `port_forwards` so pre-rename config.json files still load.
+        if let modern = try c.decodeIfPresent([HostForwardConfig].self, forKey: .hostForwards) {
+            hostForwards = modern
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            hostForwards = (try legacy.decodeIfPresent([HostForwardConfig].self, forKey: .portForwards)) ?? []
+        }
         guestForwards = try c.decodeIfPresent([GuestForwardConfig].self, forKey: .guestForwards) ?? []
     }
 
@@ -308,7 +325,7 @@ struct VmConfig: Codable {
             state: VmState(rawValue: state) ?? .stopped,
             netEnabled: netEnabled,
             sharedFolders: sharedFolders.compactMap { $0.tag.isEmpty ? nil : $0.toSharedFolder() },
-            portForwards: portForwards.map { $0.toPortForward() },
+            hostForwards: hostForwards.map { $0.toHostForward() },
             guestForwards: guestForwards.map { $0.toGuestForward() },
             displayScale: max(1, min(2, displayScale)),
             debugMode: debugMode

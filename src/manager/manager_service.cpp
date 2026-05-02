@@ -308,8 +308,8 @@ bool ManagerService::CloneVm(const std::string& vm_id, std::string* error) {
     new_spec.creation_time = static_cast<int64_t>(
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
     new_spec.last_boot_time = 0;
-    // port_forwards would conflict on host ports, so clear them
-    new_spec.port_forwards.clear();
+    // host_forwards would conflict on host ports, so clear them
+    new_spec.host_forwards.clear();
 
     settings::SaveVmManifest(new_spec);
 
@@ -388,7 +388,7 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
 
     if (patch.name) vm.spec.name = *patch.name;
     if (patch.debug_mode) vm.spec.debug_mode = *patch.debug_mode;
-    if (patch.port_forwards) vm.spec.port_forwards = *patch.port_forwards;
+    if (patch.host_forwards) vm.spec.host_forwards = *patch.host_forwards;
     if (patch.shared_folders) vm.spec.shared_folders = *patch.shared_folders;
 
     if (!running || patch.apply_on_next_boot) {
@@ -398,7 +398,7 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
 
     settings::SaveVmManifest(vm.spec);
 
-    if (running && (patch.port_forwards || patch.guest_forwards)) {
+    if (running && (patch.host_forwards || patch.guest_forwards)) {
         ipc::Message msg;
         msg.channel = ipc::Channel::kControl;
         msg.kind = ipc::Kind::kRequest;
@@ -406,10 +406,10 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
         msg.vm_id = vm_id;
         msg.request_id = GetTickCount64();
         msg.fields["link_up"] = "true";
-        msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
-        for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
+        msg.fields["forward_count"] = std::to_string(vm.spec.host_forwards.size());
+        for (size_t i = 0; i < vm.spec.host_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
-                vm.spec.port_forwards[i].ToHostfwd();
+                vm.spec.host_forwards[i].ToHostfwd();
         }
         AppendGuestFwdFields(msg, vm.spec.guest_forwards);
         SendRuntimeMessage(vm, msg);
@@ -797,10 +797,10 @@ void ManagerService::UpdateGlobalGuestForwards(std::vector<GuestForward> gfs) {
         msg.vm_id = id;
         msg.request_id = GetTickCount64();
         msg.fields["link_up"] = "true";
-        msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
-        for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
+        msg.fields["forward_count"] = std::to_string(vm.spec.host_forwards.size());
+        for (size_t i = 0; i < vm.spec.host_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
-                vm.spec.port_forwards[i].ToHostfwd();
+                vm.spec.host_forwards[i].ToHostfwd();
         }
         AppendGuestFwdFields(msg, vm.spec.guest_forwards);
         SendRuntimeMessage(vm, msg);
@@ -956,9 +956,9 @@ void ManagerService::SetGuestAgentStateCallback(GuestAgentStateCallback cb) {
     guest_agent_state_callback_ = std::move(cb);
 }
 
-void ManagerService::SetPortForwardErrorCallback(PortForwardErrorCallback cb) {
+void ManagerService::SetHostForwardErrorCallback(HostForwardErrorCallback cb) {
     std::lock_guard<std::mutex> lock(vms_mutex_);
-    port_forward_error_callback_ = std::move(cb);
+    host_forward_error_callback_ = std::move(cb);
 }
 
 bool ManagerService::IsGuestAgentConnected(const std::string& vm_id) const {
@@ -1211,7 +1211,7 @@ std::vector<SharedFolder> ManagerService::GetSharedFolders(const std::string& vm
     return vm->spec.shared_folders;
 }
 
-bool ManagerService::AddPortForward(const std::string& vm_id, const PortForward& forward,
+bool ManagerService::AddHostForward(const std::string& vm_id, const HostForward& forward,
                                      std::string* error) {
     std::lock_guard<std::mutex> lock(vms_mutex_);
     VmRecord* vmp = FindVm(vm_id);
@@ -1226,14 +1226,14 @@ bool ManagerService::AddPortForward(const std::string& vm_id, const PortForward&
         return false;
     }
 
-    for (const auto& pf : vm.spec.port_forwards) {
+    for (const auto& pf : vm.spec.host_forwards) {
         if (pf.host_port == forward.host_port) {
             if (error) *error = "host port " + std::to_string(forward.host_port) + " already in use";
             return false;
         }
     }
 
-    vm.spec.port_forwards.push_back(forward);
+    vm.spec.host_forwards.push_back(forward);
     settings::SaveVmManifest(vm.spec);
 
     if (vm.state == VmPowerState::kRunning) {
@@ -1244,10 +1244,10 @@ bool ManagerService::AddPortForward(const std::string& vm_id, const PortForward&
         msg.vm_id = vm_id;
         msg.request_id = GetTickCount64();
         msg.fields["link_up"] = "true";
-        msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
-        for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
+        msg.fields["forward_count"] = std::to_string(vm.spec.host_forwards.size());
+        for (size_t i = 0; i < vm.spec.host_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
-                vm.spec.port_forwards[i].ToHostfwd();
+                vm.spec.host_forwards[i].ToHostfwd();
         }
         AppendGuestFwdFields(msg, vm.spec.guest_forwards);
         SendRuntimeMessage(vm, msg);
@@ -1256,7 +1256,7 @@ bool ManagerService::AddPortForward(const std::string& vm_id, const PortForward&
     return true;
 }
 
-bool ManagerService::RemovePortForward(const std::string& vm_id, uint16_t host_port,
+bool ManagerService::RemoveHostForward(const std::string& vm_id, uint16_t host_port,
                                         std::string* error) {
     std::lock_guard<std::mutex> lock(vms_mutex_);
     VmRecord* vmp = FindVm(vm_id);
@@ -1266,14 +1266,14 @@ bool ManagerService::RemovePortForward(const std::string& vm_id, uint16_t host_p
     }
     VmRecord& vm = *vmp;
 
-    auto pf_it = std::find_if(vm.spec.port_forwards.begin(), vm.spec.port_forwards.end(),
-                              [host_port](const PortForward& pf) { return pf.host_port == host_port; });
-    if (pf_it == vm.spec.port_forwards.end()) {
+    auto pf_it = std::find_if(vm.spec.host_forwards.begin(), vm.spec.host_forwards.end(),
+                              [host_port](const HostForward& pf) { return pf.host_port == host_port; });
+    if (pf_it == vm.spec.host_forwards.end()) {
         if (error) *error = "port forward with host port " + std::to_string(host_port) + " not found";
         return false;
     }
 
-    vm.spec.port_forwards.erase(pf_it);
+    vm.spec.host_forwards.erase(pf_it);
     settings::SaveVmManifest(vm.spec);
 
     if (vm.state == VmPowerState::kRunning) {
@@ -1284,10 +1284,10 @@ bool ManagerService::RemovePortForward(const std::string& vm_id, uint16_t host_p
         msg.vm_id = vm_id;
         msg.request_id = GetTickCount64();
         msg.fields["link_up"] = "true";
-        msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
-        for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
+        msg.fields["forward_count"] = std::to_string(vm.spec.host_forwards.size());
+        for (size_t i = 0; i < vm.spec.host_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
-                vm.spec.port_forwards[i].ToHostfwd();
+                vm.spec.host_forwards[i].ToHostfwd();
         }
         AppendGuestFwdFields(msg, vm.spec.guest_forwards);
         SendRuntimeMessage(vm, msg);
@@ -1296,13 +1296,13 @@ bool ManagerService::RemovePortForward(const std::string& vm_id, uint16_t host_p
     return true;
 }
 
-std::vector<PortForward> ManagerService::GetPortForwards(const std::string& vm_id) const {
+std::vector<HostForward> ManagerService::GetHostForwards(const std::string& vm_id) const {
     std::lock_guard<std::mutex> lock(vms_mutex_);
     const VmRecord* vm = FindVm(vm_id);
     if (!vm) {
         return {};
     }
-    return vm->spec.port_forwards;
+    return vm->spec.host_forwards;
 }
 
 bool ManagerService::AddGuestForward(const std::string& vm_id, const GuestForward& gf,
@@ -1339,10 +1339,10 @@ bool ManagerService::AddGuestForward(const std::string& vm_id, const GuestForwar
         msg.vm_id = vm_id;
         msg.request_id = GetTickCount64();
         msg.fields["link_up"] = "true";
-        msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
-        for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
+        msg.fields["forward_count"] = std::to_string(vm.spec.host_forwards.size());
+        for (size_t i = 0; i < vm.spec.host_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
-                vm.spec.port_forwards[i].ToHostfwd();
+                vm.spec.host_forwards[i].ToHostfwd();
         }
         AppendGuestFwdFields(msg, vm.spec.guest_forwards);
         SendRuntimeMessage(vm, msg);
@@ -1381,10 +1381,10 @@ bool ManagerService::RemoveGuestForward(const std::string& vm_id, uint32_t guest
         msg.vm_id = vm_id;
         msg.request_id = GetTickCount64();
         msg.fields["link_up"] = "true";
-        msg.fields["forward_count"] = std::to_string(vm.spec.port_forwards.size());
-        for (size_t i = 0; i < vm.spec.port_forwards.size(); ++i) {
+        msg.fields["forward_count"] = std::to_string(vm.spec.host_forwards.size());
+        for (size_t i = 0; i < vm.spec.host_forwards.size(); ++i) {
             msg.fields["forward_" + std::to_string(i)] =
-                vm.spec.port_forwards[i].ToHostfwd();
+                vm.spec.host_forwards[i].ToHostfwd();
         }
         AppendGuestFwdFields(msg, vm.spec.guest_forwards);
         SendRuntimeMessage(vm, msg);
@@ -1736,15 +1736,15 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
             }
             // Build formatted strings with host_port:guest_port
             std::vector<std::string> failed_mappings;
-            PortForwardErrorCallback cb;
+            HostForwardErrorCallback cb;
             {
                 std::lock_guard<std::mutex> lock(vms_mutex_);
-                cb = port_forward_error_callback_;
+                cb = host_forward_error_callback_;
                 VmRecord* vm = FindVm(vm_id);
                 if (vm) {
                     for (uint16_t hp : failed_host_ports) {
                         uint16_t gp = hp;  // default: same as host port
-                        for (const auto& pf : vm->spec.port_forwards) {
+                        for (const auto& pf : vm->spec.host_forwards) {
                             if (pf.host_port == hp) {
                                 gp = pf.guest_port;
                                 break;
@@ -1920,7 +1920,7 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
         auto it = msg.fields.find("state");
         if (it != msg.fields.end()) {
             StateChangeCallback cb;
-            std::vector<PortForward> forwards_to_send;
+            std::vector<HostForward> forwards_to_send;
             bool send_forwards = false;
             {
                 std::lock_guard<std::mutex> lock(vms_mutex_);
@@ -1930,8 +1930,8 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
                     if (state_str == "running") {
                         vm->state = VmPowerState::kRunning;
                         // Send port forwards when VM becomes running
-                        if (!vm->spec.port_forwards.empty()) {
-                            forwards_to_send = vm->spec.port_forwards;
+                        if (!vm->spec.host_forwards.empty()) {
+                            forwards_to_send = vm->spec.host_forwards;
                             send_forwards = true;
                         }
                     } else if (state_str == "starting") {

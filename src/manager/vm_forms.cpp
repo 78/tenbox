@@ -1,7 +1,7 @@
 #include "manager/vm_forms.h"
 
 namespace {
-bool SameForwards(const std::vector<PortForward>& a, const std::vector<PortForward>& b) {
+bool SameForwards(const std::vector<HostForward>& a, const std::vector<HostForward>& b) {
     if (a.size() != b.size()) return false;
     for (size_t i = 0; i < a.size(); ++i) {
         if (a[i].host_port != b[i].host_port || a[i].guest_port != b[i].guest_port) {
@@ -33,7 +33,7 @@ ValidationResult ValidateEditForm(const VmEditForm& form, VmPowerState current_s
     const bool running = current_state == VmPowerState::kRunning ||
                          current_state == VmPowerState::kStarting;
     if (running && !form.apply_on_next_boot) {
-        return {true, "nat/port_forwards can apply online; cpu/memory requires power off"};
+        return {true, "nat/host_forwards can apply online; cpu/memory requires power off"};
     }
     return {true, ""};
 }
@@ -47,8 +47,8 @@ VmMutablePatch BuildVmPatch(const VmEditForm& form, const VmSpec& current_spec) 
     if (form.debug_mode != current_spec.debug_mode) {
         patch.debug_mode = form.debug_mode;
     }
-    if (!SameForwards(form.port_forwards, current_spec.port_forwards)) {
-        patch.port_forwards = form.port_forwards;
+    if (!SameForwards(form.host_forwards, current_spec.host_forwards)) {
+        patch.host_forwards = form.host_forwards;
     }
     if (form.memory_mb != current_spec.memory_mb) {
         patch.memory_mb = form.memory_mb;

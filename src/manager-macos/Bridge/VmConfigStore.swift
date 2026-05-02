@@ -155,7 +155,7 @@ class VmConfigStore {
 
         newConfig.name = generateCloneName(baseName: srcConfig.name)
         newConfig.state = "stopped"
-        newConfig.portForwards = []
+        newConfig.hostForwards = []
 
         let srcPrefix = srcDir.path + "/"
         let destPrefix = destDir.path + "/"
@@ -256,18 +256,18 @@ class VmConfigStore {
     // MARK: - Port Forwards
 
     @discardableResult
-    func addPortForward(_ pf: PortForward, toVm vmId: String) -> Bool {
+    func addHostForward(_ pf: HostForward, toVm vmId: String) -> Bool {
         guard var config = readConfig(vmId: vmId) else { return false }
-        if config.portForwards.contains(where: { $0.hostPort == pf.hostPort }) { return false }
-        config.portForwards.append(PortForwardConfig.from(pf))
+        if config.hostForwards.contains(where: { $0.hostPort == pf.hostPort }) { return false }
+        config.hostForwards.append(HostForwardConfig.from(pf))
         return writeConfig(vmId: vmId, config: config)
     }
 
     @discardableResult
-    func removePortForward(hostPort: UInt16, fromVm vmId: String) -> Bool {
+    func removeHostForward(hostPort: UInt16, fromVm vmId: String) -> Bool {
         guard var config = readConfig(vmId: vmId) else { return false }
-        guard let idx = config.portForwards.firstIndex(where: { $0.hostPort == hostPort }) else { return false }
-        config.portForwards.remove(at: idx)
+        guard let idx = config.hostForwards.firstIndex(where: { $0.hostPort == hostPort }) else { return false }
+        config.hostForwards.remove(at: idx)
         return writeConfig(vmId: vmId, config: config)
     }
 

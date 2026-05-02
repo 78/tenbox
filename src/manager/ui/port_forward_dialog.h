@@ -8,3 +8,4 @@
 class ManagerService;
 
 void ShowPortForwardsDialog(HWND parent, ManagerService& mgr, const std::string& vm_id);
+

@@ -6,6 +6,7 @@
         <span class="nav-name">TenBox</span>
       </a>
       <div class="nav-actions">
+        <a href="https://my.tenbox.ai/" class="nav-link">Console</a>
         <a
           href="https://github.com/78/tenbox"
           target="_blank"
@@ -107,6 +108,17 @@ onUnmounted(() => window.removeEventListener('scroll', onScroll))
   font-size: 0.875rem;
   font-weight: 600;
   transition: color var(--transition);
+}
+
+.nav-link {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: color var(--transition);
+}
+
+.nav-link:hover {
+  color: #fff;
 }
 
 .nav-github:hover {

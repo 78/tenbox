@@ -82,14 +82,18 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Enable pnpm
         if: steps.changes.outputs.website == 'true'
-        run: npm install
+        run: corepack enable
+
+      - name: Install website dependencies
+        if: steps.changes.outputs.website == 'true'
+        run: pnpm install --frozen-lockfile
         working-directory: website
 
-      - name: Build
+      - name: Build website
         if: steps.changes.outputs.website == 'true'
-        run: npm run build
+        run: pnpm run build
         working-directory: website
 
       - name: Skip notice

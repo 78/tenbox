@@ -126,18 +126,18 @@ struct AddSharedFolderSheet: View {
     }
 }
 
-struct AddPortForwardSheet: View {
+struct AddHostForwardSheet: View {
     let vmId: String
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @FocusState private var focusedField: PortForwardField?
+    @FocusState private var focusedField: HostForwardField?
 
     @State private var hostIpText = "127.0.0.1"
     @State private var hostPortText = ""
     @State private var guestIpText = "10.0.2.15"
     @State private var guestPortText = ""
 
-    private enum PortForwardField { case hostIp, hostPort, guestIp, guestPort }
+    private enum HostForwardField { case hostIp, hostPort, guestIp, guestPort }
 
     private var hostPort: UInt16? { UInt16(hostPortText) }
     private var guestPort: UInt16? { UInt16(guestPortText) }
@@ -175,7 +175,7 @@ struct AddPortForwardSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Add") { addPortForward() }
+                Button("Add") { addHostForward() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!isValid)
             }
@@ -184,10 +184,10 @@ struct AddPortForwardSheet: View {
         .frame(width: 340, height: 260)
     }
 
-    private func addPortForward() {
+    private func addHostForward() {
         guard let hp = hostPort, let gp = guestPort else { return }
-        let pf = PortForward(hostPort: hp, guestPort: gp, hostIp: hostIpText, guestIp: guestIpText)
-        appState.addPortForward(pf, toVm: vmId)
+        let pf = HostForward(hostPort: hp, guestPort: gp, hostIp: hostIpText, guestIp: guestIpText)
+        appState.addHostForward(pf, toVm: vmId)
         dismiss()
     }
 }
@@ -370,13 +370,13 @@ struct PortForwardsSheet: View {
                 .padding(.horizontal)
                 .padding(.top)
 
-                if vm.portForwards.isEmpty {
+                if vm.hostForwards.isEmpty {
                     Text("No port forwards")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        ForEach(vm.portForwards) { pf in
+                        ForEach(vm.hostForwards) { pf in
                             HStack(spacing: 8) {
                                 Image(systemName: "network")
                                     .foregroundStyle(.secondary)
@@ -390,7 +390,7 @@ struct PortForwardsSheet: View {
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 Button(role: .destructive) {
-                                    appState.removePortForward(hostPort: pf.hostPort, fromVm: vmId)
+                                    appState.removeHostForward(hostPort: pf.hostPort, fromVm: vmId)
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
@@ -456,7 +456,7 @@ struct PortForwardsSheet: View {
         }
         .frame(width: 460, height: 480)
         .sheet(isPresented: $showAddPfSheet) {
-            AddPortForwardSheet(vmId: vmId)
+            AddHostForwardSheet(vmId: vmId)
         }
         .sheet(isPresented: $showAddGfSheet) {
             AddGuestForwardSheet(vmId: vmId)

@@ -200,9 +200,9 @@ int main(int argc, char* argv[]) {
             config.debug_mode = true;
         } else if (Arg("--hostfwd")) {
             auto v = NextArg(); if (!v) return 1;
-            PortForward pf;
-            if (PortForward::FromHostfwd(v, pf)) {
-                config.port_forwards.push_back(pf);
+            HostForward pf;
+            if (HostForward::FromHostfwd(v, pf)) {
+                config.host_forwards.push_back(pf);
             } else {
                 fprintf(stderr, "Invalid --hostfwd format: %s\n"
                         "  Expected: tcp:ADDR:HPORT-:GPORT  (e.g. tcp:127.0.0.1:8080-:80)\n", v);

@@ -2,7 +2,7 @@
 #include "manager/ui/dlg_builder.h"
 #include "manager/i18n.h"
 #include "manager/app_settings.h"
-#include "manager/image_source.h"
+#include "common/image_source.h"
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN

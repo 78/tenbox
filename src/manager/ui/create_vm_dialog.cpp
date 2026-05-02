@@ -3,7 +3,7 @@
 #include "manager/i18n.h"
 #include "manager/vm_forms.h"
 #include "manager/app_settings.h"
-#include "manager/image_source.h"
+#include "common/image_source.h"
 #include "manager/http_download.h"
 #include "version.h"
 

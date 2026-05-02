@@ -2,6 +2,7 @@
 #include "core/vmm/types.h"
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -83,6 +84,10 @@ std::string UnixSocketConnection::ReadLine() {
     }
 }
 
+bool UnixSocketConnection::HasBufferedLine() const {
+    return line_buffer_.find('\n') != std::string::npos;
+}
+
 bool UnixSocketConnection::ReadExact(void* buf, size_t len) {
     uint8_t* p = static_cast<uint8_t*>(buf);
     size_t remaining = len;
@@ -153,6 +158,13 @@ bool UnixSocketServer::Listen(const std::string& path) {
         return false;
     }
 
+    struct stat st{};
+    if (::fstat(fd, &st) == 0) {
+        bound_inode_ = static_cast<uint64_t>(st.st_ino);
+    } else {
+        bound_inode_ = 0;
+    }
+
     listen_fd_ = fd;
     path_ = path;
     LOG_INFO("ipc: listening on %s", path.c_str());
@@ -165,7 +177,7 @@ UnixSocketConnection UnixSocketServer::Accept() {
         LOG_ERROR("ipc: accept() failed: %s", strerror(errno));
         return UnixSocketConnection(-1);
     }
-    LOG_INFO("ipc: client connected");
+    LOG_DEBUG("ipc: client connected");
     return UnixSocketConnection(client_fd);
 }
 
@@ -175,8 +187,19 @@ void UnixSocketServer::Close() {
         listen_fd_ = -1;
     }
     if (!path_.empty()) {
-        ::unlink(path_.c_str());
+        // Only unlink the path if it still names the socket file we created
+        // in Listen(). If a different listener has rebound the same path
+        // (e.g. a fresh RuntimeSession after a guest reboot reusing the
+        // per-vm socket name), unlinking would yank the new listener's
+        // socket and break clients trying to connect.
+        struct stat st{};
+        if (bound_inode_ != 0 &&
+            ::stat(path_.c_str(), &st) == 0 &&
+            static_cast<uint64_t>(st.st_ino) == bound_inode_) {
+            ::unlink(path_.c_str());
+        }
         path_.clear();
+        bound_inode_ = 0;
     }
 }
 
@@ -204,7 +227,7 @@ UnixSocketConnection UnixSocketClient::Connect(const std::string& path) {
         return UnixSocketConnection(-1);
     }
 
-    LOG_INFO("ipc: connected to %s", path.c_str());
+    LOG_DEBUG("ipc: connected to %s", path.c_str());
     return UnixSocketConnection(fd);
 }
 

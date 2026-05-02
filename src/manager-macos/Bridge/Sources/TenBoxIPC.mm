@@ -662,8 +662,8 @@ static std::string HexDecode(const std::string& hex) {
             IPC_DEBUG_LOG(@"[IPC] << %s runtime.update_network.result FAILED ports: %@",
                           GetTimestamp().c_str(), failedPorts);
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (self->_portForwardErrorHandler) {
-                    self->_portForwardErrorHandler([failedPorts copy]);
+                if (self->_hostForwardErrorHandler) {
+                    self->_hostForwardErrorHandler([failedPorts copy]);
                 }
             });
         }

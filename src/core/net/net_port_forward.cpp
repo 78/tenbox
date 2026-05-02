@@ -19,10 +19,10 @@ extern "C" {
 // Setup / teardown
 // ============================================================
 
-std::vector<uint16_t> NetBackend::SetupPortForwards() {
+std::vector<uint16_t> NetBackend::SetupHostForwards() {
     std::vector<uint16_t> failed_ports;
 
-    for (auto& pf : port_forwards_) {
+    for (auto& pf : host_forwards_) {
         SocketHandle s = socket(AF_INET, SOCK_STREAM, 0);
         if (s == SOCK_INVALID) {
             LOG_ERROR("Port forward: failed to create listener for port %u", pf.host_port);
@@ -69,8 +69,8 @@ std::vector<uint16_t> NetBackend::SetupPortForwards() {
     return failed_ports;
 }
 
-void NetBackend::TeardownPortForwards() {
-    for (auto& pf : port_forwards_) {
+void NetBackend::TeardownHostForwards() {
+    for (auto& pf : host_forwards_) {
         pf.listener_poll.Close();
         if (pf.listener != ~(uintptr_t)0) {
             SOCK_CLOSE(static_cast<SocketHandle>(pf.listener));
@@ -93,7 +93,7 @@ void NetBackend::TeardownPortForwards() {
         }
     }
     auto all_polls_closed = [this]() {
-        for (const auto& pf : port_forwards_) {
+        for (const auto& pf : host_forwards_) {
             if (pf.listener_poll.inited() && !pf.listener_poll.closed())
                 return false;
             for (const auto& c : pf.conns) {
@@ -105,14 +105,14 @@ void NetBackend::TeardownPortForwards() {
     };
     while (!all_polls_closed())
         uv_run(&loop_, UV_RUN_NOWAIT);
-    for (auto& pf : port_forwards_)
+    for (auto& pf : host_forwards_)
         pf.conns.clear();
-    port_forwards_.clear();
+    host_forwards_.clear();
 }
 
 void NetBackend::CheckPendingUpdates() {
-    std::optional<std::vector<PortForward>> update;
-    PortForwardCallback cb;
+    std::optional<std::vector<HostForward>> update;
+    HostForwardCallback cb;
     {
         std::lock_guard<std::mutex> lock(pf_update_mutex_);
         if (pending_pf_update_) {
@@ -122,16 +122,16 @@ void NetBackend::CheckPendingUpdates() {
         }
     }
     if (update) {
-        TeardownPortForwards();
+        TeardownHostForwards();
         for (const auto& f : *update) {
-            port_forwards_.emplace_back();
-            auto& pf = port_forwards_.back();
+            host_forwards_.emplace_back();
+            auto& pf = host_forwards_.back();
             pf.backend = this;
             pf.host_port = f.host_port;
             pf.guest_port = f.guest_port;
             pf.host_ip = f.host_ip;
         }
-        auto failed = SetupPortForwards();
+        auto failed = SetupHostForwards();
         LOG_INFO("Port forwards updated (%zu entries, %zu failed)",
                  update->size(), failed.size());
 

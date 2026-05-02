@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common/vm_model.h"
-#include "manager/image_source.h"
+#include "common/image_source.h"
 
 #include <cstdint>
 #include <string>

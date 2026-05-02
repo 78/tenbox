@@ -188,6 +188,16 @@ std::vector<std::string> VirtioFsDevice::GetShareTags() const {
     return tags;
 }
 
+std::vector<ShareInfo> VirtioFsDevice::GetShares() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<ShareInfo> result;
+    result.reserve(shares_.size());
+    for (const auto& [_, info] : shares_) {
+        result.push_back(info);
+    }
+    return result;
+}
+
 bool VirtioFsDevice::HasShare(const std::string& tag) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return shares_.find(tag) != shares_.end();

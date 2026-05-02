@@ -243,4 +243,53 @@ private:
     int32_t cursor_y_ = 0;
     uint32_t cursor_hot_x_ = 0;
     uint32_t cursor_hot_y_ = 0;
+
+    // Snapshot of what we last delivered through `cursor_callback_`. Guests
+    // (notably the Linux virtio_gpu driver) re-emit MOVE_CURSOR every vblank
+    // even while the pointer is stationary, so without this dedup we would
+    // re-encode and re-send identical frames at the display refresh rate.
+    // UPDATE_CURSOR always passes through because the same resource_id can
+    // carry freshly re-uploaded pixels via TRANSFER_TO_HOST_2D.
+    struct LastEmittedCursor {
+        bool valid = false;
+        int32_t x = 0;
+        int32_t y = 0;
+        uint32_t hot_x = 0;
+        uint32_t hot_y = 0;
+        uint32_t resource_id = 0;
+        bool visible = false;
+
+        // True when the new state matches what we already pushed downstream;
+        // in that case the caller can drop the event entirely.
+        bool MatchesMove(int32_t new_x,
+                         int32_t new_y,
+                         uint32_t new_hot_x,
+                         uint32_t new_hot_y,
+                         uint32_t new_resource_id,
+                         bool new_visible) const {
+            return valid &&
+                   x == new_x &&
+                   y == new_y &&
+                   hot_x == new_hot_x &&
+                   hot_y == new_hot_y &&
+                   resource_id == new_resource_id &&
+                   visible == new_visible;
+        }
+
+        void Update(int32_t new_x,
+                    int32_t new_y,
+                    uint32_t new_hot_x,
+                    uint32_t new_hot_y,
+                    uint32_t new_resource_id,
+                    bool new_visible) {
+            valid = true;
+            x = new_x;
+            y = new_y;
+            hot_x = new_hot_x;
+            hot_y = new_hot_y;
+            resource_id = new_resource_id;
+            visible = new_visible;
+        }
+    };
+    LastEmittedCursor last_emitted_cursor_;
 };

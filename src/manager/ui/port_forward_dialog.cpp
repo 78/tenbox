@@ -159,7 +159,7 @@ static void PfRefreshList(PfDlgData* data) {
     HWND lv = data->listview;
     ListView_DeleteAllItems(lv);
 
-    auto forwards = data->mgr->GetPortForwards(data->vm_id);
+    auto forwards = data->mgr->GetHostForwards(data->vm_id);
     for (size_t i = 0; i < forwards.size(); ++i) {
         const auto& pf = forwards[i];
         std::string host_part = pf.EffectiveHostIp() + ":" + std::to_string(pf.host_port);
@@ -359,14 +359,14 @@ static INT_PTR CALLBACK AddPfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 return TRUE;
             }
 
-            PortForward pf;
+            HostForward pf;
             pf.host_ip = hip_str;
             pf.host_port = static_cast<uint16_t>(host_port);
             pf.guest_ip = gip_str;
             pf.guest_port = static_cast<uint16_t>(guest_port);
 
             std::string error;
-            if (data->mgr->AddPortForward(data->vm_id, pf, &error)) {
+            if (data->mgr->AddHostForward(data->vm_id, pf, &error)) {
                 data->added = true;
                 EndDialog(dlg, IDOK);
             } else {
@@ -385,7 +385,7 @@ static INT_PTR CALLBACK AddPfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     return FALSE;
 }
 
-static bool ShowAddPortForwardDialog(HWND parent, ManagerService& mgr, const std::string& vm_id) {
+static bool ShowAddHostForwardDialog(HWND parent, ManagerService& mgr, const std::string& vm_id) {
     using S = i18n::S;
     DlgBuilder b;
     int W = 220, H = 120;
@@ -508,7 +508,7 @@ static INT_PTR CALLBACK PfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case IDC_PF_ADD:
-            if (ShowAddPortForwardDialog(dlg, *data->mgr, data->vm_id)) {
+            if (ShowAddHostForwardDialog(dlg, *data->mgr, data->vm_id)) {
                 PfRefreshList(data);
                 PfUpdateButtons(dlg, data->listview);
             }
@@ -517,7 +517,7 @@ static INT_PTR CALLBACK PfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         case IDC_PF_OPEN: {
             int sel = ListView_GetNextItem(data->listview, -1, LVNI_SELECTED);
             if (sel >= 0) {
-                auto forwards = data->mgr->GetPortForwards(data->vm_id);
+                auto forwards = data->mgr->GetHostForwards(data->vm_id);
                 if (sel < static_cast<int>(forwards.size())) {
                     std::string url_str = "http://" + forwards[sel].EffectiveHostIp() +
                                          ":" + std::to_string(forwards[sel].host_port) +
@@ -537,7 +537,7 @@ static INT_PTR CALLBACK PfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 return TRUE;
             }
 
-            auto forwards = data->mgr->GetPortForwards(data->vm_id);
+            auto forwards = data->mgr->GetHostForwards(data->vm_id);
             if (sel >= static_cast<int>(forwards.size()))
                 return TRUE;
 
@@ -550,7 +550,7 @@ static INT_PTR CALLBACK PfDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                     i18n::tr_w(i18n::S::kPfConfirmRemoveTitle).c_str(),
                     MB_YESNO | MB_ICONQUESTION) == IDYES) {
                 std::string error;
-                if (data->mgr->RemovePortForward(data->vm_id, host_port, &error)) {
+                if (data->mgr->RemoveHostForward(data->vm_id, host_port, &error)) {
                     PfRefreshList(data);
                     PfUpdateButtons(dlg, data->listview);
                 } else {

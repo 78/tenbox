@@ -1,11 +1,15 @@
-build/
+/build/
+/build-*/
+/tenbox-cloud/
 /out/
 /tmp/
 /scripts/1/
+/dist/
 .deps/
 .wix/
 .vs/
 .vscode/
+.cursor/
 .build*/
 .DS_Store
 *.obj
@@ -21,5 +25,5 @@ scripts/.signing_sha1
 CMakePresets.json
 
 # Website
-website/node_modules/
-website/dist/
+/website/node_modules/
+/website/dist/

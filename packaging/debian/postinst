@@ -1,0 +1,44 @@
+#!/bin/sh
+# Reload systemd so the freshly-installed unit file takes effect, then
+# bounce tenboxd if it is currently enabled. The bounce is the linchpin
+# of the host.update flow: the daemon shell calls `apt-get install` and
+# returns control; `deb-systemd-invoke restart` then sends SIGTERM to
+# the old daemon so the new one comes up under systemd's supervision.
+#
+# We do not auto-start an unenabled service: a fresh install runs the
+# enable step from scripts/install-linux.sh after dropping
+# /etc/tenbox/tenboxd.env, which is the only point where we know the
+# operator wants the daemon active.
+
+set -e
+
+case "$1" in
+    configure)
+        # Create the `tenbox` system group. The unix socket at
+        # /run/tenbox/tenbox.sock is chgrp'd to this group + chmod 0660,
+        # so any human added to the group can run `tenbox vm ls` etc.
+        # without sudo. Mirrors the libvirt / docker / podman model.
+        if ! getent group tenbox >/dev/null; then
+            addgroup --system tenbox
+        fi
+
+        # Create the `tenbox` system user too, for a future drop-priv
+        # step where tenboxd no longer runs as root. Today the unit
+        # still runs as root (KVM ioctls, /dev/kvm group is usually
+        # `kvm` not us, and we touch /etc/apt during self-update), so
+        # this user is reserved but unused. Created early so /var/lib
+        # ownership migrations don't have to happen later.
+        if ! getent passwd tenbox >/dev/null; then
+            adduser --system --no-create-home --ingroup tenbox \
+                    --home /var/lib/tenbox --shell /usr/sbin/nologin \
+                    tenbox
+        fi
+
+        systemctl daemon-reload || true
+        if systemctl is-enabled --quiet tenboxd 2>/dev/null; then
+            deb-systemd-invoke restart tenboxd || true
+        fi
+        ;;
+esac
+
+exit 0

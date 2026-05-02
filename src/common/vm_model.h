@@ -5,7 +5,10 @@
 #include <string>
 #include <vector>
 
-struct PortForward {
+// Host-initiated forwarding: host listens on host_ip:host_port, traffic is
+// forwarded to guest_ip:guest_port inside the VM. Maps 1:1 to QEMU hostfwd.
+// Pairs with `GuestForward` (the reverse direction).
+struct HostForward {
     uint16_t host_port;
     uint16_t guest_port;
     std::string host_ip;    // empty or "127.0.0.1" = loopback, "0.0.0.0" = LAN
@@ -27,7 +30,7 @@ struct PortForward {
 
     // Parse hostfwd-style string. Returns true on success.
     // Accepts: "tcp:ADDR:HP-[GADDR]:GP" (full) or "HP:GP" / "HP:GP:L" (legacy)
-    static bool FromHostfwd(const char* s, PortForward& out) {
+    static bool FromHostfwd(const char* s, HostForward& out) {
         out = {};
         if (!s || !*s) return false;
 
@@ -246,7 +249,7 @@ struct VmSpec {
     bool nat_enabled = true;
     bool debug_mode = false;
     bool dpi_scaled = false;  // true = apply DPI scaling (lower VM res, larger text), false = 1:1 physical pixels
-    std::vector<PortForward> port_forwards;
+    std::vector<HostForward> host_forwards;
     std::vector<GuestForward> guest_forwards;
     std::vector<SharedFolder> shared_folders;
     int64_t creation_time = 0;   // Unix timestamp (seconds since epoch), 0 = not set
@@ -256,7 +259,7 @@ struct VmSpec {
 struct VmMutablePatch {
     std::optional<std::string> name;
     std::optional<bool> debug_mode;
-    std::optional<std::vector<PortForward>> port_forwards;
+    std::optional<std::vector<HostForward>> host_forwards;
     std::optional<std::vector<GuestForward>> guest_forwards;
     std::optional<std::vector<SharedFolder>> shared_folders;
     std::optional<uint64_t> memory_mb;

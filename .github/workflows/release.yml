@@ -1,0 +1,153 @@
+name: Release Build
+
+# Cuts an amd64 + arm64 .deb on every `vX.Y.Z` tag push and uploads them
+# to the matching GitHub Release. This is the head of the linux update
+# pipeline: the tenbox-cloud sync timer pulls these debs into the apt
+# repo, the console then offers in-browser upgrades to all paired hosts.
+#
+# IMPORTANT: the runners are pinned to ubuntu-22.04 / ubuntu-22.04-arm,
+# NOT ubuntu-latest. The static build base image is ubuntu:22.04 (glibc
+# 2.35) and the binary's effective glibc floor is whatever the build
+# host bundles. Switching to noble would silently bump the floor to
+# 2.39 and break Debian 12 / Ubuntu 22.04 hosts. Do not "modernize" the
+# runner without also bumping the supported matrix everywhere else
+# (release notes, install-linux.sh preflight, releases.json, console).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.7.6). Must match VERSION."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    name: Build .deb (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04,     arch: amd64 }
+          - { runner: ubuntu-22.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag and validate VERSION
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              tag="${{ inputs.tag }}"
+          else
+              tag="${GITHUB_REF_NAME}"
+          fi
+          version="$(cat VERSION | head -n1 | tr -d '[:space:]')"
+          if [ "v${version}" != "${tag}" ]; then
+              echo "::error ::tag ${tag} does not match VERSION (${version})."
+              echo "       update VERSION before tagging."
+              exit 1
+          fi
+          echo "tag=${tag}"          >> "$GITHUB_OUTPUT"
+          echo "version=${version}"  >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build static-deps base image
+        uses: docker/build-push-action@v5
+        with:
+          context: packaging/build-base
+          file: packaging/build-base/Dockerfile.jammy
+          tags: tenbox-build:jammy-${{ matrix.arch }}
+          load: true
+          # Cache the heavy ffmpeg/x264/opus/libyuv compile across runs;
+          # only invalidates when packaging/build-base/ actually changes.
+          cache-from: type=gha,scope=build-base-${{ matrix.arch }}
+          cache-to: type=gha,scope=build-base-${{ matrix.arch }},mode=max
+
+      - name: Compile tenbox (static)
+        run: |
+          set -euo pipefail
+          docker run --rm \
+              -v "${{ github.workspace }}:/src" \
+              -w /src \
+              tenbox-build:jammy-${{ matrix.arch }} \
+              bash -lc '
+                  set -euo pipefail
+                  cmake -B build -G Ninja \
+                      -DCMAKE_BUILD_TYPE=Release \
+                      -DTENBOX_STATIC_FFMPEG=ON
+                  cmake --build build --parallel
+                  strip build/tenbox build/tenboxd build/tenbox-vm-runtime
+              '
+
+      - name: Build .deb
+        run: |
+          packaging/debian/build-deb.sh \
+              "${{ matrix.arch }}" \
+              "${{ steps.ver.outputs.version }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenbox-deb-${{ matrix.arch }}
+          path: |
+            dist/tenbox_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb
+            dist/tenbox_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb.sha256
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-deb
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              tag="${{ inputs.tag }}"
+          else
+              tag="${GITHUB_REF_NAME}"
+          fi
+          version="${tag#v}"
+          echo "tag=${tag}"         >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Download deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: tenbox-deb-*
+          merge-multiple: true
+
+      # The marketing-site shim at website/public/install.sh fetches
+      # install-linux.sh from each Release's download URL, so attach the
+      # canonical script here. Updating the installer means cutting a new
+      # release - exactly what scripts/install-linux.sh's header documents.
+      - name: Stage install-linux.sh
+        run: |
+          install -m 0755 scripts/install-linux.sh dist/install-linux.sh
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: TenBox ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/tenbox_${{ steps.ver.outputs.version }}_amd64.deb
+            dist/tenbox_${{ steps.ver.outputs.version }}_amd64.deb.sha256
+            dist/tenbox_${{ steps.ver.outputs.version }}_arm64.deb
+            dist/tenbox_${{ steps.ver.outputs.version }}_arm64.deb.sha256
+            dist/install-linux.sh

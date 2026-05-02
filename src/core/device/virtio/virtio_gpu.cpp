@@ -238,13 +238,23 @@ void VirtioGpuDevice::ProcessCursorQueue(VirtQueue& vq) {
                     cursor_hot_y_ = cmd->hot_y;
                 }
 
-                if (cursor_callback_) {
+                const bool visible = (cursor_resource_id_ != 0);
+                // Skip duplicate MOVE_CURSORs. Always pass UPDATE_CURSOR
+                // through because the same resource_id can carry freshly
+                // re-uploaded pixels.
+                const bool dedup_skip = !is_update &&
+                    last_emitted_cursor_.MatchesMove(
+                        cursor_x_, cursor_y_,
+                        cursor_hot_x_, cursor_hot_y_,
+                        cursor_resource_id_, visible);
+
+                if (!dedup_skip && cursor_callback_) {
                     CursorInfo info;
                     info.x = cursor_x_;
                     info.y = cursor_y_;
                     info.hot_x = cursor_hot_x_;
                     info.hot_y = cursor_hot_y_;
-                    info.visible = (cursor_resource_id_ != 0);
+                    info.visible = visible;
                     info.image_updated = is_update;
 
                     if (is_update && cursor_resource_id_ != 0) {
@@ -258,6 +268,10 @@ void VirtioGpuDevice::ProcessCursorQueue(VirtQueue& vq) {
                     }
 
                     cursor_callback_(info);
+                    last_emitted_cursor_.Update(
+                        cursor_x_, cursor_y_,
+                        cursor_hot_x_, cursor_hot_y_,
+                        cursor_resource_id_, visible);
                 }
             }
         }

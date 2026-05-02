@@ -4,9 +4,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface TBIpcClient : NSObject
 
-/// Called on main thread when runtime reports port forward bind failures.
+/// Called on main thread when runtime reports host-forward bind failures.
 /// Each string is a host port that failed (e.g. "22").
-@property (nonatomic, copy, nullable) void (^portForwardErrorHandler)(NSArray<NSString *> *failedPorts);
+@property (nonatomic, copy, nullable) void (^hostForwardErrorHandler)(NSArray<NSString *> *failedPorts);
 
 - (BOOL)connectToVm:(NSString *)vmId;
 - (BOOL)attachToFd:(int)fd;

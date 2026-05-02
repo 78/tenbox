@@ -1,0 +1,42 @@
+[Unit]
+Description=TenBox daemon
+Documentation=https://tenbox.ai
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Operator-editable defaults: TENBOX_CLOUD_URL / TENBOX_DATA_DIR.
+# Marked optional (`-`) so a fresh install without /etc/tenbox/tenboxd.env
+# falls back to the daemon's compile-time defaults instead of failing to
+# start. The installer at scripts/install-linux.sh writes this file.
+EnvironmentFile=-/etc/tenbox/tenboxd.env
+ExecStart=/usr/local/bin/tenboxd \
+    --data-dir ${TENBOX_DATA_DIR} \
+    --runtime /usr/local/bin/tenbox-vm-runtime \
+    --socket /run/tenbox/tenbox.sock \
+    --cloud-url ${TENBOX_CLOUD_URL}
+Restart=on-failure
+RestartSec=2
+# /run/tenbox/ is world-traversable (0755) so any user can stat the
+# socket inside it. The actual access control sits on the socket
+# file itself, which the daemon chmods to 0660 + chgrp'd to `tenbox`
+# right after Listen() succeeds (systemd's RuntimeDirectory* options
+# apply only to the directory, not to descendants the daemon creates
+# inside). Same model as libvirt's /var/run/libvirt/ and docker's
+# /var/run/docker.sock — letting non-group-members at least see that
+# the socket exists keeps error messages honest ("permission denied"
+# rather than "no such file"), which matters for our CLI fallback
+# logic in client.cpp:DefaultSocketPath().
+RuntimeDirectory=tenbox
+RuntimeDirectoryMode=0755
+StateDirectory=tenbox
+# Tells the daemon which group to chgrp the socket to. Read from
+# the daemon's own getenv() rather than via systemd's Group= because
+# we still need to run as root for /dev/kvm + apt self-update.
+Environment=TENBOX_SOCKET_GROUP=tenbox
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

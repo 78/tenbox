@@ -144,7 +144,7 @@ class AppState: ObservableObject {
     @Published var showSharedFoldersSheet = false
     @Published var showPortForwardsSheet = false
     @Published var startVmError: String?
-    @Published var portForwardError: String?
+    @Published var hostForwardError: String?
     @Published var llmMappings: [LlmModelMapping] = []
     @Published var llmLoggingEnabled = false
 
@@ -275,18 +275,18 @@ class AppState: ObservableObject {
         session.onRuntimeRunning = { [weak self] in
             self?.sendNetworkUpdateIfRunning(vmId: vmId)
         }
-        session.ipcClient.onPortForwardError = { [weak self] failedPorts in
+        session.ipcClient.onHostForwardError = { [weak self] failedPorts in
             guard let self = self, !failedPorts.isEmpty else { return }
             let vm = self.vms.first(where: { $0.id == vmId })
             let mappings = failedPorts.map { hostPort -> String in
                 if let hp = UInt16(hostPort),
-                   let pf = vm?.portForwards.first(where: { $0.hostPort == hp }) {
+                   let pf = vm?.hostForwards.first(where: { $0.hostPort == hp }) {
                     return "\(hp) → \(pf.guestPort)"
                 }
                 return hostPort
             }
             let list = mappings.map { "  • \($0)" }.joined(separator: "\n")
-            self.portForwardError = "The following port forward(s) failed to bind:\n\(list)\n\nThe host port(s) may already be in use."
+            self.hostForwardError = "The following host forward(s) failed to bind:\n\(list)\n\nThe host port(s) may already be in use."
         }
         sessionCancellables[vmId] = session.objectWillChange
             .receive(on: RunLoop.main)
@@ -429,14 +429,14 @@ class AppState: ObservableObject {
         sendSharedFoldersUpdateIfRunning(vmId: vmId)
     }
 
-    func addPortForward(_ pf: PortForward, toVm vmId: String) {
-        _ = bridge.addPortForward(pf, toVm: vmId)
+    func addHostForward(_ pf: HostForward, toVm vmId: String) {
+        _ = bridge.addHostForward(pf, toVm: vmId)
         refreshVmList()
         sendNetworkUpdateIfRunning(vmId: vmId)
     }
 
-    func removePortForward(hostPort: UInt16, fromVm vmId: String) {
-        _ = bridge.removePortForward(hostPort: hostPort, fromVm: vmId)
+    func removeHostForward(hostPort: UInt16, fromVm vmId: String) {
+        _ = bridge.removeHostForward(hostPort: hostPort, fromVm: vmId)
         refreshVmList()
         sendNetworkUpdateIfRunning(vmId: vmId)
     }
@@ -567,7 +567,7 @@ class AppState: ObservableObject {
     func sendNetworkUpdateIfRunning(vmId: String) {
         guard let session = activeSessions[vmId], session.ipcClient.isConnected,
               let vm = vms.first(where: { $0.id == vmId }) else { return }
-        let hostfwdEntries = vm.portForwards.map { pf in
+        let hostfwdEntries = vm.hostForwards.map { pf in
             "tcp:\(pf.effectiveHostIp):\(pf.hostPort)-\(pf.effectiveGuestIp):\(pf.guestPort)"
         }
         var guestfwdEntries = vm.guestForwards.map { gf in

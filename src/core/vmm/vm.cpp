@@ -182,7 +182,7 @@ std::unique_ptr<Vm> Vm::Create(const VmConfig& config) {
         if (!vm->SetupVirtioBlk(config.disk_path, slots[0])) return nullptr;
     }
 
-    if (!vm->SetupVirtioNet(config.net_link_up, config.port_forwards, config.guest_forwards, slots[1]))
+    if (!vm->SetupVirtioNet(config.net_link_up, config.host_forwards, config.guest_forwards, slots[1]))
         return nullptr;
 
     if (!vm->SetupVirtioInput(slots[2], slots[3])) return nullptr;
@@ -555,7 +555,7 @@ bool Vm::SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& sl
     return true;
 }
 
-bool Vm::SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
+bool Vm::SetupVirtioNet(bool link_up, const std::vector<HostForward>& forwards,
                         const std::vector<GuestForward>& guest_forwards,
                         const VirtioDeviceSlot& slot) {
     net_backend_ = std::make_unique<NetBackend>();
@@ -928,10 +928,10 @@ void Vm::SetNetLinkUp(bool up) {
     if (net_backend_) net_backend_->SetLinkUp(up);
 }
 
-void Vm::UpdatePortForwards(const std::vector<PortForward>& forwards,
-                             PortForwardCallback cb) {
+void Vm::UpdateHostForwards(const std::vector<HostForward>& forwards,
+                             HostForwardCallback cb) {
     if (net_backend_) {
-        net_backend_->UpdatePortForwards(forwards, std::move(cb));
+        net_backend_->UpdateHostForwards(forwards, std::move(cb));
     } else if (cb) {
         cb({});
     }
@@ -1034,6 +1034,23 @@ std::vector<std::string> Vm::GetSharedFolderTags() const {
         return {};
     }
     return virtio_fs_->GetShareTags();
+}
+
+std::vector<VmSharedFolder> Vm::GetSharedFolders() const {
+    if (!virtio_fs_) {
+        return {};
+    }
+    auto shares = virtio_fs_->GetShares();
+    std::vector<VmSharedFolder> result;
+    result.reserve(shares.size());
+    for (const auto& s : shares) {
+        VmSharedFolder f;
+        f.tag = s.tag;
+        f.host_path = s.host_path;
+        f.readonly = s.readonly;
+        result.push_back(std::move(f));
+    }
+    return result;
 }
 
 bool Vm::IsGuestAgentConnected() const {

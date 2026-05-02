@@ -68,4 +68,13 @@ bool LoadImageMeta(const std::string& cache_dir, ImageEntry& entry);
 // Compare version strings (returns -1 if a < b, 0 if a == b, 1 if a > b)
 int CompareVersions(const std::string& a, const std::string& b);
 
+// Sweep `images_dir` for stale download leftovers and remove them. A cache
+// subdirectory is considered stale if (a) it has no `image.json` (the
+// downloader writes the manifest only after every file lands), or (b) the
+// directory contains any `*.tmp` shards (a previous download was killed
+// before rename). Used at daemon startup so a hard-killed tenboxd does not
+// silently accumulate half-finished images on disk. Returns the number of
+// directories removed.
+size_t CleanupStaleImageCache(const std::string& images_dir);
+
 }  // namespace image_source

@@ -1,4 +1,4 @@
-#include "manager/image_source.h"
+#include "common/image_source.h"
 
 #include <nlohmann/json.hpp>
 
@@ -228,6 +228,46 @@ bool LoadImageMeta(const std::string& cache_dir, ImageEntry& entry) {
 
     entry = std::move(images[0]);
     return true;
+}
+
+size_t CleanupStaleImageCache(const std::string& images_dir) {
+    std::error_code ec;
+    if (!fs::exists(images_dir, ec) || !fs::is_directory(images_dir, ec)) {
+        return 0;
+    }
+
+    size_t removed = 0;
+    for (const auto& entry : fs::directory_iterator(images_dir, ec)) {
+        if (ec) break;
+        if (!entry.is_directory()) continue;
+
+        const auto dir = entry.path();
+        bool is_stale = false;
+
+        // Missing manifest: the downloader writes image.json only after all
+        // files have been renamed into place, so its absence means the
+        // previous download was killed mid-flight.
+        if (!fs::exists(dir / "image.json", ec)) {
+            is_stale = true;
+        } else {
+            // Manifest is present but orphan `.tmp` shards survived a crash.
+            for (const auto& child : fs::directory_iterator(dir, ec)) {
+                if (ec) break;
+                if (child.is_regular_file() &&
+                    child.path().extension() == ".tmp") {
+                    is_stale = true;
+                    break;
+                }
+            }
+        }
+
+        if (is_stale) {
+            std::error_code rm_ec;
+            fs::remove_all(dir, rm_ec);
+            if (!rm_ec) ++removed;
+        }
+    }
+    return removed;
 }
 
 }  // namespace image_source

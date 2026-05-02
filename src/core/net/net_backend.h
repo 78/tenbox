@@ -28,15 +28,15 @@ public:
 
     bool Start(VirtioNetDevice* dev,
                std::function<void()> irq_cb,
-               const std::vector<PortForward>& forwards,
+               const std::vector<HostForward>& forwards,
                const std::vector<GuestForward>& guest_forwards = {});
     void Stop();
 
     void SetLinkUp(bool up);
 
-    using PortForwardCallback = std::function<void(std::vector<uint16_t> failed_ports)>;
-    void UpdatePortForwards(const std::vector<PortForward>& forwards,
-                            PortForwardCallback cb = nullptr);
+    using HostForwardCallback = std::function<void(std::vector<uint16_t> failed_ports)>;
+    void UpdateHostForwards(const std::vector<HostForward>& forwards,
+                            HostForwardCallback cb = nullptr);
 
     void UpdateGuestForwards(const std::vector<GuestForward>& guest_forwards);
 
@@ -113,7 +113,7 @@ private:
     bool icmp_poll_active_ = false;
 #endif
 
-    std::vector<uint16_t> SetupPortForwards();
+    std::vector<uint16_t> SetupHostForwards();
 
     VirtioNetDevice* virtio_net_ = nullptr;
     std::function<void()> irq_callback_;
@@ -187,14 +187,14 @@ private:
         std::list<Conn> conns;
     };
     // PfEntry addresses are used as libuv callback data, so storage must stay stable.
-    std::list<PfEntry> port_forwards_;
+    std::list<PfEntry> host_forwards_;
     void TeardownPfConn(PfEntry::Conn& c);
     void DrainPfToGuest(PfEntry::Conn& conn);
     void DrainPfToHost(PfEntry::Conn& conn);
     void UpdatePfConnPoll(PfEntry::Conn& conn);
     void OnPfConnPollEvent(PfEntry::Conn* conn, int status, int events);
     void OnPfListenerReadable(PfEntry* pf);
-    void TeardownPortForwards();
+    void TeardownHostForwards();
     void CheckPendingUpdates();
 
     // Guest forwarding (guestfwd): guest connects to a virtual IP:port,
@@ -236,8 +236,8 @@ private:
     void RescheduleLwipTimer();
 
     std::mutex pf_update_mutex_;
-    std::optional<std::vector<PortForward>> pending_pf_update_;
-    PortForwardCallback pf_update_cb_;
+    std::optional<std::vector<HostForward>> pending_pf_update_;
+    HostForwardCallback pf_update_cb_;
 
 public:
     // Network addresses (public for use by lwIP callbacks)

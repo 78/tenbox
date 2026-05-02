@@ -1,0 +1,17 @@
+#!/bin/sh
+# Stop the daemon before its binary is removed, to avoid the runtime
+# inheriting an orphan tenboxd that has no on-disk file to re-exec from.
+# Upgrade case (`upgrade`/`failed-upgrade`) leaves it running because
+# postinst will restart it once dpkg has swapped binaries.
+
+set -e
+
+case "$1" in
+    remove|deconfigure)
+        if systemctl is-active --quiet tenboxd 2>/dev/null; then
+            deb-systemd-invoke stop tenboxd || true
+        fi
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,27 @@
+Package: tenbox
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: @ARCH@
+Maintainer: Terrence <terrence@tenclass.com>
+Homepage: https://tenbox.ai
+Pre-Depends: adduser
+Depends: libc6 (>= 2.35),
+ libssl3t64 | libssl3,
+ ca-certificates
+Suggests: qemu-utils
+Description: TenBox virtualization daemon and CLI
+ TenBox is a single-host VM monitor with cloud-managed remote desktop.
+ The daemon talks to KVM directly through /dev/kvm and ships its own
+ virtio devices, qcow2 backend, and user-mode network stack, so it
+ does NOT fork qemu-system-*. This package ships the headless daemon
+ (tenboxd), the per-VM runtime (tenbox-vm-runtime) and the local CLI
+ (tenbox). FFmpeg / libx264 / libopus / libyuv / libcurl are
+ statically linked, so the only runtime requirements are the system
+ libc (>= 2.35), OpenSSL 3, and ca-certificates. qemu-utils (for
+ qemu-img) is only needed when building custom rootfs templates with
+ the helper scripts in scripts/, so it is suggested rather than
+ required. A single deb installs cleanly across Debian 12+/13+,
+ Ubuntu 22.04+/24.04+, Raspberry Pi OS 12, and Armbian Bookworm;
+ the OR-dep on libssl3t64 keeps trixie/noble (post-time_t-rename)
+ happy alongside bookworm/jammy.

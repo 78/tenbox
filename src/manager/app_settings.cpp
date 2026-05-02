@@ -1,5 +1,5 @@
 #include "manager/app_settings.h"
-#include "manager/image_source.h"
+#include "common/image_source.h"
 #include "manager/i18n.h"
 
 #define NOMINMAX
@@ -270,16 +270,22 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
         spec.initrd_path = Resolve("initrd");
         spec.disk_path   = Resolve("disk");
 
-        if (j.contains("port_forwards") && j["port_forwards"].is_array()) {
-            for (auto& item : j["port_forwards"]) {
+        // Read the new `host_forwards` key, falling back to the legacy
+        // `port_forwards` so pre-rename vm.json files still load.
+        const json* host_forwards_json =
+            j.contains("host_forwards") && j["host_forwards"].is_array() ? &j["host_forwards"]
+            : j.contains("port_forwards") && j["port_forwards"].is_array() ? &j["port_forwards"]
+            : nullptr;
+        if (host_forwards_json) {
+            for (auto& item : *host_forwards_json) {
                 if (item.contains("host_port") && item.contains("guest_port")) {
-                    PortForward pf;
+                    HostForward pf;
                     pf.host_port = item["host_port"].get<uint16_t>();
                     pf.guest_port = item["guest_port"].get<uint16_t>();
                     if (item.contains("host_ip")) pf.host_ip = item["host_ip"].get<std::string>();
                     else if (item.contains("lan") && item["lan"].get<bool>()) pf.host_ip = "0.0.0.0";
                     if (item.contains("guest_ip")) pf.guest_ip = item["guest_ip"].get<std::string>();
-                    spec.port_forwards.push_back(pf);
+                    spec.host_forwards.push_back(pf);
                 }
             }
         }
@@ -353,13 +359,13 @@ void SaveVmManifest(const VmSpec& spec) {
     if (spec.last_boot_time > 0) j["last_boot_time"] = spec.last_boot_time;
 
     json fwds = json::array();
-    for (const auto& f : spec.port_forwards) {
+    for (const auto& f : spec.host_forwards) {
         json fj = {{"host_port", f.host_port}, {"guest_port", f.guest_port}};
         if (!f.host_ip.empty() && f.host_ip != "127.0.0.1") fj["host_ip"] = f.host_ip;
         if (!f.guest_ip.empty()) fj["guest_ip"] = f.guest_ip;
         fwds.push_back(std::move(fj));
     }
-    j["port_forwards"] = fwds;
+    j["host_forwards"] = fwds;
 
     json gfwds = json::array();
     for (const auto& gf : spec.guest_forwards) {

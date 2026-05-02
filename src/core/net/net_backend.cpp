@@ -90,13 +90,13 @@ NetBackend::~NetBackend() {
 
 bool NetBackend::Start(VirtioNetDevice* dev,
                        std::function<void()> irq_cb,
-                       const std::vector<PortForward>& forwards,
+                       const std::vector<HostForward>& forwards,
                        const std::vector<GuestForward>& guest_forwards) {
     virtio_net_ = dev;
     irq_callback_ = std::move(irq_cb);
     for (const auto& f : forwards) {
-        port_forwards_.emplace_back();
-        auto& pf = port_forwards_.back();
+        host_forwards_.emplace_back();
+        auto& pf = host_forwards_.back();
         pf.backend = this;
         pf.host_port = f.host_port;
         pf.guest_port = f.guest_port;
@@ -147,8 +147,8 @@ void NetBackend::SetLinkUp(bool up) {
     link_up_ = up;
 }
 
-void NetBackend::UpdatePortForwards(const std::vector<PortForward>& forwards,
-                                     PortForwardCallback cb) {
+void NetBackend::UpdateHostForwards(const std::vector<HostForward>& forwards,
+                                     HostForwardCallback cb) {
     {
         std::lock_guard<std::mutex> lock(pf_update_mutex_);
         pending_pf_update_ = forwards;
@@ -245,7 +245,7 @@ void NetBackend::OnLwipTimer(uv_timer_t* handle) {
 void NetBackend::OnCleanupTimer(uv_timer_t* handle) {
     auto* self = static_cast<NetBackend*>(handle->data);
     self->CleanupStaleEntries();
-    for (auto& pf : self->port_forwards_) {
+    for (auto& pf : self->host_forwards_) {
         pf.conns.remove_if([](const PfEntry::Conn& c) {
             return c.host_sock == ~(uintptr_t)0 && c.guest_pcb == nullptr
                 && c.poll.closed();
@@ -392,7 +392,7 @@ void NetBackend::OnStopSignal(uv_async_t* handle) {
     }
 #endif
 
-    for (auto& pf : self->port_forwards_) {
+    for (auto& pf : self->host_forwards_) {
         pf.listener_poll.Close();
         if (pf.listener != ~(uintptr_t)0) {
             SOCK_CLOSE(static_cast<SocketHandle>(pf.listener));
@@ -518,7 +518,7 @@ void NetBackend::NetworkThread() {
     }
     loop_ready_cv_.notify_one();
 
-    SetupPortForwards();
+    SetupHostForwards();
 
     LOG_INFO("Network backend started (gateway 10.0.2.2, guest 10.0.2.15)");
 
@@ -530,7 +530,7 @@ void NetBackend::NetworkThread() {
         ;
 
     nat_entries_.clear();
-    for (auto& pf : port_forwards_)
+    for (auto& pf : host_forwards_)
         pf.conns.clear();
 
     uv_loop_close(&loop_);

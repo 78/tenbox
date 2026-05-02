@@ -41,7 +41,7 @@ struct VmConfig {
     uint32_t cpu_count = 1;
     bool net_link_up = false;
     bool debug_mode = false;
-    std::vector<PortForward> port_forwards;
+    std::vector<HostForward> host_forwards;
     std::vector<GuestForward> guest_forwards;
     std::vector<VmSharedFolder> shared_folders;
     bool interactive = true;
@@ -68,9 +68,9 @@ public:
     void TriggerPowerButton();
     void InjectConsoleBytes(const uint8_t* data, size_t size);
     void SetNetLinkUp(bool up);
-    using PortForwardCallback = std::function<void(std::vector<uint16_t> failed_ports)>;
-    void UpdatePortForwards(const std::vector<PortForward>& forwards,
-                            PortForwardCallback cb = nullptr);
+    using HostForwardCallback = std::function<void(std::vector<uint16_t> failed_ports)>;
+    void UpdateHostForwards(const std::vector<HostForward>& forwards,
+                            HostForwardCallback cb = nullptr);
     void UpdateGuestForwards(const std::vector<GuestForward>& guest_forwards);
     void InjectKeyEvent(uint32_t evdev_code, bool pressed);
     void InjectPointerEvent(int32_t x, int32_t y, uint32_t buttons);
@@ -85,6 +85,7 @@ public:
     bool AddSharedFolder(const std::string& tag, const std::string& host_path, bool readonly = false);
     bool RemoveSharedFolder(const std::string& tag);
     std::vector<std::string> GetSharedFolderTags() const;
+    std::vector<VmSharedFolder> GetSharedFolders() const;
 
     GuestAgentHandler* GetGuestAgentHandler() { return guest_agent_handler_.get(); }
     bool IsGuestAgentConnected() const;
@@ -96,7 +97,7 @@ private:
 
     bool AllocateMemory(uint64_t size);
     bool SetupVirtioBlk(const std::string& disk_path, const VirtioDeviceSlot& slot);
-    bool SetupVirtioNet(bool link_up, const std::vector<PortForward>& forwards,
+    bool SetupVirtioNet(bool link_up, const std::vector<HostForward>& forwards,
                         const std::vector<GuestForward>& guest_forwards, const VirtioDeviceSlot& slot);
     bool SetupVirtioInput(const VirtioDeviceSlot& kbd_slot, const VirtioDeviceSlot& tablet_slot);
     bool SetupVirtioGpu(uint32_t width, uint32_t height, const VirtioDeviceSlot& slot);

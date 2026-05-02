@@ -45,6 +45,8 @@ public:
     // Read a complete line (terminated by '\n'). Returns empty on EOF/error.
     std::string ReadLine();
 
+    bool HasBufferedLine() const;
+
     // Read exactly |len| bytes. Returns false on EOF/error.
     bool ReadExact(void* buf, size_t len);
 
@@ -76,6 +78,12 @@ public:
 private:
     int listen_fd_ = -1;
     std::string path_;
+    // Inode of the socket file we created in Listen(). Captured so Close()
+    // can refuse to unlink the path if a *different* listener has rebound
+    // the same name in the meantime (this happens on guest reboot, where
+    // the new RuntimeSession Listen()s on the same per-vm path while the
+    // old session's destructor is still racing to clean up).
+    uint64_t bound_inode_ = 0;
 };
 
 class UnixSocketClient {

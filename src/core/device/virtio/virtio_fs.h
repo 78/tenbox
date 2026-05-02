@@ -372,6 +372,7 @@ public:
     bool AddShare(const std::string& tag, const std::string& host_path, bool readonly = false);
     bool RemoveShare(const std::string& tag);
     std::vector<std::string> GetShareTags() const;
+    std::vector<ShareInfo> GetShares() const;
     bool HasShare(const std::string& tag) const;
 
     // VirtioDeviceOps interface
