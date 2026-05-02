@@ -1,33 +1,41 @@
-# TenBox release build base image (LEGACY — kept for rollback only).
+# TenBox release build base image (bullseye edition).
 #
-# DEPRECATED: superseded by Dockerfile.bullseye, which lowers the glibc
-# floor from 2.35 to 2.31 and additionally static-links OpenSSL,
-# libstdc++, and libgcc. Both build-base.yml and the release/PR
-# workflows now point at Dockerfile.bullseye. This file stays in-tree
-# for one release cycle so we can rebuild the old image quickly if a
-# regression in the bullseye toolchain forces a rollback. Do NOT add
-# new build deps here — patch Dockerfile.bullseye instead. Plan to
-# delete this file after the next tagged release once the bullseye
-# image has been exercised in production.
+# Pinned to Debian 11 ("bullseye") because that is the lowest glibc version
+# (2.31) tenbox supports. Building on a newer base would silently raise the
+# supported floor; building on an older base brings C++20 toolchain headaches
+# that are not worth solving. glibc symbols are forward-compatible, so
+# binaries linked here run on Debian 11/12/13, Ubuntu 20.04/22.04/24.04,
+# Raspberry Pi OS 11+, Armbian Bullseye+, and any other Debian-derived
+# distro with libc6 >= 2.31.
 #
-# Pinned to Ubuntu 22.04 ("jammy") because that is the lowest glibc version
-# (2.35) the previous build floor shipped against.
+# Compared to the previous Dockerfile.jammy this image also static-links
+# libssl/libcrypto (OpenSSL 3) and -static-libstdc++/-static-libgcc into
+# the final binaries, so the deb's only runtime deps are libc6 and
+# ca-certificates. That removes the libssl3 vs libssl3t64 OR-dep dance
+# and lets the same deb install on bullseye (libssl1.1 only) without any
+# packaging gymnastics.
 #
 # This image only carries the static dependencies and a build environment;
 # the actual tenbox sources are bind-mounted in by the release workflow.
-FROM ubuntu:22.04
+FROM debian:11
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Toolchain + build deps. We deliberately do NOT pull libavcodec-dev /
-# libopus-dev / libyuv-dev from apt: we are about to compile static
-# replacements with our own configure flags. ca-certificates / git / curl
-# are needed to pull the upstream sources, libssl-dev stays dynamic.
+# bullseye ships GCC 10. Earlier drafts pulled GCC 12 from
+# bullseye-backports for fuller C++20 support, but bullseye is now
+# oldstable and archive.debian.org has dropped gcc-12 from the
+# backports pool. Surveying tenbox's source tree showed it doesn't
+# actually use the C++20 features GCC 10 lacks (no <ranges>, no
+# header <concepts>, no <format>, no <source_location>, no
+# coroutines), so stock GCC 10 + `-std=c++20` is sufficient. If a
+# new dependency starts requiring GCC 11+ features the cleanest
+# next step is to compile a recent GCC from source inside this
+# image, not to chase moving bullseye archives.
 #
-# CMake comes from kitware's apt repo (jammy ships 3.22 which can't parse
-# the single-URL FetchContent_Declare blocks in the top-level
-# CMakeLists.txt — bumping to 3.24+ avoids monkey-patching every
-# FetchContent call site).
+# CMake comes from kitware's apt repo because bullseye's 3.18 cannot
+# parse the single-URL FetchContent_Declare blocks in the top-level
+# CMakeLists.txt (the `URL ... DOWNLOAD_EXTRACT_TIMESTAMP TRUE` form
+# requires 3.24+).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -36,7 +44,7 @@ RUN apt-get update \
         lsb-release \
     && curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc \
         | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main" \
+    && echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main" \
         > /etc/apt/sources.list.d/kitware.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -46,10 +54,10 @@ RUN apt-get update \
         file \
         git \
         gzip \
-        libcurl4-openssl-dev \
-        libssl-dev \
+        make \
         ninja-build \
         nasm \
+        perl \
         pkg-config \
         python3 \
         tar \
@@ -67,20 +75,44 @@ ARG X264_REF=stable
 ARG OPUS_VERSION=1.5.2
 # libyuv: pin to a specific commit on main rather than tracking the
 # `stable` branch. The stable branch occasionally ships NEON inline
-# assembly that jammy's binutils 2.38 rejects (e.g. `ld1 {v4.16b},
-# [x3, 80]` without the required `#` on the immediate offset), which
-# breaks the arm64 build-base. Pinning a known-good main commit also
-# makes the static archive bit-for-bit reproducible across runs.
+# assembly that older binutils rejects (e.g. `ld1 {v4.16b}, [x3, 80]`
+# without the required `#` on the immediate offset), which breaks the
+# arm64 build-base. Pinning a known-good main commit also makes the
+# static archive bit-for-bit reproducible across runs.
 ARG LIBYUV_REF=b438739c8b08eba2c562a62ea5961f6215d525ed
 ARG FFMPEG_VERSION=6.1.1
-# libcurl is statically linked into tenboxd. Pinning the version here
-# (instead of pulling whatever apt has) means the LLM proxy's HTTP
-# stack behaves identically across distros, and pre-empts the
-# Debian 13 libcurl4 -> libcurl4t64 rename that would otherwise force
-# every downstream user to chase the new package name.
 ARG CURL_VERSION=8.10.1
+# OpenSSL 3.0 is the LTS line (security support through 2026-09).
+# Static-linking it means the deb no longer needs libssl3/libssl3t64 in
+# Depends, which is the whole reason this base image exists: bullseye
+# only ships libssl1.1, and we want one deb to install on every supported
+# distro.
+ARG OPENSSL_VERSION=3.0.15
 
 WORKDIR /tmp/build
+
+# OpenSSL (Apache-2.0): static libssl + libcrypto used by tenboxd's cloud
+# tunnel (cloud_tunnel.cpp) and transitively by libdatachannel's
+# usrsctp/libsrtp. Build first so the rest of the static deps (libcurl,
+# anything else needing TLS) pick up this prefix instead of the system
+# /usr/include/openssl. `no-shared` produces only the .a archives;
+# `no-module` removes the dynamic engine loader (we don't use engines);
+# `no-tests` skips ~30s of test compilation that we don't need.
+#
+# Architecture target is auto-derived: openssl's Configure script reads
+# `uname -m` when no explicit target is given, which produces
+# `linux-x86_64` on amd64 runners and `linux-aarch64` on arm64 runners.
+RUN curl -fsSL "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+        | tar xz \
+    && cd openssl-${OPENSSL_VERSION} \
+    && ./Configure \
+        --prefix=$DEPS_PREFIX \
+        --openssldir=/etc/ssl \
+        --libdir=lib \
+        no-shared no-module no-tests \
+    && make -j"$(nproc)" \
+    && make install_sw \
+    && cd .. && rm -rf openssl-${OPENSSL_VERSION}
 
 # x264 (GPL): static encoder for libavcodec to wrap. tenbox is GPLv3 so
 # the static link is fine; switching to OpenH264 only makes sense if the
@@ -147,22 +179,20 @@ RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
 
 # libcurl (MIT-style): tenboxd uses it only for the in-process LLM
 # proxy (llm_proxy.cpp) which forwards OpenAI-compatible JSON + SSE.
-# Static linkage means we can drop libcurl4 from the deb's Depends:
-# and avoid the Debian 13 libcurl4 -> libcurl4t64 rename that breaks
-# `apt install` on trixie/noble. We also disable every protocol /
-# codec / auth scheme tenbox doesn't use, which keeps the static
-# .a small (~700 KB) and shrinks the attack surface — fewer features
-# = fewer CVEs we have to chase via tenbox releases. TLS still defers
-# to the system's OpenSSL (libssl3/libssl3t64 stays a deb dep) so
-# CVE updates flow through the distro security team rather than us.
+# Built --with-openssl=$DEPS_PREFIX so it picks up our static OpenSSL
+# rather than the system libssl1.1 (which is what bullseye otherwise
+# ships and would cause a link mix). Disabling every protocol /
+# codec / auth scheme tenbox doesn't use keeps the static .a small
+# (~700 KB) and shrinks the attack surface — fewer features =
+# fewer CVEs we have to chase via tenbox releases.
 RUN curl -fsSL "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" \
         | tar xJ \
     && cd curl-${CURL_VERSION} \
-    && ./configure \
+    && PKG_CONFIG_PATH=$DEPS_PREFIX/lib/pkgconfig ./configure \
         --prefix=$DEPS_PREFIX \
         --enable-static --disable-shared \
         --with-pic \
-        --with-openssl \
+        --with-openssl=$DEPS_PREFIX \
         --without-libpsl --without-zstd --without-brotli \
         --without-libidn2 --without-librtmp --without-nghttp2 \
         --without-libssh2 --without-libssh --without-zlib \
@@ -177,6 +207,8 @@ RUN curl -fsSL "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" \
     && cd .. && rm -rf curl-${CURL_VERSION}
 
 # Sanity check: every static archive we ship must actually exist.
+# libssl.a / libcrypto.a are new vs Dockerfile.jammy and gate the
+# whole "deb installs on bullseye without libssl3" promise.
 RUN test -f $DEPS_PREFIX/lib/libavcodec.a \
     && test -f $DEPS_PREFIX/lib/libavformat.a \
     && test -f $DEPS_PREFIX/lib/libavutil.a \
@@ -184,6 +216,8 @@ RUN test -f $DEPS_PREFIX/lib/libavcodec.a \
     && test -f $DEPS_PREFIX/lib/libx264.a \
     && test -f $DEPS_PREFIX/lib/libopus.a \
     && test -f $DEPS_PREFIX/lib/libyuv.a \
-    && test -f $DEPS_PREFIX/lib/libcurl.a
+    && test -f $DEPS_PREFIX/lib/libcurl.a \
+    && test -f $DEPS_PREFIX/lib/libssl.a \
+    && test -f $DEPS_PREFIX/lib/libcrypto.a
 
 WORKDIR /src

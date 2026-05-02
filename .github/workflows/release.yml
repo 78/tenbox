@@ -6,12 +6,14 @@ name: Release Build
 # repo, the console then offers in-browser upgrades to all paired hosts.
 #
 # IMPORTANT: the runners are pinned to ubuntu-22.04 / ubuntu-22.04-arm,
-# NOT ubuntu-latest. The static build base image is ubuntu:22.04 (glibc
-# 2.35) and the binary's effective glibc floor is whatever the build
-# host bundles. Switching to noble would silently bump the floor to
-# 2.39 and break Debian 12 / Ubuntu 22.04 hosts. Do not "modernize" the
-# runner without also bumping the supported matrix everywhere else
-# (release notes, install-linux.sh preflight, releases.json, console).
+# NOT ubuntu-latest. The static build base image is debian:11 ("bullseye",
+# glibc 2.31) and the binary's effective glibc floor is whatever the build
+# container bundles. The runner OS itself doesn't matter for symbol
+# resolution because cmake runs *inside* the bullseye container, but we
+# still pin the runner so docker-buildx's emulation needs are predictable.
+# Do not "modernize" the runner without also bumping the supported matrix
+# everywhere else (release notes, install-linux.sh preflight,
+# releases.json, console).
 
 on:
   push:
@@ -73,7 +75,7 @@ jobs:
       - name: Pull static-deps base image
         id: pull_base
         continue-on-error: true
-        run: docker pull ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }}
+        run: docker pull ghcr.io/78/tenbox-build:bullseye-${{ matrix.arch }}
 
       - name: Set up Docker buildx (fallback)
         if: steps.pull_base.outcome == 'failure'
@@ -84,8 +86,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: packaging/build-base
-          file: packaging/build-base/Dockerfile.jammy
-          tags: ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }}
+          file: packaging/build-base/Dockerfile.bullseye
+          tags: ghcr.io/78/tenbox-build:bullseye-${{ matrix.arch }}
           load: true
           cache-from: type=gha,scope=build-base-${{ matrix.arch }}
           cache-to: type=gha,scope=build-base-${{ matrix.arch }},mode=max
@@ -96,12 +98,13 @@ jobs:
           docker run --rm \
               -v "${{ github.workspace }}:/src" \
               -w /src \
-              ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }} \
+              ghcr.io/78/tenbox-build:bullseye-${{ matrix.arch }} \
               bash -lc '
                   set -euo pipefail
                   cmake -B build -G Ninja \
                       -DCMAKE_BUILD_TYPE=Release \
-                      -DTENBOX_STATIC_FFMPEG=ON
+                      -DTENBOX_STATIC_FFMPEG=ON \
+                      -DTENBOX_STATIC_RUNTIME=ON
                   cmake --build build --parallel
                   strip build/tenbox build/tenboxd build/tenbox-vm-runtime
               '

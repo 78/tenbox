@@ -89,7 +89,7 @@ jobs:
       # If the pull fails the PR author should rerun build-base.yml.
       - name: Pull static-deps base image
         if: steps.changes.outputs.src == 'true'
-        run: docker pull ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }}
+        run: docker pull ghcr.io/78/tenbox-build:bullseye-${{ matrix.arch }}
 
       - name: Compile tenbox (static)
         if: steps.changes.outputs.src == 'true'
@@ -98,12 +98,13 @@ jobs:
           docker run --rm \
               -v "${{ github.workspace }}:/src" \
               -w /src \
-              ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }} \
+              ghcr.io/78/tenbox-build:bullseye-${{ matrix.arch }} \
               bash -lc '
                   set -euo pipefail
                   cmake -B build -G Ninja \
                       -DCMAKE_BUILD_TYPE=Release \
-                      -DTENBOX_STATIC_FFMPEG=ON
+                      -DTENBOX_STATIC_FFMPEG=ON \
+                      -DTENBOX_STATIC_RUNTIME=ON
                   cmake --build build --parallel
                   strip build/tenbox build/tenboxd build/tenbox-vm-runtime
               '

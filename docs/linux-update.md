@@ -16,16 +16,23 @@ end-to-end update story has three personas:
 ## Compatibility matrix
 
 A single deb covers every Debian-derived distribution with
-`glibc >= 2.35` and `libssl3` available, on both `amd64` and `arm64`.
-That includes:
+`glibc >= 2.31`, on both `amd64` and `arm64`. OpenSSL, libstdc++, and
+libgcc are statically linked into the binary, so the deb does **not**
+depend on `libssl3` / `libssl3t64` / `libstdc++6` from the host — it
+installs unchanged on bullseye (which only ships `libssl1.1`) and
+trixie (which renamed to `libssl3t64`) alike. Supported distros:
 
 | Distro                     | amd64 | arm64 |
 | -------------------------- | :---: | :---: |
+| Debian 11 (bullseye)       |   ✅  |   ✅  |
 | Debian 12 (bookworm)       |   ✅  |   ✅  |
 | Debian 13 (trixie)         |   ✅  |   ✅  |
+| Ubuntu 20.04 LTS (focal)   |   ✅  |   ✅  |
 | Ubuntu 22.04 LTS (jammy)   |   ✅  |   ✅  |
 | Ubuntu 24.04 LTS (noble)   |   ✅  |   ✅  |
+| Raspberry Pi OS 11         |   —   |   ✅  |
 | Raspberry Pi OS 12         |   —   |   ✅  |
+| Armbian Bullseye           |   —   |   ✅  |
 | Armbian Bookworm           |   —   |   ✅  |
 
 The `install-linux.sh` preflight refuses anything older. Hosts also
@@ -123,12 +130,14 @@ hand). There is intentionally no "force" flag.
 
 ## Static link & GPL note
 
-`tenboxd` is built inside the [`packaging/build-base/Dockerfile.jammy`](../packaging/build-base/Dockerfile.jammy)
-container against `glibc 2.35` with FFmpeg, libx264, libopus, libyuv,
-and libcurl linked statically. As a result:
+`tenboxd` is built inside the [`packaging/build-base/Dockerfile.bullseye`](../packaging/build-base/Dockerfile.bullseye)
+container against `glibc 2.31` with FFmpeg, libx264, libopus, libyuv,
+libcurl, and OpenSSL all linked statically. The build also passes
+`-static-libstdc++ -static-libgcc` (via `TENBOX_STATIC_RUNTIME=ON`) so
+the C++ runtime is baked into each executable. As a result:
 
 - `apt show tenbox | grep -E '^(Depends|Suggests)'` lists:
-  - **Depends:** `libc6 (>= 2.35), libssl3t64 | libssl3, ca-certificates`
+  - **Depends:** `libc6 (>= 2.31), ca-certificates`
   - **Suggests:** `qemu-utils` (only needed when building custom rootfs templates with `scripts/*/make-rootfs-*.sh`)
 - `tenboxd` is a self-contained KVM-based VMM: it opens `/dev/kvm`
   directly and ships its own virtio devices, qcow2 backend, and

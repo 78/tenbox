@@ -40,6 +40,13 @@ die() {
     exit 1
 }
 
+# Progress lines so the operator sees something between long apt steps
+# instead of staring at a blank terminal for 10-30s while we run a
+# silenced `apt-get update` / `apt-get install`.
+step() {
+    echo "==> $*"
+}
+
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
         die "please run as root (e.g. via sudo)"
@@ -47,6 +54,7 @@ require_root() {
 }
 
 check_platform() {
+    step "Checking platform compatibility..."
     if [ ! -r /etc/os-release ]; then
         die "/etc/os-release not found; this installer only supports Debian/Ubuntu derivatives"
     fi
@@ -67,15 +75,20 @@ check_platform() {
     esac
 
     # glibc is the real compat boundary, not the codename. Reject hosts
-    # whose loader is too old to map our jammy-based binaries.
+    # whose loader is too old to map our bullseye-based binaries. The
+    # build-base image (packaging/build-base/Dockerfile.bullseye) is
+    # debian:11 with glibc 2.31, so anything from Debian 11 / Ubuntu
+    # 20.04 onwards is supported. The deb itself only Depends on
+    # libc6 (>= 2.31) + ca-certificates because OpenSSL, libstdc++,
+    # and libgcc are all linked statically.
     if command -v ldd >/dev/null 2>&1; then
         glibc_ver="$(ldd --version 2>/dev/null | head -1 | awk '{print $NF}')"
         if [ -n "$glibc_ver" ]; then
             major="$(printf '%s' "$glibc_ver" | awk -F. '{print $1}')"
             minor="$(printf '%s' "$glibc_ver" | awk -F. '{print $2}')"
             if [ -n "$major" ] && [ -n "$minor" ]; then
-                if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 35 ]; }; then
-                    die "tenbox requires glibc 2.35+ (your system: $glibc_ver). Upgrade to Debian 12+ / Ubuntu 22.04+ / Raspberry Pi OS 12+ first."
+                if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 31 ]; }; then
+                    die "tenbox requires glibc 2.31+ (your system: $glibc_ver). Upgrade to Debian 11+ / Ubuntu 20.04+ / Raspberry Pi OS 11+ first."
                 fi
             fi
         fi
@@ -83,6 +96,7 @@ check_platform() {
 }
 
 check_kvm() {
+    step "Checking KVM support..."
     if ! grep -Eq '(vmx|svm)' /proc/cpuinfo 2>/dev/null; then
         die "KVM unsupported: CPU virtualization flag vmx/svm was not found"
     fi
@@ -94,7 +108,9 @@ check_kvm() {
 
 apt_install_deps() {
     export DEBIAN_FRONTEND=noninteractive
+    step "Refreshing apt package index..."
     apt-get update -y >/dev/null
+    step "Installing installer prerequisites (curl, gnupg, jq)..."
     # Pre-reqs for this installer (curl/jq for talking to the apt repo
     # metadata, gnupg for the future signed InRelease handover). The
     # deb's own runtime deps (libc6 / libssl3{,t64} / qemu-system-*)
@@ -107,6 +123,7 @@ apt_install_deps() {
 }
 
 register_apt_repo() {
+    step "Registering TenBox apt repository ($repo_url $suite)..."
     install -d -m 0755 /etc/apt/sources.list.d
     # [trusted=yes] is intentional for v1; phase 6 adds an InRelease
     # signed by a TenBox release key and this flag goes away.
@@ -125,10 +142,12 @@ apt_install_tenbox() {
     # the install set minimal (only libc6 / libssl3{,t64} /
     # ca-certificates land via the deb's Depends).
     if [ "$release_tag" = "latest" ]; then
+        step "Installing tenbox (latest)..."
         apt-get install -y --no-install-recommends tenbox >/dev/null
     else
         # Strip the leading `v` so apt sees the bare version number.
         version="${release_tag#v}"
+        step "Installing tenbox=$version..."
         apt-get install -y --no-install-recommends \
             "tenbox=$version" >/dev/null \
             || die "apt could not install tenbox=$version (not in repo yet?)"
@@ -136,6 +155,7 @@ apt_install_tenbox() {
 }
 
 write_env_file() {
+    step "Writing /etc/tenbox/tenboxd.env..."
     install -d -m 0755 /etc/tenbox
     cat > /etc/tenbox/tenboxd.env <<EOF
 # Managed by scripts/install-linux.sh; safe to edit manually.
@@ -185,6 +205,7 @@ enable_systemd() {
     # daemon may already be active from a previous run; in that case
     # `--now` becomes a no-op and the freshly written env file is
     # ignored. Force a restart so the new env always wins.
+    step "Enabling and starting tenboxd.service..."
     systemctl daemon-reload
     systemctl enable tenboxd >/dev/null
     systemctl restart tenboxd
@@ -228,6 +249,7 @@ await_pair_url() {
     fi
 }
 
+echo "TenBox installer starting (this can take 30-60s on a fresh host)..."
 require_root
 check_platform
 check_kvm

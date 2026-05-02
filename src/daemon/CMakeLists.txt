@@ -22,10 +22,11 @@ add_executable(tenboxd ${TENBOX_DAEMON_SOURCES})
 
 option(TENBOX_FETCH_LIBDATACHANNEL "Fetch libdatachannel when no system package is available" ON)
 option(TENBOX_ENABLE_LIBYUV "Enable libyuv pixel conversion fast path" ON)
-# Release builds set this to pick up the static ffmpeg/x264/opus/libyuv
-# baked into packaging/build-base/Dockerfile.jammy under /opt/tenbox-deps.
-# Defaults to OFF so developer builds keep using the system shared libs.
-option(TENBOX_STATIC_FFMPEG "Link ffmpeg/x264/opus/libyuv statically from /opt/tenbox-deps" OFF)
+# Release builds set this to pick up the static ffmpeg/x264/opus/libyuv/
+# openssl/libcurl baked into packaging/build-base/Dockerfile.bullseye under
+# /opt/tenbox-deps. Defaults to OFF so developer builds keep using the
+# system shared libs.
+option(TENBOX_STATIC_FFMPEG "Link ffmpeg/x264/opus/libyuv/openssl/libcurl statically from /opt/tenbox-deps" OFF)
 if(TENBOX_STATIC_FFMPEG)
     # pkg-config queries against the static prefix must come first so
     # PkgConfig::FFMPEG / PkgConfig::OPUS resolve to the .a archives,
@@ -38,6 +39,17 @@ if(TENBOX_STATIC_FFMPEG)
     # Ask pkg-config to expand --libs into the full transitive set so
     # libavcodec.a + libx264.a + libopus.a all land on the link line.
     set(PKG_CONFIG_USE_STATIC_LIBS TRUE)
+
+    # Steer every find_package(OpenSSL) in the build tree (this file's
+    # own call below, plus libdatachannel's usrsctp / libsrtp transitive
+    # calls reached via FetchContent) at the static libssl.a / libcrypto.a
+    # baked into the build-base image. Without OPENSSL_ROOT_DIR cmake
+    # would happily mix in /usr/lib/x86_64-linux-gnu/libssl.so, which
+    # defeats the whole point of building bullseye-compatible binaries
+    # — bullseye only ships libssl1.1, while everything newer ships
+    # libssl3, and our static archive sidesteps the version split.
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+    set(OPENSSL_ROOT_DIR "${_tenbox_static_prefix}")
 endif()
 
 target_include_directories(tenboxd

@@ -66,6 +66,14 @@ install -m 0755 "$PACKAGING_DIR/postrm"   "$DEB_ROOT/DEBIAN/postrm"
 # still has dynamic deps outside the documented set. Catches regressions
 # where a developer accidentally adds a new shared dep without updating
 # control.in.
+#
+# After the bullseye base + TENBOX_STATIC_RUNTIME switch the only DT_NEEDED
+# entries that should remain are the libc/threads/loader trio. If you see
+# libssl, libcrypto, libstdc++, or libgcc_s reappear here it means
+# TENBOX_STATIC_FFMPEG / TENBOX_STATIC_RUNTIME did not take effect, the
+# OPENSSL_ROOT_DIR hint missed, or libdatachannel pulled in the system
+# /usr/lib OpenSSL behind our backs — in which case the bullseye
+# compatibility promise (single deb works on libssl1.1 hosts) breaks.
 if command -v ldd >/dev/null 2>&1; then
     # awk strips directory components so /lib64/ld-linux-x86-64.so.2
     # collapses to ld-linux-x86-64.so.2 and matches the whitelist.
@@ -74,13 +82,14 @@ if command -v ldd >/dev/null 2>&1; then
             | awk '{print $1}' \
             | awk -F/ '{print $NF}' \
             | grep -E '\.so' \
-            | grep -vE '^(linux-vdso|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libgcc_s\.so|libstdc\+\+\.so|ld-linux-(x86-64|aarch64)\.so|libssl\.so|libcrypto\.so)' \
+            | grep -vE '^(linux-vdso|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|ld-linux-(x86-64|aarch64)\.so)' \
             || true
     )
     if [ -n "$UNEXPECTED" ]; then
         echo "build-deb: WARNING tenboxd has unexpected dynamic deps:" >&2
         echo "$UNEXPECTED" >&2
-        echo "build-deb: update packaging/debian/control.in if these are intentional" >&2
+        echo "build-deb: update packaging/debian/control.in if these are intentional," >&2
+        echo "           or fix the static-link config so they go away." >&2
     fi
 fi
 

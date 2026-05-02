@@ -1,8 +1,8 @@
 name: Build Base Image
 
-# Builds the static-deps base image (ffmpeg / x264 / opus / libyuv / curl
-# all compiled static against jammy's glibc 2.35) and pushes it to GHCR
-# as ghcr.io/78/tenbox-build:jammy-<arch>. Both release.yml and
+# Builds the static-deps base image (ffmpeg / x264 / opus / libyuv / curl /
+# openssl all compiled static against bullseye's glibc 2.31) and pushes it
+# to GHCR as ghcr.io/78/tenbox-build:bullseye-<arch>. Both release.yml and
 # pr-check.yml just `docker pull` this image and run cmake against the
 # bind-mounted source tree, which keeps PR builds short and avoids
 # recompiling ffmpeg on every commit.
@@ -12,8 +12,12 @@ name: Build Base Image
 #   - manual workflow_dispatch (for re-pushing after a registry hiccup)
 #
 # Image tags written:
-#   jammy-amd64 / jammy-arm64  -> the rolling tag used by downstream jobs
-#   jammy-<sha7>-<arch>        -> immutable tag for one-off pinning
+#   bullseye-amd64 / bullseye-arm64    -> the rolling tag used by downstream jobs
+#   bullseye-<sha7>-<arch>             -> immutable tag for one-off pinning
+#   jammy-amd64 / jammy-arm64          -> legacy alias kept for one release
+#                                          cycle so old branches/tags can
+#                                          still pull a working image. Drop
+#                                          after the next tagged release.
 
 on:
   push:
@@ -59,9 +63,16 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: packaging/build-base
-          file: packaging/build-base/Dockerfile.jammy
+          file: packaging/build-base/Dockerfile.bullseye
           push: true
+          # Push the new bullseye-* tags AND the legacy jammy-* aliases
+          # (pointing at the same image) so PRs / release branches still
+          # cut against ghcr.io/78/tenbox-build:jammy-<arch> keep working
+          # while we migrate. Drop the jammy aliases after the next
+          # tagged release once every active branch is on bullseye-*.
           tags: |
+            ghcr.io/78/tenbox-build:bullseye-${{ matrix.arch }}
+            ghcr.io/78/tenbox-build:bullseye-${{ steps.meta.outputs.sha7 }}-${{ matrix.arch }}
             ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }}
             ghcr.io/78/tenbox-build:jammy-${{ steps.meta.outputs.sha7 }}-${{ matrix.arch }}
           cache-from: type=gha,scope=build-base-${{ matrix.arch }}

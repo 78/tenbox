@@ -21,6 +21,19 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
+# Release builds on Linux statically link the C++ runtime so the
+# resulting tenbox / tenboxd / tenbox-vm-runtime binaries don't
+# DT_NEEDED libstdc++.so.6 / libgcc_s.so.1. Combined with the static
+# OpenSSL/ffmpeg/etc. that packaging/build-base/Dockerfile.bullseye
+# bakes in, this lets a single deb run on every Debian-derived
+# distribution from bullseye (glibc 2.31) up through trixie/noble,
+# without juggling libssl3 / libssl3t64 / libstdc++ ABI versions.
+# Off by default so developer builds keep using the system shared libs.
+option(TENBOX_STATIC_RUNTIME "Static-link libstdc++ and libgcc into all executables" OFF)
+if(TENBOX_STATIC_RUNTIME AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT MSVC)
+    add_link_options(-static-libstdc++ -static-libgcc)
+endif()
+
 # Put all executables in build root (e.g. x64-debug/) instead of deep src/... paths
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
