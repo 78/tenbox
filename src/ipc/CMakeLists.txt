@@ -20,3 +20,12 @@ target_include_directories(tenbox_ipc
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_BINARY_DIR}
 )
+
+# shared_framebuffer_posix.cpp uses shm_open/shm_unlink, which live in
+# librt on glibc. Newer toolchains (GCC 11+ on jammy) merge librt into
+# libc as a no-op linker stub, but bullseye's GCC 10 still needs the
+# explicit -lrt. Propagate it as INTERFACE so every executable that
+# links tenbox_ipc picks it up automatically.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(tenbox_ipc INTERFACE rt)
+endif()
