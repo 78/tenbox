@@ -42,19 +42,28 @@ DoctorReport RunKvmDoctorUncached() {
         has_vmx ? "CPU exposes Intel VMX" :
         has_svm ? "CPU exposes AMD SVM" :
                   "CPU virtualization flag vmx/svm was not found in /proc/cpuinfo");
+#elif defined(__aarch64__) || defined(__arm64__)
+    // On ARM64, KVM relies on EL2 being available rather than a CPU flag in
+    // /proc/cpuinfo. Loaded `kvm` module + a usable /dev/kvm are the
+    // authoritative signals; treat those checks below as the source of truth.
 #else
-    Add(report, "architecture", false, "this iteration supports x86_64 only");
+    Add(report, "architecture", false,
+        "unsupported CPU architecture (only x86_64 and aarch64 are supported)");
 #endif
 
     const bool has_kvm_module = fs::exists("/sys/module/kvm");
     Add(report, "kvm_module", has_kvm_module,
         has_kvm_module ? "kvm module is loaded" : "kvm kernel module is not loaded");
 
+#if defined(__x86_64__) || defined(__amd64__)
+    // Vendor sub-modules are an x86-only concept; ARM64 has no kvm_intel /
+    // kvm_amd equivalents (KVM is built into the arm64 kernel tree).
     const bool has_vendor_module =
         fs::exists("/sys/module/kvm_intel") || fs::exists("/sys/module/kvm_amd");
     Add(report, "kvm_vendor_module", has_vendor_module,
         has_vendor_module ? "vendor KVM module is loaded" :
                             "kvm_intel or kvm_amd module is not loaded");
+#endif
 
     const bool has_dev_kvm = fs::exists("/dev/kvm");
     Add(report, "dev_kvm_exists", has_dev_kvm,
