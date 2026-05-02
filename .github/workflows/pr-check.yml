@@ -4,31 +4,16 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
-  build-cpp:
-    name: Build C++ Project (${{ matrix.os }})
+  build-windows:
+    name: Build C++ Project (windows-latest)
     if: >-
       github.event_name == 'pull_request'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            configure_args: -A x64 -DCMAKE_BUILD_TYPE=Release
-            build_args: --config Release --parallel
-            artifact_name: tenbox-build-windows
-            artifact_path: build/Release/*.exe
-          - os: ubuntu-latest
-            configure_args: -DCMAKE_BUILD_TYPE=Release
-            build_args: --parallel
-            artifact_name: tenbox-build-linux-x64
-            artifact_path: build/tenbox-vm-runtime
-          - os: ubuntu-24.04-arm
-            configure_args: -DCMAKE_BUILD_TYPE=Release
-            build_args: --parallel
-            artifact_name: tenbox-build-linux-arm64
-            artifact_path: build/tenbox-vm-runtime
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -44,22 +29,107 @@ jobs:
 
       - name: Configure CMake
         if: steps.changes.outputs.src == 'true'
-        run: cmake -B build ${{ matrix.configure_args }}
+        run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         if: steps.changes.outputs.src == 'true'
-        run: cmake --build build ${{ matrix.build_args }}
+        run: cmake --build build --config Release --parallel
 
       - name: Upload build artifacts
         if: steps.changes.outputs.src == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_path }}
+          name: tenbox-build-windows
+          path: build/Release/*.exe
 
       - name: Skip notice
         if: steps.changes.outputs.src != 'true'
         run: echo "No changes in src/, skipping C++ build."
+
+  build-deb:
+    name: Build .deb (${{ matrix.arch }})
+    if: >-
+      github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04,     arch: amd64 }
+          - { runner: ubuntu-22.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same gate as the windows job: only run when something that
+      # affects the binary actually changed. packaging/** is included
+      # so packaging-only PRs still validate the deb pipeline.
+      - name: Check relevant changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            src:
+              - 'src/**'
+              - 'CMakeLists.txt'
+              - 'tests/**'
+              - 'packaging/**'
+              - '.github/workflows/pr-check.yml'
+
+      - name: Login to GHCR
+        if: steps.changes.outputs.src == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The base image is produced by .github/workflows/build-base.yml.
+      # For PRs we deliberately do NOT fall back to building the image
+      # locally: that would add ~25 minutes to the run on a cold cache.
+      # If the pull fails the PR author should rerun build-base.yml.
+      - name: Pull static-deps base image
+        if: steps.changes.outputs.src == 'true'
+        run: docker pull ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }}
+
+      - name: Compile tenbox (static)
+        if: steps.changes.outputs.src == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm \
+              -v "${{ github.workspace }}:/src" \
+              -w /src \
+              ghcr.io/78/tenbox-build:jammy-${{ matrix.arch }} \
+              bash -lc '
+                  set -euo pipefail
+                  cmake -B build -G Ninja \
+                      -DCMAKE_BUILD_TYPE=Release \
+                      -DTENBOX_STATIC_FFMPEG=ON
+                  cmake --build build --parallel
+                  strip build/tenbox build/tenboxd build/tenbox-vm-runtime
+              '
+
+      # PR builds use the VERSION file as-is so we exercise the same
+      # script the release runs. The resulting .deb is throwaway -
+      # only used to confirm the packaging pipeline is healthy.
+      - name: Build .deb
+        if: steps.changes.outputs.src == 'true'
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION | head -n1 | tr -d '[:space:]')"
+          packaging/debian/build-deb.sh "${{ matrix.arch }}" "${version}"
+
+      - name: Upload .deb artifact
+        if: steps.changes.outputs.src == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenbox-deb-${{ matrix.arch }}
+          path: |
+            dist/tenbox_*_${{ matrix.arch }}.deb
+            dist/tenbox_*_${{ matrix.arch }}.deb.sha256
+
+      - name: Skip notice
+        if: steps.changes.outputs.src != 'true'
+        run: echo "No changes in src/ or packaging/, skipping .deb build."
 
   build-website:
     name: Build Website
@@ -81,19 +151,17 @@ jobs:
         if: steps.changes.outputs.website == 'true'
         with:
           node-version: 20
-
-      - name: Enable pnpm
-        if: steps.changes.outputs.website == 'true'
-        run: corepack enable
+          cache: npm
+          cache-dependency-path: website/package-lock.json
 
       - name: Install website dependencies
         if: steps.changes.outputs.website == 'true'
-        run: pnpm install --frozen-lockfile
+        run: npm ci
         working-directory: website
 
       - name: Build website
         if: steps.changes.outputs.website == 'true'
-        run: pnpm run build
+        run: npm run build
         working-directory: website
 
       - name: Skip notice

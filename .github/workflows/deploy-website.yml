@@ -25,16 +25,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Enable pnpm
-        run: corepack enable
+          cache: npm
+          cache-dependency-path: website/package-lock.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
         working-directory: website
 
       - name: Build
-        run: pnpm run build
+        run: npm run build
         working-directory: website
 
       - name: Upload artifact

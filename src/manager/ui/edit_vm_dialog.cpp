@@ -60,7 +60,7 @@ static LRESULT CALLBACK EditDlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARA
             form.cpu_count          = cpu_count;
             form.debug_mode         = IsDlgButtonChecked(dlg, IDC_ED_DEBUG) == BST_CHECKED;
             form.apply_on_next_boot = running;
-            form.port_forwards      = data->rec.spec.port_forwards;
+            form.host_forwards      = data->rec.spec.host_forwards;
 
             auto patch = BuildVmPatch(form, data->rec.spec);
             std::string error;
