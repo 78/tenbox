@@ -11,6 +11,16 @@ case "$1" in
         if systemctl is-active --quiet tenboxd 2>/dev/null; then
             deb-systemd-invoke stop tenboxd || true
         fi
+        # Drop the [Install] symlinks too. Without this, the unit
+        # remains `enabled` after `apt-get remove tenbox`, and a
+        # subsequent fresh `apt install tenbox` would have postinst
+        # see is-enabled=true and call `deb-systemd-invoke restart`
+        # *before* install-linux.sh has had a chance to write
+        # /etc/tenbox/tenboxd.env, leaving the daemon running with
+        # empty TENBOX_CLOUD_URL / TENBOX_DATA_DIR.
+        if systemctl is-enabled --quiet tenboxd 2>/dev/null; then
+            systemctl disable tenboxd >/dev/null 2>&1 || true
+        fi
         ;;
 esac
 

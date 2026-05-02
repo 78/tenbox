@@ -179,8 +179,15 @@ enable_systemd() {
     # but deliberately does not enable it, because the env file above
     # is what makes the unit actually safe to launch with the right
     # cloud URL / data dir.
+    #
+    # `enable --now` would only `start` (not `restart`) the service,
+    # which is fine on a brand-new install. But on a re-install the
+    # daemon may already be active from a previous run; in that case
+    # `--now` becomes a no-op and the freshly written env file is
+    # ignored. Force a restart so the new env always wins.
     systemctl daemon-reload
-    systemctl enable --now tenboxd
+    systemctl enable tenboxd >/dev/null
+    systemctl restart tenboxd
 }
 
 await_pair_url() {

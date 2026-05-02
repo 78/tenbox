@@ -76,7 +76,36 @@ sudo apt-get install tenbox=0.7.5
 The package's `postinst` reloads systemd and bounces `tenboxd` only if
 the unit was already enabled — fresh installs are still gated on
 `scripts/install-linux.sh` writing `/etc/tenbox/tenboxd.env` and calling
-`systemctl enable --now tenboxd`.
+`systemctl enable + restart tenboxd` (note: not `enable --now`, because
+on a re-install `--now` would no-op when the daemon is already active
+and the freshly written env file would never be loaded). Symmetrically,
+`prerm` runs `systemctl disable tenboxd` so a subsequent
+`apt install tenbox` doesn't see a stale enabled state and start the
+daemon before the env file lands.
+
+## Socket permissions and the `tenbox` group
+
+`tenboxd` listens on `/run/tenbox/tenbox.sock`. The deb's `postinst`
+creates a system group `tenbox` and a system user `tenbox` (the user
+is reserved for a future drop-priv step; today the daemon still runs
+as root for `/dev/kvm` and `apt-get`). At startup the daemon:
+
+1. Lets systemd create `/run/tenbox/` mode `0755` (owned `root:root`).
+2. After `Listen()` succeeds, reads `TENBOX_SOCKET_GROUP` from the
+   environment (set to `tenbox` by the unit file), and `chown :tenbox`
+   + `chmod 0660` on the socket file itself.
+
+The result mirrors libvirt and docker: the directory is
+world-traversable so any user can `stat(2)` the socket and the CLI
+can give an honest `permission denied` error rather than a misleading
+`no such file`, but only members of the `tenbox` group can `connect(2)`.
+The installer adds `$SUDO_USER` to the group automatically; new
+shells (or `newgrp tenbox`) pick up the membership.
+
+CLI default-socket lookup is in `client.cpp:DefaultSocketPath()` and
+goes: `$TENBOX_SOCK` → `/run/tenbox/tenbox.sock` (if `/run/tenbox`
+exists) → `$XDG_RUNTIME_DIR/tenbox.sock` (per-user dev daemon) →
+`/tmp/tenbox-<uid>.sock` (last-resort fallback).
 
 ## Stop all VMs first
 
