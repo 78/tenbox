@@ -4,9 +4,11 @@
 #include "core/vmm/types.h"
 
 #include <cerrno>
+#include <condition_variable>
 #include <cstddef>
 #include <csignal>
 #include <cstring>
+#include <mutex>
 #include <linux/kvm.h>
 #include <asm/kvm.h>
 #include <pthread.h>
@@ -52,10 +54,6 @@ static constexpr uint64_t kOffSp     = 31u * 8u;          // 0xF8
 static constexpr uint64_t kOffPc     = 32u * 8u;          // 0x100
 static constexpr uint64_t kOffPstate = 33u * 8u;          // 0x108
 
-// MPIDR_EL1 encoding for KVM_REG_ARM64 system register access.
-//   op0=3 op1=0 CRn=0 CRm=0 op2=5
-static constexpr uint64_t kSysRegMpidrEl1 = ARM64_SYS_REG(3, 0, 0, 0, 5);
-
 static bool SetOneReg(int fd, uint64_t id, uint64_t value) {
     struct kvm_one_reg r{};
     r.id = id;
@@ -82,13 +80,37 @@ std::unique_ptr<KvmVCpu> KvmVCpu::Create(KvmVm& vm, uint32_t index,
     vcpu->addr_space_ = addr_space;
 
     // arm64 KVM requires KVM_CREATE_VCPU / KVM_ARM_VCPU_INIT to be fully
-    // serialised across vCPUs: once any vcpu has been INIT'd the kernel
-    // returns -EBUSY on further KVM_CREATE_VCPU. Our vcpu worker threads
-    // run in parallel, so guard the whole create + init sequence with a
-    // process-wide mutex. (Single-process use of /dev/kvm is the norm for
-    // this runtime, so a static lock is fine.)
+    // serialised AND issued in ascending vcpu_id order:
+    //   * The in-kernel VGICv3 assigns each vCPU's redistributor by call
+    //     order, while the guest kernel walks redistributors by MPIDR. If
+    //     vcpu_id N is created before vcpu_id N-1, the redist <-> MPIDR
+    //     mapping gets shuffled, PPIs (most importantly the virtual arch
+    //     timer, INTID 27) end up routed to the wrong vCPU and the guest
+    //     hangs forever in idle once a single CPU goes to WFI.
+    //   * Once any vcpu has been INIT'd the kernel returns -EBUSY on
+    //     further KVM_CREATE_VCPU.
+    // Our vcpu worker threads create their vCPUs in parallel, so we need a
+    // barrier that lets index 0 in first, then 1, etc. (Single-process use
+    // of /dev/kvm is the norm for this runtime, so static state is fine.)
     static std::mutex create_mutex;
-    std::lock_guard<std::mutex> create_guard(create_mutex);
+    static std::condition_variable create_cv;
+    static uint32_t next_to_create = 0;
+    {
+        std::unique_lock<std::mutex> lock(create_mutex);
+        create_cv.wait(lock, [index] { return next_to_create == index; });
+    }
+
+    // RAII: regardless of success or failure, advance the barrier so the
+    // next vcpu_id can proceed (and notify all waiters).
+    struct ReleaseBarrier {
+        ~ReleaseBarrier() {
+            {
+                std::lock_guard<std::mutex> lock(create_mutex);
+                ++next_to_create;
+            }
+            create_cv.notify_all();
+        }
+    } release_guard;
 
     vcpu->vcpu_fd_ = ::ioctl(vm.VmFd(), KVM_CREATE_VCPU, (unsigned long)index);
     if (vcpu->vcpu_fd_ < 0) {
@@ -113,13 +135,12 @@ std::unique_ptr<KvmVCpu> KvmVCpu::Create(KvmVm& vm, uint32_t index,
         return nullptr;
     }
 
-    // Program MPIDR_EL1 with a unique affinity value (Aff0 = index). KVM
-    // defaults to derived affinity but being explicit matches QEMU/HVF.
-    if (!SetOneReg(vcpu->vcpu_fd_, kSysRegMpidrEl1,
-                   static_cast<uint64_t>(index) & 0xFFu)) {
-        LOG_WARN("kvm: set MPIDR_EL1 for vCPU %u failed: %s",
-                 index, strerror(errno));
-    }
+    // Note: we do not override MPIDR_EL1 here. KVM derives MPIDR from the
+    // vcpu_id during KVM_ARM_VCPU_INIT (Aff0 = vcpu_id & 0xff) and the
+    // affinity bits become read-only afterwards, so KVM_SET_ONE_REG would
+    // be silently ignored. Now that vCPUs are created in ascending order
+    // (see the barrier above) the natural KVM mapping already matches the
+    // FDT cpu@N nodes.
 
     LOG_INFO("kvm: aarch64 vCPU %u created (%s)",
              index, power_off ? "POWER_OFF" : "running");
