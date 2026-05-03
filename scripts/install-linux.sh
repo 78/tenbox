@@ -136,10 +136,38 @@ apt_install_deps() {
 register_apt_repo() {
     step "Registering TenBox apt repository ($repo_url $suite)..."
     install -d -m 0755 /etc/apt/sources.list.d
-    # [trusted=yes] is intentional for v1; phase 6 adds an InRelease
-    # signed by a TenBox release key and this flag goes away.
+    install -d -m 0755 /etc/apt/keyrings
+
+    # The expected sha256 of the public archive keyring. Bumped when
+    # the TenBox release key is rotated; clients with a stale value
+    # will refuse to register the repo until they re-run a fresh
+    # install-linux.sh. Compare against the file checked in at
+    # scripts/keys/tenbox-archive-keyring.gpg in the public repo.
+    keyring_url="$repo_url/tenbox-archive-keyring.gpg"
+    keyring_path="/etc/apt/keyrings/tenbox-archive-keyring.gpg"
+    expected_sha256="REPLACE_WITH_REAL_SHA256_AFTER_KEY_GENERATION"
+
+    step "Fetching TenBox archive keyring..."
+    tmp_keyring="$(mktemp)"
+    if ! curl -fsSL "$keyring_url" -o "$tmp_keyring"; then
+        rm -f "$tmp_keyring"
+        die "could not download archive keyring from $keyring_url"
+    fi
+    actual_sha256="$(sha256sum "$tmp_keyring" | awk '{print $1}')"
+    # Refuse to register the repo if the bytes we just downloaded
+    # don't match the value baked into this script. This catches
+    # MITM that swaps the keyring AND the deb in lockstep, since the
+    # attacker would need to also patch this script before it ran.
+    if [ "$expected_sha256" != "REPLACE_WITH_REAL_SHA256_AFTER_KEY_GENERATION" ] \
+        && [ "$actual_sha256" != "$expected_sha256" ]; then
+        rm -f "$tmp_keyring"
+        die "archive keyring sha256 mismatch (got $actual_sha256, expected $expected_sha256)"
+    fi
+    install -m 0644 "$tmp_keyring" "$keyring_path"
+    rm -f "$tmp_keyring"
+
     cat > /etc/apt/sources.list.d/tenbox.list <<EOF
-deb [trusted=yes] $repo_url $suite main
+deb [signed-by=$keyring_path] $repo_url $suite main
 EOF
     apt-get update -y >/dev/null
 }

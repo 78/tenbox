@@ -47,3 +47,24 @@ sudo apt-get install tenbox=0.7.5
 ```
 
 Older debs remain in the apt repo's `pool/` until manually removed.
+
+## Repository signing
+
+The `dists/stable/Release` file at `https://my.tenbox.ai/repo/` is GPG
+signed; clients verify it via `signed-by=` in their
+`/etc/apt/sources.list.d/tenbox.list`. The public keyring lives at:
+
+- Download: <https://my.tenbox.ai/repo/tenbox-archive-keyring.gpg>
+- In-tree (source of truth): [`scripts/keys/tenbox-archive-keyring.gpg`](../scripts/keys/tenbox-archive-keyring.gpg)
+- Sha256: hard-coded in [`scripts/install-linux.sh`](../scripts/install-linux.sh) (`expected_sha256`)
+
+Verifying a downloaded keyring out of band:
+
+```sh
+gpg --show-keys --with-fingerprint \
+    /etc/apt/keyrings/tenbox-archive-keyring.gpg
+```
+
+Key generation, storage, rotation, and revocation are operator
+concerns and are documented in the internal signing runbook (not in
+this repo).

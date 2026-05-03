@@ -13,3 +13,6 @@ Dockerfile  text eol=lf
 *.cfg       text eol=lf
 *.conf      text eol=lf
 *.entitlements text eol=lf
+
+# GPG keyring is binary (avoid CRLF mangling on Windows clones)
+*.gpg       binary
