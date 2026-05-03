@@ -260,36 +260,36 @@ public:
             peer_->setRemoteDescription(rtc::Description(sdp, "offer"));
             peer_->setLocalDescription(rtc::Description::Type::Answer);
 
-            // Wait long enough to (a) absolutely require the answer SDP and
-            // (b) opportunistically pick up gathered candidates so the
-            // initial answer carries something useful.
+            // Two-phase wait so the answer turns around in tens of
+            // milliseconds even when STUN is unreachable:
             //
-            // `description_ready_` is hard: without local SDP we have no
-            // answer to hand back, so we error out. `gathering_complete_`
-            // is intentionally soft - if STUN servers are unreachable
-            // (common on locked-down networks: 19302/UDP black-holed by
-            // ISP, no TURN configured), libdatachannel keeps waiting on
-            // the binding response indefinitely. Returning the SDP with
-            // whatever host candidates we already have lets LAN peers
-            // connect, and the `LocalIceCandidateHandler` continues to
-            // trickle later srflx/relay candidates as they arrive.
+            // 1. Hard wait (up to 5s) for `description_ready_` - without the
+            //    local SDP there is no answer to return at all.
+            // 2. Soft wait (a short tail window after SDP arrives) to let
+            //    libdatachannel emit the synchronous host candidates so the
+            //    initial answer's `candidates[]` is non-empty for browsers
+            //    that don't act on trickle until the answer is applied.
+            //
+            // We intentionally do NOT wait on `gathering_complete_`. STUN
+            // probing can hang for the full network timeout (~9s) when UDP
+            // 3478 is black-holed (locked-down ISPs, Tailscale tailnets
+            // without exit-node STUN reachability, etc), and any srflx /
+            // relay candidate we miss here is still trickled to the
+            // browser via `LocalIceCandidateHandler` as it arrives.
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait_for(lock, std::chrono::seconds(10), [this] {
-                return description_ready_ && gathering_complete_;
+            cv_.wait_for(lock, std::chrono::seconds(5), [this] {
+                return description_ready_;
             });
             if (local_sdp_.empty()) {
                 return WebRtcAnswer{.ok = false, .error = "timed out creating WebRTC answer"};
             }
-            if (!gathering_complete_) {
-                std::fprintf(stdout,
-                             "[WARN]  remote_webrtc: returning answer before ICE "
-                             "gathering finished (%zu host candidate(s) so far); "
-                             "remaining candidates will trickle. Check STUN "
-                             "reachability or set TENBOX_STUN_SERVERS to a "
-                             "reachable server list.\n",
-                             candidates_.size());
-                std::fflush(stdout);
-            }
+            // Brief tail wait for the first batch of host candidates. They
+            // are produced synchronously by libdatachannel right after
+            // setLocalDescription, so 100ms is generous; we bail early as
+            // soon as gathering finishes (LAN-only path).
+            cv_.wait_for(lock, std::chrono::milliseconds(100), [this] {
+                return gathering_complete_;
+            });
             return WebRtcAnswer{
                 .ok = true,
                 .sdp = local_sdp_,
