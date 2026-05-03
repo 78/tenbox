@@ -23,6 +23,7 @@
 .signing_sha1
 scripts/.signing_sha1
 CMakePresets.json
+TENBOXD.md
 
 # Website
 /website/node_modules/
