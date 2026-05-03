@@ -113,29 +113,32 @@ onUnmounted(() => window.removeEventListener('scroll', onScroll))
 .nav-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 1.5rem;
 }
 
 .nav-link {
   color: var(--color-text-light);
   font-size: 0.875rem;
   font-weight: 600;
-  transition: color var(--transition);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  transition: color var(--transition), background var(--transition);
 }
 
 .nav-link-icon {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.5rem;
 }
 
 .nav-link:hover {
   color: var(--color-primary);
+  background: rgba(15, 23, 42, 0.04);
 }
 
 .lang-toggle {
-  padding: 6px 14px;
-  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--color-text-light);
