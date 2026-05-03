@@ -145,7 +145,7 @@ register_apt_repo() {
     # scripts/keys/tenbox-archive-keyring.gpg in the public repo.
     keyring_url="$repo_url/tenbox-archive-keyring.gpg"
     keyring_path="/etc/apt/keyrings/tenbox-archive-keyring.gpg"
-    expected_sha256="REPLACE_WITH_REAL_SHA256_AFTER_KEY_GENERATION"
+    expected_sha256="22b124e3370f54335c8588a4a0a672f22916970714be0c41c540e995be7a7e2d"
 
     step "Fetching TenBox archive keyring..."
     tmp_keyring="$(mktemp)"
@@ -158,8 +158,7 @@ register_apt_repo() {
     # don't match the value baked into this script. This catches
     # MITM that swaps the keyring AND the deb in lockstep, since the
     # attacker would need to also patch this script before it ran.
-    if [ "$expected_sha256" != "REPLACE_WITH_REAL_SHA256_AFTER_KEY_GENERATION" ] \
-        && [ "$actual_sha256" != "$expected_sha256" ]; then
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
         rm -f "$tmp_keyring"
         die "archive keyring sha256 mismatch (got $actual_sha256, expected $expected_sha256)"
     fi
