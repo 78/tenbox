@@ -1876,15 +1876,26 @@ nlohmann::json CloudTunnel::CreateRemoteSession(const std::string& vm_id, const 
     auto json = ToJson(*session);
     json["video_bitrate_bps"] = video_bitrate_bps;
     json["video_pixel_format"] = RemoteVideoPixelFormatName(video_pixel_format);
-    // Advertise the same STUN list the daemon itself is using so both
-    // peers agree on the candidate-gathering servers (see ResolvedStunServers
-    // for why the defaults skew toward CN-reachable hosts; operators can
-    // override via TENBOX_STUN_SERVERS).
-    nlohmann::json ice_urls = nlohmann::json::array();
-    for (const auto& url : ResolvedStunServers()) ice_urls.push_back(url);
-    json["ice_servers"] = nlohmann::json::array({
-        {{"urls", std::move(ice_urls)}},
-    });
+    // Advertise the same ICE server list the daemon itself is using so
+    // both peers agree on the candidate-gathering servers (see
+    // ResolvedIceServers for why the STUN defaults skew toward
+    // CN-reachable hosts; operators can override via TENBOX_ICE_SERVERS
+    // JSON or the legacy TENBOX_STUN_SERVERS comma list). In the
+    // self-hosted deployment path the daemon advertises this list
+    // verbatim; in the managed cloud path the control-plane rewrites
+    // the payload downstream to inject per-user TURN credentials (see
+    // tenbox-cloud/docs/turn-rollout.md).
+    nlohmann::json ice_servers = nlohmann::json::array();
+    for (const auto& spec : ResolvedIceServers()) {
+        nlohmann::json entry;
+        nlohmann::json urls = nlohmann::json::array();
+        for (const auto& url : spec.urls) urls.push_back(url);
+        entry["urls"] = std::move(urls);
+        if (!spec.username.empty()) entry["username"] = spec.username;
+        if (!spec.credential.empty()) entry["credential"] = spec.credential;
+        ice_servers.push_back(std::move(entry));
+    }
+    json["ice_servers"] = std::move(ice_servers);
     // Public snapshot: scrub cursor pixels / clipboard / audio so the cloud
     // relay never observes guest-visible content. Browser receives those
     // exclusively through the WebRTC control DataChannel.

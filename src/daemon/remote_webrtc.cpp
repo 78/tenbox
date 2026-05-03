@@ -73,48 +73,182 @@ const char* PeerStateName(int state) {
     }
 }
 
-// Returns the configured STUN URL list. `TENBOX_STUN_SERVERS` is a
-// comma-separated list (whitespace tolerated) of full URLs such as
+// Parses the legacy TENBOX_STUN_SERVERS env format: comma-separated
+// (whitespace tolerated) URLs like
 // "stun:stun.qq.com:3478,stun:stun.miwifi.com:3478". Empty entries
-// are skipped.
-//
-// Defaults are skewed for mainland China deployments because that's where
-// most of the production fleet lives today and Google STUN
-// (stun.l.google.com:19302) is regularly UDP-blackholed by CN ISPs,
-// which previously made WebRTC setup time out at "creating answer".
-// Order matters - libdatachannel probes them in sequence:
+// are skipped. Used both for the dedicated STUN-only env var and as a
+// last-resort tokenizer for anything that slipped past JSON parsing.
+std::vector<std::string> SplitCommaSeparated(std::string_view view) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (start <= view.size()) {
+        size_t comma = view.find(',', start);
+        size_t end = comma == std::string_view::npos ? view.size() : comma;
+        size_t s = start;
+        size_t e = end;
+        while (s < e && std::isspace(static_cast<unsigned char>(view[s]))) ++s;
+        while (e > s && std::isspace(static_cast<unsigned char>(view[e - 1]))) --e;
+        if (e > s) out.emplace_back(view.substr(s, e - s));
+        if (comma == std::string_view::npos) break;
+        start = comma + 1;
+    }
+    return out;
+}
+
+// Built-in defaults used when neither TENBOX_ICE_SERVERS nor
+// TENBOX_STUN_SERVERS is set. Defaults are skewed for mainland China
+// deployments because that's where most of the production fleet lives
+// today and Google STUN (stun.l.google.com:19302) is regularly
+// UDP-blackholed by CN ISPs, which previously made WebRTC setup time
+// out at "creating answer". Order matters - libdatachannel probes them
+// in sequence:
 //   1. Tencent  - rock solid in CN, used by every domestic Live SDK
 //   2. Xiaomi   - secondary domestic option, embedded in MiWiFi routers
 //   3. Cloudflare - global fallback for users outside CN; CF anycast is
 //                   reachable with low latency from the mainland too,
 //                   so it doubles as a third tier when the first two are
 //                   busy or filtered.
-// Operators can override the whole list with TENBOX_STUN_SERVERS, e.g.
-// to point at a self-hosted coturn or to add TURN once we have one.
-std::vector<std::string> ConfiguredStunServers() {
-    const char* raw = std::getenv("TENBOX_STUN_SERVERS");
-    std::vector<std::string> out;
-    if (raw && raw[0] != '\0') {
-        std::string_view view(raw);
-        size_t start = 0;
-        while (start <= view.size()) {
-            size_t comma = view.find(',', start);
-            size_t end = comma == std::string_view::npos ? view.size() : comma;
-            size_t s = start;
-            size_t e = end;
-            while (s < e && std::isspace(static_cast<unsigned char>(view[s]))) ++s;
-            while (e > s && std::isspace(static_cast<unsigned char>(view[e - 1]))) --e;
-            if (e > s) out.emplace_back(view.substr(s, e - s));
-            if (comma == std::string_view::npos) break;
-            start = comma + 1;
-        }
+IceServerSpec DefaultStunServers() {
+    IceServerSpec spec;
+    spec.urls = {
+        "stun:stun.qq.com:3478",
+        "stun:stun.miwifi.com:3478",
+        "stun:stun.cloudflare.com:3478",
+    };
+    return spec;
+}
+
+// Parses TENBOX_ICE_SERVERS, a JSON array of W3C-shaped RTCIceServer
+// dictionaries:
+//
+//   [
+//     {"urls":["stun:stun.qq.com:3478"]},
+//     {"urls":["turn:turn.tenbox.ai:3478?transport=udp",
+//              "turn:turn.tenbox.ai:3478?transport=tcp"],
+//      "username":"1735689600:u_42:s_abc",
+//      "credential":"base64-hmac-sha1"}
+//   ]
+//
+// `urls` may also be a single string (matching the W3C union type).
+// Entries with zero usable URLs are dropped silently.
+//
+// Credentials are almost always unused on the daemon side - in
+// production only the browser peer receives TURN credentials, because
+// a WebRTC session succeeds as long as *one* peer contributes a relay
+// candidate and the daemon is rarely the constrained side. The schema
+// still parses them so the same env var works for self-hosted
+// operators who want the daemon to relay through their own TURN.
+std::optional<std::vector<IceServerSpec>> ParseIceServersJson(std::string_view raw) {
+    std::vector<IceServerSpec> out;
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse(raw);
+    } catch (const std::exception& e) {
+        std::fprintf(stdout,
+                     "[WARN]  remote_webrtc: TENBOX_ICE_SERVERS is not valid JSON: %s\n",
+                     e.what());
+        std::fflush(stdout);
+        return std::nullopt;
     }
-    if (out.empty()) {
-        out.emplace_back("stun:stun.qq.com:3478");
-        out.emplace_back("stun:stun.miwifi.com:3478");
-        out.emplace_back("stun:stun.cloudflare.com:3478");
+    if (!parsed.is_array()) {
+        std::fprintf(stdout,
+                     "[WARN]  remote_webrtc: TENBOX_ICE_SERVERS must be a JSON array\n");
+        std::fflush(stdout);
+        return std::nullopt;
+    }
+    for (const auto& entry : parsed) {
+        if (!entry.is_object()) continue;
+        IceServerSpec spec;
+        if (auto it = entry.find("urls"); it != entry.end()) {
+            if (it->is_string()) {
+                spec.urls.push_back(it->get<std::string>());
+            } else if (it->is_array()) {
+                for (const auto& u : *it) {
+                    if (u.is_string()) spec.urls.push_back(u.get<std::string>());
+                }
+            }
+        }
+        if (spec.urls.empty()) continue;
+        if (auto it = entry.find("username"); it != entry.end() && it->is_string()) {
+            spec.username = it->get<std::string>();
+        }
+        if (auto it = entry.find("credential"); it != entry.end() && it->is_string()) {
+            spec.credential = it->get<std::string>();
+        }
+        out.push_back(std::move(spec));
     }
     return out;
+}
+
+std::vector<IceServerSpec> ConfiguredIceServers() {
+    if (const char* raw = std::getenv("TENBOX_ICE_SERVERS"); raw && raw[0] != '\0') {
+        if (auto parsed = ParseIceServersJson(raw); parsed && !parsed->empty()) {
+            return std::move(*parsed);
+        }
+        // Fall through to the legacy env var / defaults rather than
+        // returning an empty list - an operator who sets a broken
+        // JSON value should still get a working daemon.
+    }
+    if (const char* raw = std::getenv("TENBOX_STUN_SERVERS"); raw && raw[0] != '\0') {
+        IceServerSpec spec;
+        spec.urls = SplitCommaSeparated(raw);
+        if (!spec.urls.empty()) return {std::move(spec)};
+    }
+    return {DefaultStunServers()};
+}
+
+// Wraps rtc::IceServer construction with a fallback for STUN URLs
+// (which take just a URL) vs TURN URLs (which need a
+// hostname/port/user/pass tuple). libdatachannel's single-arg
+// IceServer(url) constructor already parses "turn://user:pass@host:port"
+// but does NOT accept the W3C-style "turn:host:port" with a separate
+// username/credential, so we peel those apart manually.
+std::optional<rtc::IceServer> BuildRtcIceServer(const std::string& url,
+                                                const std::string& username,
+                                                const std::string& credential) {
+    if (username.empty() && credential.empty()) {
+        return rtc::IceServer(url);
+    }
+    // TURN URL shape: "turn[s]:host[:port][?transport=udp|tcp]". Strip
+    // the scheme so IceServer's hostname/service constructor can chew
+    // on what's left. Any URL that isn't recognisably TURN falls back
+    // to the single-arg constructor.
+    auto starts_with = [](std::string_view s, std::string_view p) {
+        return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
+    };
+    std::string_view body(url);
+    auto relay_type = rtc::IceServer::RelayType::TurnUdp;
+    if (starts_with(body, "turns:")) {
+        body.remove_prefix(6);
+        relay_type = rtc::IceServer::RelayType::TurnTls;
+    } else if (starts_with(body, "turn:")) {
+        body.remove_prefix(5);
+    } else {
+        return rtc::IceServer(url);
+    }
+    auto qmark = body.find('?');
+    std::string_view host_port = qmark == std::string_view::npos ? body : body.substr(0, qmark);
+    if (qmark != std::string_view::npos) {
+        std::string_view query = body.substr(qmark + 1);
+        if (query.find("transport=tcp") != std::string_view::npos) {
+            // Keep TLS relay type for turns:, otherwise switch to TCP.
+            if (relay_type != rtc::IceServer::RelayType::TurnTls) {
+                relay_type = rtc::IceServer::RelayType::TurnTcp;
+            }
+        }
+    }
+    auto colon = host_port.rfind(':');
+    std::string host;
+    std::string service;
+    if (colon == std::string_view::npos) {
+        host = std::string(host_port);
+        service = (relay_type == rtc::IceServer::RelayType::TurnTls) ? "5349" : "3478";
+    } else {
+        host = std::string(host_port.substr(0, colon));
+        service = std::string(host_port.substr(colon + 1));
+    }
+    if (host.empty()) return std::nullopt;
+    return rtc::IceServer(std::move(host), std::move(service), username, credential, relay_type);
 }
 
 std::string StripLipSyncGroups(std::string sdp) {
@@ -177,14 +311,24 @@ public:
           preferred_video_format_(preferred_video_format) {
         EnsureLibDatachannelLoggerInstalled();
         rtc::Configuration config;
-        for (const auto& url : ConfiguredStunServers()) {
-            try {
-                config.iceServers.emplace_back(url);
-            } catch (const std::exception& e) {
-                std::fprintf(stdout,
-                             "[WARN]  remote_webrtc: ignoring invalid STUN url %s: %s\n",
-                             url.c_str(), e.what());
-                std::fflush(stdout);
+        for (const auto& spec : ConfiguredIceServers()) {
+            for (const auto& url : spec.urls) {
+                try {
+                    auto built = BuildRtcIceServer(url, spec.username, spec.credential);
+                    if (built) {
+                        config.iceServers.push_back(std::move(*built));
+                    } else {
+                        std::fprintf(stdout,
+                                     "[WARN]  remote_webrtc: ignoring malformed ICE url %s\n",
+                                     url.c_str());
+                        std::fflush(stdout);
+                    }
+                } catch (const std::exception& e) {
+                    std::fprintf(stdout,
+                                 "[WARN]  remote_webrtc: ignoring invalid ICE url %s: %s\n",
+                                 url.c_str(), e.what());
+                    std::fflush(stdout);
+                }
             }
         }
         config.disableAutoNegotiation = true;
@@ -1411,8 +1555,8 @@ bool NativeWebRtcAvailable() {
     return true;
 }
 
-std::vector<std::string> ResolvedStunServers() {
-    return ConfiguredStunServers();
+std::vector<IceServerSpec> ResolvedIceServers() {
+    return ConfiguredIceServers();
 }
 
 }  // namespace tenbox::daemon

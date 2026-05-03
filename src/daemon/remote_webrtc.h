@@ -109,11 +109,28 @@ std::shared_ptr<WebRtcPeer> CreateWebRtcPeer(
     PixelFormat preferred_video_format = PixelFormat::kYuv420p);
 bool NativeWebRtcAvailable();
 
-// Returns the resolved STUN URL list (TENBOX_STUN_SERVERS override or the
-// CN-leaning defaults). Exposed so the cloud tunnel can advertise the
-// same servers to the browser-side RTCPeerConnection - keeping both sides
-// of the connection probing the same set avoids one peer giving up on
-// srflx because it picked a server the other peer cannot reach.
-std::vector<std::string> ResolvedStunServers();
+// One ICE server entry in the W3C `RTCIceServer`-shaped form we also
+// advertise to the browser over the cloud websocket. A single entry can
+// carry multiple URLs sharing the same credentials (e.g. the UDP and TCP
+// variants of the same TURN host). For pure STUN entries `username`
+// and `credential` are empty.
+struct IceServerSpec {
+    std::vector<std::string> urls;
+    std::string username;
+    std::string credential;
+};
+
+// Returns the resolved ICE server list. Source of truth is (in order):
+//   1. TENBOX_ICE_SERVERS - JSON array of W3C-shaped entries, supports
+//      STUN + TURN with credentials.
+//   2. TENBOX_STUN_SERVERS - legacy comma-separated STUN-only URLs.
+//   3. Built-in CN-reachable STUN defaults.
+// Exposed so the cloud tunnel can advertise the same list to the
+// browser-side RTCPeerConnection - keeping both peers probing the same
+// set avoids one giving up on srflx because it picked a server the
+// other peer cannot reach. See docs/turn-rollout.md in tenbox-cloud for
+// the production provisioning plan (TURN credentials are minted by the
+// cloud signaling layer, not the daemon).
+std::vector<IceServerSpec> ResolvedIceServers();
 
 }  // namespace tenbox::daemon
