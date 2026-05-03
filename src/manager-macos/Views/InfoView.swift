@@ -128,16 +128,18 @@ struct AddSharedFolderSheet: View {
 
 struct AddHostForwardSheet: View {
     let vmId: String
+    var existing: HostForward? = nil
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: HostForwardField?
 
+    @State private var nameText = ""
     @State private var hostIpText = "127.0.0.1"
     @State private var hostPortText = ""
     @State private var guestIpText = "10.0.2.15"
     @State private var guestPortText = ""
 
-    private enum HostForwardField { case hostIp, hostPort, guestIp, guestPort }
+    private enum HostForwardField { case name, hostIp, hostPort, guestIp, guestPort }
 
     private var hostPort: UInt16? { UInt16(hostPortText) }
     private var guestPort: UInt16? { UInt16(guestPortText) }
@@ -145,15 +147,19 @@ struct AddHostForwardSheet: View {
         guard let hp = hostPort, let gp = guestPort else { return false }
         return hp >= 1 && gp >= 1 && !hostIpText.isEmpty
     }
+    private var isEditing: Bool { existing != nil }
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Host → Guest")
+            Text(isEditing ? "Edit Host → Guest" : "Host → Guest")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .padding()
 
             Form {
+                TextField("Name (optional)", text: $nameText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .name)
                 TextField("Host IP", text: $hostIpText)
                     .disableAutocorrection(true)
                     .focused($focusedField, equals: .hostIp)
@@ -169,24 +175,35 @@ struct AddHostForwardSheet: View {
                     .focused($focusedField, equals: .guestPort)
             }
             .padding(.horizontal)
-            .onAppear { focusedField = .hostPort }
+            .onAppear {
+                if let pf = existing {
+                    nameText = pf.name
+                    hostIpText = pf.effectiveHostIp
+                    hostPortText = String(pf.hostPort)
+                    guestPortText = String(pf.guestPort)
+                }
+                focusedField = .name
+            }
 
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Add") { addHostForward() }
+                Button(isEditing ? "Save" : "Add") { addHostForward() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!isValid)
             }
             .padding()
         }
-        .frame(width: 340, height: 260)
+        .frame(width: 340, height: 300)
     }
 
     private func addHostForward() {
         guard let hp = hostPort, let gp = guestPort else { return }
-        let pf = HostForward(hostPort: hp, guestPort: gp, hostIp: hostIpText, guestIp: guestIpText)
+        if let old = existing {
+            appState.removeHostForward(hostPort: old.hostPort, fromVm: vmId)
+        }
+        let pf = HostForward(name: nameText, hostPort: hp, guestPort: gp, hostIp: hostIpText, guestIp: guestIpText)
         appState.addHostForward(pf, toVm: vmId)
         dismiss()
     }
@@ -194,16 +211,18 @@ struct AddHostForwardSheet: View {
 
 struct AddGuestForwardSheet: View {
     let vmId: String
+    var existing: GuestForward? = nil
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: GuestForwardField?
 
+    @State private var nameText = ""
     @State private var guestIpText = "10.0.2.2"
     @State private var guestPortText = ""
     @State private var hostAddrText = "127.0.0.1"
     @State private var hostPortText = ""
 
-    private enum GuestForwardField { case guestIp, guestPort, hostAddr, hostPort }
+    private enum GuestForwardField { case name, guestIp, guestPort, hostAddr, hostPort }
 
     private var guestPort: UInt16? { UInt16(guestPortText) }
     private var hostPort: UInt16? { UInt16(hostPortText) }
@@ -211,15 +230,19 @@ struct AddGuestForwardSheet: View {
         guard let gp = guestPort, let hp = hostPort else { return false }
         return gp >= 1 && hp >= 1 && !guestIpText.isEmpty && !hostAddrText.isEmpty
     }
+    private var isEditing: Bool { existing != nil }
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Guest → Host")
+            Text(isEditing ? "Edit Guest → Host" : "Guest → Host")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .padding()
 
             Form {
+                TextField("Name (optional)", text: $nameText)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .name)
                 TextField("Guest IP", text: $guestIpText)
                     .disableAutocorrection(true)
                     .focused($focusedField, equals: .guestIp)
@@ -234,24 +257,36 @@ struct AddGuestForwardSheet: View {
                     .focused($focusedField, equals: .hostPort)
             }
             .padding(.horizontal)
-            .onAppear { focusedField = .guestPort }
+            .onAppear {
+                if let gf = existing {
+                    nameText = gf.name
+                    guestIpText = gf.guestIp
+                    guestPortText = String(gf.guestPort)
+                    hostAddrText = gf.effectiveHostAddr
+                    hostPortText = String(gf.hostPort)
+                }
+                focusedField = .name
+            }
 
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Add") { addGuestForward() }
+                Button(isEditing ? "Save" : "Add") { addGuestForward() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!isValid)
             }
             .padding()
         }
-        .frame(width: 340, height: 260)
+        .frame(width: 340, height: 300)
     }
 
     private func addGuestForward() {
         guard let gp = guestPort, let hp = hostPort else { return }
-        let gf = GuestForward(guestIp: guestIpText, guestPort: gp, hostAddr: hostAddrText, hostPort: hp)
+        if let old = existing {
+            appState.removeGuestForward(guestIp: old.guestIp, guestPort: old.guestPort, fromVm: vmId)
+        }
+        let gf = GuestForward(name: nameText, guestIp: guestIpText, guestPort: gp, hostAddr: hostAddrText, hostPort: hp)
         appState.addGuestForward(gf, toVm: vmId)
         dismiss()
     }
@@ -347,6 +382,8 @@ struct PortForwardsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showAddPfSheet = false
     @State private var showAddGfSheet = false
+    @State private var editingPf: HostForward? = nil
+    @State private var editingGf: GuestForward? = nil
 
     private var vm: VmInfo? {
         appState.vms.first(where: { $0.id == vmId })
@@ -357,7 +394,7 @@ struct PortForwardsSheet: View {
             if let vm = vm {
                 // Host -> Guest section
                 HStack {
-                    Text("Host → Guest")
+                    Text("Host \u{2192} Guest")
                         .font(.headline)
                     Spacer()
                     Button {
@@ -380,15 +417,25 @@ struct PortForwardsSheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "network")
                                     .foregroundStyle(.secondary)
-                                let guestDisplay = pf.guestIp.isEmpty ? "10.0.2.15" : pf.guestIp
-                                Text(verbatim: "\(pf.effectiveHostIp):\(pf.hostPort)")
-                                    .fontWeight(.medium)
-                                Image(systemName: "arrow.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(verbatim: "\(guestDisplay):\(pf.guestPort)")
-                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if !pf.name.isEmpty {
+                                        Text(pf.name)
+                                            .fontWeight(.medium)
+                                    }
+                                    let guestDisplay = pf.guestIp.isEmpty ? "10.0.2.15" : pf.guestIp
+                                    Text(verbatim: "\(pf.effectiveHostIp):\(pf.hostPort) \u{2192} \(guestDisplay):\(pf.guestPort)")
+                                        .foregroundStyle(pf.name.isEmpty ? .primary : .secondary)
+                                        .font(pf.name.isEmpty ? .body : .caption)
+                                }
                                 Spacer()
+                                Button {
+                                    editingPf = pf
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Edit")
                                 Button(role: .destructive) {
                                     appState.removeHostForward(hostPort: pf.hostPort, fromVm: vmId)
                                 } label: {
@@ -404,7 +451,7 @@ struct PortForwardsSheet: View {
 
                 // Guest -> Host section
                 HStack {
-                    Text("Guest → Host")
+                    Text("Guest \u{2192} Host")
                         .font(.headline)
                     Spacer()
                     Button {
@@ -427,14 +474,24 @@ struct PortForwardsSheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "network")
                                     .foregroundStyle(.secondary)
-                                Text(verbatim: "\(gf.guestIp):\(gf.guestPort)")
-                                    .fontWeight(.medium)
-                                Image(systemName: "arrow.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(verbatim: "\(gf.effectiveHostAddr):\(gf.hostPort)")
-                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if !gf.name.isEmpty {
+                                        Text(gf.name)
+                                            .fontWeight(.medium)
+                                    }
+                                    Text(verbatim: "\(gf.guestIp):\(gf.guestPort) \u{2192} \(gf.effectiveHostAddr):\(gf.hostPort)")
+                                        .foregroundStyle(gf.name.isEmpty ? .primary : .secondary)
+                                        .font(gf.name.isEmpty ? .body : .caption)
+                                }
                                 Spacer()
+                                Button {
+                                    editingGf = gf
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Edit")
                                 Button(role: .destructive) {
                                     appState.removeGuestForward(guestIp: gf.guestIp, guestPort: gf.guestPort, fromVm: vmId)
                                 } label: {
@@ -458,8 +515,14 @@ struct PortForwardsSheet: View {
         .sheet(isPresented: $showAddPfSheet) {
             AddHostForwardSheet(vmId: vmId)
         }
+        .sheet(item: $editingPf) { pf in
+            AddHostForwardSheet(vmId: vmId, existing: pf)
+        }
         .sheet(isPresented: $showAddGfSheet) {
             AddGuestForwardSheet(vmId: vmId)
+        }
+        .sheet(item: $editingGf) { gf in
+            AddGuestForwardSheet(vmId: vmId, existing: gf)
         }
     }
 }

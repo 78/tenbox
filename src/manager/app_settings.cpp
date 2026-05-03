@@ -285,6 +285,7 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
                     if (item.contains("host_ip")) pf.host_ip = item["host_ip"].get<std::string>();
                     else if (item.contains("lan") && item["lan"].get<bool>()) pf.host_ip = "0.0.0.0";
                     if (item.contains("guest_ip")) pf.guest_ip = item["guest_ip"].get<std::string>();
+                    if (item.contains("name") && item["name"].is_string()) pf.name = item["name"].get<std::string>();
                     spec.host_forwards.push_back(pf);
                 }
             }
@@ -300,6 +301,7 @@ bool LoadVmManifest(const std::string& vm_dir, VmSpec& spec) {
                     if (item.contains("host_addr"))
                         gf.host_addr = item["host_addr"].get<std::string>();
                     gf.host_port = item["host_port"].get<uint16_t>();
+                    if (item.contains("name") && item["name"].is_string()) gf.name = item["name"].get<std::string>();
                     spec.guest_forwards.push_back(gf);
                 }
             }
@@ -363,6 +365,7 @@ void SaveVmManifest(const VmSpec& spec) {
         json fj = {{"host_port", f.host_port}, {"guest_port", f.guest_port}};
         if (!f.host_ip.empty() && f.host_ip != "127.0.0.1") fj["host_ip"] = f.host_ip;
         if (!f.guest_ip.empty()) fj["guest_ip"] = f.guest_ip;
+        if (!f.name.empty()) fj["name"] = f.name;
         fwds.push_back(std::move(fj));
     }
     j["host_forwards"] = fwds;
@@ -376,6 +379,7 @@ void SaveVmManifest(const VmSpec& spec) {
         };
         if (!gf.host_addr.empty() && gf.host_addr != "127.0.0.1")
             gj["host_addr"] = gf.host_addr;
+        if (!gf.name.empty()) gj["name"] = gf.name;
         gfwds.push_back(std::move(gj));
     }
     j["guest_forwards"] = gfwds;
