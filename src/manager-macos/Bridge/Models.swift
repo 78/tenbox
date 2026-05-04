@@ -46,6 +46,7 @@ struct SharedFolder: Identifiable, Codable, Equatable {
 
 struct HostForward: Identifiable, Codable, Equatable {
     var id: String { "\(effectiveHostIp):\(hostPort):\(guestPort)" }
+    var name: String = ""
     let hostPort: UInt16
     let guestPort: UInt16
     var hostIp: String = "127.0.0.1"
@@ -57,6 +58,7 @@ struct HostForward: Identifiable, Codable, Equatable {
 
 struct GuestForward: Identifiable, Codable, Equatable {
     var id: String { "\(guestIp):\(guestPort)" }
+    var name: String = ""
     let guestIp: String
     let guestPort: UInt16
     var hostAddr: String = "127.0.0.1"
@@ -168,6 +170,7 @@ struct HostForwardConfig: Codable, Equatable {
     var hostIp: String?
     var guestIp: String?
     var lan: Bool?
+    var name: String?
 
     enum CodingKeys: String, CodingKey {
         case hostPort = "host_port"
@@ -175,6 +178,7 @@ struct HostForwardConfig: Codable, Equatable {
         case hostIp = "host_ip"
         case guestIp = "guest_ip"
         case lan
+        case name
     }
 
     func toHostForward() -> HostForward {
@@ -186,7 +190,7 @@ struct HostForwardConfig: Codable, Equatable {
         } else {
             resolvedHostIp = "127.0.0.1"
         }
-        return HostForward(hostPort: hostPort, guestPort: guestPort,
+        return HostForward(name: name ?? "", hostPort: hostPort, guestPort: guestPort,
                            hostIp: resolvedHostIp, guestIp: guestIp ?? "")
     }
 
@@ -198,6 +202,9 @@ struct HostForwardConfig: Codable, Equatable {
         if !pf.guestIp.isEmpty {
             cfg.guestIp = pf.guestIp
         }
+        if !pf.name.isEmpty {
+            cfg.name = pf.name
+        }
         return cfg
     }
 }
@@ -207,16 +214,18 @@ struct GuestForwardConfig: Codable, Equatable {
     var guestPort: UInt16
     var hostPort: UInt16
     var hostAddr: String?
+    var name: String?
 
     enum CodingKeys: String, CodingKey {
         case guestIp = "guest_ip"
         case guestPort = "guest_port"
         case hostPort = "host_port"
         case hostAddr = "host_addr"
+        case name
     }
 
     func toGuestForward() -> GuestForward {
-        GuestForward(guestIp: guestIp, guestPort: guestPort,
+        GuestForward(name: name ?? "", guestIp: guestIp, guestPort: guestPort,
                      hostAddr: hostAddr ?? "127.0.0.1", hostPort: hostPort)
     }
 
@@ -224,6 +233,9 @@ struct GuestForwardConfig: Codable, Equatable {
         var cfg = GuestForwardConfig(guestIp: gf.guestIp, guestPort: gf.guestPort, hostPort: gf.hostPort)
         if !gf.hostAddr.isEmpty && gf.hostAddr != "127.0.0.1" {
             cfg.hostAddr = gf.hostAddr
+        }
+        if !gf.name.isEmpty {
+            cfg.name = gf.name
         }
         return cfg
     }

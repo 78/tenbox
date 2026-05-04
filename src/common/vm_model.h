@@ -9,6 +9,7 @@
 // forwarded to guest_ip:guest_port inside the VM. Maps 1:1 to QEMU hostfwd.
 // Pairs with `GuestForward` (the reverse direction).
 struct HostForward {
+    std::string name;       // user-facing label for identifying this forward
     uint16_t host_port;
     uint16_t guest_port;
     std::string host_ip;    // empty or "127.0.0.1" = loopback, "0.0.0.0" = LAN
@@ -111,6 +112,7 @@ private:
 // Guest-initiated forwarding: guest connects to guest_ip:guest_port,
 // traffic is forwarded to host_addr:host_port on the host.
 struct GuestForward {
+    std::string name;             // user-facing label for identifying this forward
     uint32_t guest_ip = 0;        // network byte order not used; stored as host uint32
     uint16_t guest_port = 0;
     std::string host_addr;        // empty or "127.0.0.1" = loopback
