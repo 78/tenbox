@@ -65,8 +65,13 @@ public:
         dispatch_source_set_event_handler(s, ^{
             uint64_t next_ns = (*cb_holder)();
             if (next_ns == 0) {
-                // One-shot done or explicit stop: cancel ourselves.
+                // One-shot done: invalidate source_ before cancel so a
+                // concurrent ArmTimer -> Stop won't re-cancel the freed source.
                 dispatch_source_cancel(src_copy);
+                {
+                    std::lock_guard<std::mutex> lk(mu_);
+                    if (source_ == src_copy) source_ = nullptr;
+                }
                 return;
             }
             // Reschedule at the new period.
