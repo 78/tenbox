@@ -379,56 +379,75 @@ VCpuExitAction HvfVCpu::HandleSysReg(uint64_t syndrome) {
     uint64_t pc;
     hv_vcpu_get_reg(vcpu_, HV_REG_PC, &pc);
 
-    if (soft_gic_) {
-        // ESR_EL2 ISS for EC=0x18 (MSR/MRS):
-        //   bit 0:  direction (0=write/MSR, 1=read/MRS)
-        //   bits [9:5]: Rt
-        uint32_t iss = static_cast<uint32_t>(syndrome & 0x1FFFFFF);
-        bool is_read = (iss & 1) != 0;
-        uint8_t rt = (iss >> 5) & 0x1F;
+    // Decode the ISS once. Per ARM ARM (DDI 0487) "ISS encoding for an
+    // exception from an MSR, MRS, or System instruction":
+    //   bits [21:20] = Op0  (stored directly; valid values are 2 or 3)
+    //   bits [19:17] = Op2
+    //   bits [16:14] = Op1
+    //   bits [13:10] = CRn
+    //   bits  [9:5]  = Rt
+    //   bits  [4:1]  = CRm
+    //   bit   [0]    = Direction (0 = MSR write, 1 = MRS read)
+    const uint32_t iss     = static_cast<uint32_t>(syndrome & 0x1FFFFFF);
+    const bool     is_read = (iss & 1) != 0;
+    const uint8_t  rt      = (iss >> 5) & 0x1F;
+    const uint8_t  CRm     = (iss >> 1) & 0xF;
+    const uint8_t  CRn     = (iss >> 10) & 0xF;
+    const uint8_t  Op0     = (iss >> 20) & 0x3;
+    const uint8_t  Op1     = (iss >> 14) & 0x7;
+    const uint8_t  Op2     = (iss >> 17) & 0x7;
 
+    auto write_xt = [this, rt](uint64_t value) {
+        if (rt < 31) {
+            hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + rt), value);
+        }
+    };
+    auto advance_pc = [this, pc]() {
+        hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
+    };
+
+    // 1) Software GICv3 ICC_*_EL1 (only on macOS < 15 software-GIC path).
+    if (soft_gic_) {
         uint64_t reg_value = 0;
         if (!is_read && rt < 31) {
             hv_vcpu_get_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + rt), &reg_value);
         }
-
         if (soft_gic_->HandleIccSysReg(index_, iss, &reg_value)) {
-            if (is_read && rt < 31) {
-                hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + rt), reg_value);
-            }
-            hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
+            if (is_read) write_xt(reg_value);
+            advance_pc();
             return VCpuExitAction::kContinue;
         }
     }
 
-    // Unhandled system register access.
-    // Decode the ISS to extract the register encoding for diagnostics.
-    {
-        uint32_t iss = static_cast<uint32_t>(syndrome & 0x1FFFFFF);
-        bool is_read = (iss & 1) != 0;
-        uint8_t rt = (iss >> 5) & 0x1F;
-        uint8_t CRm = (iss >> 1) & 0xF;
-        uint8_t CRn = (iss >> 10) & 0xF;
-        uint8_t Op0_raw = (iss >> 20) & 0x3;
-        uint8_t Op1 = (iss >> 14) & 0x7;
-        uint8_t Op2 = (iss >> 17) & 0x7;
-        uint32_t Op0 = Op0_raw + 2; // ESR encoding: Op0 is stored as (Op0-2)
-
-        if (is_read) {
-            // For reads, return 0 instead of leaving the register untouched
-            // to avoid leaking stale values that could confuse guest software.
-            if (rt < 31) {
-                hv_vcpu_set_reg(vcpu_, static_cast<hv_reg_t>(HV_REG_X0 + rt), 0);
-            }
-        }
-
-        LOG_WARN("hvf: vCPU %u unhandled sysreg %s S%u_%u_C%u_C%u_%u (Xt=x%u) at PC=0x%" PRIx64,
-                 index_, is_read ? "MRS" : "MSR",
-                 Op0, Op1, CRn, CRm, Op2, rt,
-                 pc);
+    // 2) Op0=2 is the debug architecture register namespace
+    //    (MDSCR_EL1, OSLAR/OSLSR/OSDLR_EL1, DBGBVRn/DBGBCRn/DBGWVRn/DBGWCRn,
+    //    DBGCLAIM*_EL1, MDRAR_EL1, MDCCSR_EL0, ...).
+    //
+    //    macOS HVF does not virtualise hardware debug registers on either the
+    //    software-GIC or hardware-GIC path, so every access traps here. Linux
+    //    benignly clears these on each CPU during early boot
+    //    (`__cpu_setup`, `clear_os_lock`, `hw_breakpoint_reset`), generating
+    //    ~100 traps per boot that are all harmless.
+    //
+    //    Silently absorb: writes are no-ops, reads return 0 (which matches
+    //    the "debug-disabled" defaults — OSLSR_EL1.OSLK=0, MDSCR_EL1.MDE=0,
+    //    cleared breakpoint/watchpoint registers, etc.). Side effect: an
+    //    in-guest debugger that relies on hardware breakpoints will not work,
+    //    which is acceptable for our agent-VM use case.
+    if (Op0 == 2) {
+        if (is_read) write_xt(0);
+        advance_pc();
+        return VCpuExitAction::kContinue;
     }
 
-    hv_vcpu_set_reg(vcpu_, HV_REG_PC, pc + 4);
+    // 3) Genuinely unhandled system register access. Return 0 on reads to
+    //    avoid leaking stale Xt values that could confuse guest software.
+    if (is_read) write_xt(0);
+    LOG_WARN("hvf: vCPU %u unhandled sysreg %s S%u_%u_C%u_C%u_%u (Xt=x%u) at PC=0x%" PRIx64,
+             index_, is_read ? "MRS" : "MSR",
+             Op0, Op1, CRn, CRm, Op2, rt,
+             pc);
+    advance_pc();
     return VCpuExitAction::kContinue;
 }
 
