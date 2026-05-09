@@ -589,6 +589,19 @@ LRESULT CALLBACK DisplayPanel::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     case WM_MBUTTONUP:
     case WM_MOUSEMOVE:
         self->HandleMouse(msg, wp, lp);
+        // Request WM_MOUSELEAVE to detect mouse exiting the window
+        {
+            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd };
+            TrackMouseEvent(&tme);
+        }
+        return 0;
+
+    case WM_MOUSELEAVE:
+        // Mouse left the panel — release all held buttons to prevent stuck state
+        if (self && self->mouse_buttons_ != 0) {
+            self->mouse_buttons_ = 0;
+            if (self->pointer_cb_) self->pointer_cb_(self->last_abs_x_, self->last_abs_y_, 0);
+        }
         return 0;
 
     case WM_MOUSEWHEEL:
