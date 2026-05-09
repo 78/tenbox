@@ -42,17 +42,20 @@ bool FullscreenWindow::Create(HINSTANCE hinst, HMONITOR monitor,
     int w = mr.right - mr.left;
     int h = mr.bottom - mr.top;
 
-    // WS_THICKFRAME needed for DWM to properly handle borderless
+    // Create hidden first so DWM never renders a default border
     hwnd_ = CreateWindowExW(0, kWndClass, L"",
-        WS_POPUP | WS_VISIBLE | WS_THICKFRAME,
+        WS_POPUP | WS_THICKFRAME,
         mr.left, mr.top, w, h,
         nullptr, nullptr, hinst, this);
 
     if (!hwnd_) return false;
 
-    // Extend just 1px to remove DWM white border (Win10), not -1 (transparent)
-    MARGINS m{ 1, 1, 1, 1 };
+    MARGINS m{ 0, 0, 0, 1 };
     DwmExtendFrameIntoClientArea(hwnd_, &m);
+    COLORREF border_color = RGB(0, 0, 0);
+    DwmSetWindowAttribute(hwnd_, DWMWA_BORDER_COLOR, &border_color, sizeof(border_color));
+    DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_DONOTROUND;
+    DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
     SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
         SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE |
         SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE);
@@ -177,7 +180,6 @@ LRESULT CALLBACK FullscreenWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         return 0;
 
     case WM_NCCALCSIZE:
-        // Remove non-client area entirely, keeps DWM shadow on Win10
         if (wp) return 0;
         break;
 
