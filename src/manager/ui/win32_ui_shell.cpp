@@ -4,6 +4,8 @@
 #include "manager/ui/settings_dialog.h"
 #include "manager/ui/llm_proxy_dialog.h"
 #include "manager/ui/win32_display_panel.h"
+#include "manager/ui/win32_fullscreen_window.h"
+#include "manager/ui/win32_floating_toolbar.h"
 #include "manager/ui/info_tab.h"
 #include "manager/ui/console_tab.h"
 #include "manager/ui/vm_listview.h"
@@ -61,6 +63,7 @@ enum CmdId : UINT {
     IDM_LLM_PROXY     = 1027,
     IDM_HELP_DOC      = 1028,
     IDM_TRAY_TOGGLE   = 1029,
+    IDM_FULLSCREEN    = 1030,
 };
 
 // ── Control IDs ──
@@ -110,7 +113,7 @@ extern void ShowPortForwardsDialog(HWND parent, ManagerService& mgr,
 
 // ── Static singleton HWND (needed for InvokeOnUiThread) ──
 
-static HWND g_main_hwnd = nullptr;
+HWND g_main_hwnd = nullptr;
 static std::mutex g_invoke_mutex;
 static std::deque<std::function<void()>> g_invoke_queue;
 
@@ -186,6 +189,12 @@ struct Win32UiShell::Impl {
     InfoTab info_tab;
     ConsoleTab console_tab;
     std::unique_ptr<DisplayPanel> display_panel;
+    std::unique_ptr<FullscreenWindow> fullscreen_window;
+    RECT pre_fullscreen_rect{};
+    bool in_fullscreen = false;
+    std::string display_callbacks_vm_id;
+    DWORD64 esc_tick = 0;
+    UINT_PTR esc_timer = 0;
 
     std::vector<VmRecord> records;
     int selected_index = -1;
@@ -333,6 +342,9 @@ static HMENU BuildMenuBar(bool show_toolbar) {
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(vm_menu), i18n::tr_w(S::kMenuVm).c_str());
 
     HMENU view_menu = CreatePopupMenu();
+    AppendMenuW(view_menu, MF_STRING, IDM_FULLSCREEN,
+               i18n::tr_w(i18n::S::kMenuFullscreen).c_str());
+    AppendMenuW(view_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(view_menu, MF_STRING | (show_toolbar ? MF_CHECKED : MF_UNCHECKED),
                IDM_VIEW_TOOLBAR, i18n::tr_w(S::kMenuViewToolbar).c_str());
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(view_menu), i18n::tr_w(S::kMenuView).c_str());
@@ -365,6 +377,8 @@ static HIMAGELIST CreateToolbarImageList(HINSTANCE hinst, int icon_size) {
         IDB_TOOLBAR_PORT_FORWARDS,
         IDB_TOOLBAR_DPI_ZOOM,
         IDB_TOOLBAR_LLM_PROXY,
+        IDB_TOOLBAR_FULLSCREEN,
+        IDB_TOOLBAR_FULLSCREEN_EXIT,
     };
 
     HIMAGELIST hil = ImageList_Create(
@@ -420,6 +434,7 @@ static HWND CreateToolbar(HWND parent, HINSTANCE hinst, UINT dpi) {
         {IDM_PORT_FORWARDS, i18n::tr(S::kToolbarPortForwards),   8, 0},
         {0,                 nullptr,                             -1, 0},
         {IDM_DPI_ZOOM,      i18n::tr(S::kToolbarDpiZoom),        9, BTNS_CHECK},
+        {IDM_FULLSCREEN,    i18n::tr(S::kToolbarFullscreen),   11, 0},
         {IDC_SPRING_SEP,    nullptr,                             -1, 0},
         {IDM_LLM_PROXY,     i18n::tr(S::kToolbarLlmProxy),     10, 0},
     };
@@ -771,6 +786,14 @@ static void UpdateCommandStates(Impl* p) {
     SendMessage(p->toolbar, TB_CHECKBUTTON, IDM_DPI_ZOOM,
                 MAKELONG(dpi_scaled ? TRUE : FALSE, 0));
 
+    SendMessage(p->toolbar, TB_ENABLEBUTTON, IDM_FULLSCREEN,
+                MAKELONG((has_sel && running) ? TRUE : FALSE, 0));
+    HMENU view_menu = GetSubMenu(p->menu_bar, 2);
+    if (view_menu) {
+        EnableMenuItem(view_menu, IDM_FULLSCREEN,
+            (has_sel && running) ? MF_ENABLED : MF_GRAYED);
+    }
+
     InvalidateRect(p->toolbar, nullptr, FALSE);
 
     p->console_tab.SetEnabled(running);
@@ -1033,6 +1056,14 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             LayoutControls(p);
             return 0;
         }
+        case IDM_FULLSCREEN: {
+            if (!p->in_fullscreen) {
+                shell->EnterFullscreen();
+            } else {
+                shell->ExitFullscreen();
+            }
+            return 0;
+        }
         case IDM_EDIT: {
             if (p->selected_index < 0 ||
                 p->selected_index >= static_cast<int>(p->records.size()))
@@ -1268,13 +1299,13 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         switch (event) {
         case NIN_SELECT:
         case NIN_KEYSELECT: {
-            // Tray click only ever shows / focuses the window; it never
-            // hides it. This matches the convention of common Windows tray
-            // apps (Discord, Steam, ...) and side-steps the v4 double-click
-            // flicker, since a 2nd NIN_SELECT on an already-visible window
-            // is a no-op. Hiding is done via the X button or the tray
-            // context menu's "Hide to Tray" item.
-            ShowMainWindow(p);
+            // If in fullscreen, bring fullscreen window to front; fallback to main
+            if (p->in_fullscreen && p->fullscreen_window &&
+                IsWindow(p->fullscreen_window->Handle())) {
+                SetForegroundWindow(p->fullscreen_window->Handle());
+            } else {
+                ShowMainWindow(p);
+            }
             return 0;
         }
         case WM_RBUTTONUP:
@@ -1637,9 +1668,15 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                     impl_->selected_index < static_cast<int>(impl_->records.size()) &&
                     impl_->records[impl_->selected_index].spec.vm_id == vm_id);
                 if (is_current) {
-                    impl_->display_panel->AdoptFramebuffer(
-                        state.fb_width, state.fb_height,
-                        state.framebuffer.data(), state.framebuffer.size());
+                    if (impl_->in_fullscreen && impl_->fullscreen_window) {
+                        impl_->fullscreen_window->AdoptVmState(
+                            state.framebuffer, state.fb_width, state.fb_height,
+                            state.cursor, state.cursor_pixels);
+                    } else if (impl_->display_panel) {
+                        impl_->display_panel->AdoptFramebuffer(
+                            state.fb_width, state.fb_height,
+                            state.framebuffer.data(), state.framebuffer.size());
+                    }
                 }
             });
         });
@@ -1656,7 +1693,13 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
                     impl_->selected_index < static_cast<int>(impl_->records.size()) &&
                     impl_->records[impl_->selected_index].spec.vm_id == vm_id);
                 if (is_current) {
-                    impl_->display_panel->UpdateCursor(cursor);
+                    if (impl_->in_fullscreen && impl_->fullscreen_window) {
+                        impl_->fullscreen_window->AdoptVmState(
+                            state.framebuffer, state.fb_width, state.fb_height,
+                            cursor, state.cursor_pixels);
+                    } else if (impl_->display_panel) {
+                        impl_->display_panel->UpdateCursor(cursor);
+                    }
                 }
             });
         });
@@ -1830,10 +1873,308 @@ void Win32UiShell::Hide() {
     ShowWindow(impl_->hwnd, SW_HIDE);
 }
 
+// ── Fullscreen mode ──
+
+void Win32UiShell::EnterFullscreen() {
+    auto* p = impl_.get();
+    if (p->in_fullscreen || !p->display_panel) return;
+    if (p->selected_index < 0 || p->selected_index >= static_cast<int>(p->records.size())) return;
+    const auto& vm_id = p->records[p->selected_index].spec.vm_id;
+
+    // Kill pending resize timer to prevent race condition
+    if (p->resize_timer_id) {
+        KillTimer(p->hwnd, p->resize_timer_id);
+        p->resize_timer_id = 0;
+    }
+
+    GetWindowRect(p->hwnd, &p->pre_fullscreen_rect);
+    HMONITOR monitor = MonitorFromWindow(p->hwnd, MONITOR_DEFAULTTONEAREST);
+
+    p->display_panel->Reparent(nullptr);
+    ShowWindow(p->display_panel->Handle(), SW_HIDE);
+
+    auto fs = std::make_unique<FullscreenWindow>();
+    HINSTANCE hinst = GetModuleHandle(nullptr);
+    auto dp = std::move(p->display_panel);
+
+    if (!fs->Create(hinst, monitor, std::move(dp), vm_id, manager_)) {
+        p->display_panel = std::move(dp);
+        p->display_panel->Reparent(p->hwnd);
+        ShowWindow(p->display_panel->Handle(), SW_SHOW);
+        return;
+    }
+
+    p->display_callbacks_vm_id = vm_id;
+
+    // Wire toolbar callbacks
+    HWND tb = fs->GetToolbarHwnd();
+    if (tb) {
+        FloatingToolbar::SetSwitchCallback(tb, [this, tb](const std::string& vm_id) {
+            InvokeOnUiThread([this, tb, vm_id]() {
+                auto* p2 = impl_.get();
+                if (!p2->in_fullscreen || !p2->fullscreen_window) return;
+                auto vms = manager_.ListVms();
+                int new_sel = -1;
+                for (int i = 0; i < static_cast<int>(vms.size()); ++i) {
+                    if (vms[i].spec.vm_id == vm_id) { new_sel = i; break; }
+                }
+                if (new_sel < 0) return;
+                const auto& spec = vms[new_sel].spec;
+                p2->selected_index = new_sel;
+                p2->display_callbacks_vm_id = spec.vm_id;
+                VmUiState& state = p2->GetVmUiState(spec.vm_id);
+                if (!state.framebuffer.empty()) {
+                    p2->fullscreen_window->AdoptVmState(
+                        state.framebuffer, state.fb_width, state.fb_height,
+                        state.cursor, state.cursor_pixels);
+                }
+                p2->fullscreen_window->SetCurrentVmId(spec.vm_id);
+                float factor = spec.dpi_scaled ? (static_cast<float>(p2->dpi) / 96.0f) : 1.0f;
+                p2->fullscreen_window->ToggleDpiZoom(factor);
+
+                RECT rc;
+                GetClientRect(p2->fullscreen_window->Handle(), &rc);
+                uint32_t dw = static_cast<uint32_t>(rc.right) & ~7u;
+                uint32_t dh = static_cast<uint32_t>(rc.bottom);
+                if (spec.dpi_scaled && p2->dpi != 96) {
+                    dw = static_cast<uint32_t>(MulDiv(static_cast<int>(dw), 96, static_cast<int>(p2->dpi))) & ~7u;
+                    dh = static_cast<uint32_t>(MulDiv(static_cast<int>(dh), 96, static_cast<int>(p2->dpi)));
+                }
+                std::vector<std::string> rids, rnames;
+                for (const auto& vm : vms) {
+                    if (vm.state == VmPowerState::kRunning) {
+                        rids.push_back(vm.spec.vm_id);
+                        rnames.push_back(vm.spec.name);
+                    }
+                }
+                FloatingToolbar::SetVmInfo(tb, spec.vm_id, spec.name,
+                    dw, dh, rids, rnames);
+                FloatingToolbar::SetDpiZoomState(tb, spec.dpi_scaled);
+                p2->fullscreen_window->ShowOsd(i18n::to_wide(spec.name));
+            });
+        });
+        FloatingToolbar::SetDpiZoomCallback(tb, [this, tb]() {
+            auto* p2 = impl_.get();
+            if (p2->selected_index < 0 || p2->selected_index >= static_cast<int>(p2->records.size())) return;
+            auto& spec = p2->records[p2->selected_index].spec;
+            bool new_val = !spec.dpi_scaled;
+            manager_.SetVmDpiScaled(spec.vm_id, new_val);
+            spec.dpi_scaled = new_val;
+            float factor = new_val ? (static_cast<float>(p2->dpi) / 96.0f) : 1.0f;
+            if (p2->fullscreen_window) {
+                p2->fullscreen_window->ToggleDpiZoom(factor);
+            }
+            FloatingToolbar::SetDpiZoomState(tb, new_val);
+            // Update displayed resolution
+            {
+                RECT rc;
+                GetClientRect(p2->fullscreen_window->Handle(), &rc);
+                uint32_t pw = rc.right & ~7u;
+                uint32_t ph = rc.bottom;
+                uint32_t new_w, new_h;
+                if (new_val && p2->dpi != 96) {
+                    new_w = static_cast<uint32_t>(MulDiv(static_cast<int>(pw), 96, static_cast<int>(p2->dpi))) & ~7u;
+                    new_h = static_cast<uint32_t>(MulDiv(static_cast<int>(ph), 96, static_cast<int>(p2->dpi)));
+                } else {
+                    new_w = pw;
+                    new_h = ph;
+                }
+                std::vector<std::string> rids, rnames;
+                auto vms = manager_.ListVms();
+                for (const auto& vm : vms) {
+                    if (vm.state == VmPowerState::kRunning) {
+                        rids.push_back(vm.spec.vm_id);
+                        rnames.push_back(vm.spec.name);
+                    }
+                }
+                FloatingToolbar::SetVmInfo(tb, spec.vm_id, spec.name, new_w, new_h, rids, rnames);
+            }
+        });
+    }
+
+    // Initial toolbar VM info — compute expected fullscreen resolution
+    {
+        auto vms = manager_.ListVms();
+        std::vector<std::string> rids, rnames;
+        const auto* spec = &p->records[p->selected_index].spec;
+        for (const auto& vm : vms) {
+            if (vm.state == VmPowerState::kRunning) {
+                rids.push_back(vm.spec.vm_id);
+                rnames.push_back(vm.spec.name);
+            }
+        }
+        RECT fs_rc;
+        GetClientRect(fs->Handle(), &fs_rc);
+        uint32_t disp_w = static_cast<uint32_t>(fs_rc.right) & ~7u;
+        uint32_t disp_h = static_cast<uint32_t>(fs_rc.bottom);
+        if (spec->dpi_scaled && p->dpi != 96) {
+            disp_w = static_cast<uint32_t>(MulDiv(static_cast<int>(disp_w), 96, static_cast<int>(p->dpi))) & ~7u;
+            disp_h = static_cast<uint32_t>(MulDiv(static_cast<int>(disp_h), 96, static_cast<int>(p->dpi)));
+        }
+        FloatingToolbar::SetVmInfo(tb, spec->vm_id, spec->name,
+            disp_w, disp_h, rids, rnames);
+        FloatingToolbar::SetDpiZoomState(tb, spec->dpi_scaled);
+    }
+
+    fs->SetExitCallback([this]() {
+        InvokeOnUiThread([this]() {
+            ExitFullscreen();
+        });
+    });
+
+    fs->SetSwitchVmCallback([this](const std::string& cur_vm_id, bool forward) {
+        InvokeOnUiThread([this, cur_vm_id, forward]() {
+            auto* p2 = impl_.get();
+            if (!p2->in_fullscreen || !p2->fullscreen_window) return;
+
+            auto vms = manager_.ListVms();
+            std::vector<int> ridx;
+            int ci = -1;
+            for (int i = 0; i < static_cast<int>(vms.size()); ++i) {
+                if (vms[i].state == VmPowerState::kRunning) {
+                    ridx.push_back(i);
+                    if (vms[i].spec.vm_id == cur_vm_id)
+                        ci = static_cast<int>(ridx.size()) - 1;
+                }
+            }
+            if (ridx.empty()) return;
+            if (ci < 0) ci = 0;
+            else if (forward) ci = (ci + 1) % static_cast<int>(ridx.size());
+            else ci = (ci - 1 + static_cast<int>(ridx.size())) % static_cast<int>(ridx.size());
+
+            int new_sel = ridx[ci];
+            const auto& spec = vms[new_sel].spec;
+            p2->selected_index = new_sel;
+            p2->display_callbacks_vm_id = spec.vm_id;
+
+            VmUiState& state = p2->GetVmUiState(spec.vm_id);
+            if (!state.framebuffer.empty()) {
+                p2->fullscreen_window->AdoptVmState(
+                    state.framebuffer, state.fb_width, state.fb_height,
+                    state.cursor, state.cursor_pixels);
+            }
+
+            // Apply DPI zoom factor to DisplayPanel and notify VM of display size
+            p2->fullscreen_window->SetCurrentVmId(spec.vm_id);
+            float factor = spec.dpi_scaled ? (static_cast<float>(p2->dpi) / 96.0f) : 1.0f;
+            p2->fullscreen_window->ToggleDpiZoom(factor);
+
+            HWND tb = p2->fullscreen_window->GetToolbarHwnd();
+            if (tb) {
+                std::vector<std::string> rids, rnames;
+                for (const auto& vm : vms) {
+                    if (vm.state == VmPowerState::kRunning) {
+                        rids.push_back(vm.spec.vm_id);
+                        rnames.push_back(vm.spec.name);
+                    }
+                }
+                // Compute display resolution for toolbar display
+                RECT rc;
+                GetClientRect(p2->fullscreen_window->Handle(), &rc);
+                uint32_t dw = static_cast<uint32_t>(rc.right) & ~7u;
+                uint32_t dh = static_cast<uint32_t>(rc.bottom);
+                if (spec.dpi_scaled && p2->dpi != 96) {
+                    dw = static_cast<uint32_t>(MulDiv(static_cast<int>(dw), 96, static_cast<int>(p2->dpi))) & ~7u;
+                    dh = static_cast<uint32_t>(MulDiv(static_cast<int>(dh), 96, static_cast<int>(p2->dpi)));
+                }
+                FloatingToolbar::SetVmInfo(tb, spec.vm_id, spec.name,
+                    dw, dh, rids, rnames);
+                FloatingToolbar::SetDpiZoomState(tb, spec.dpi_scaled);
+            }
+
+            p2->fullscreen_window->ShowOsd(i18n::to_wide(spec.name));
+        });
+    });
+
+    // Change fullscreen button icon + text to "exit fullscreen"
+    SendMessage(p->toolbar, TB_CHANGEBITMAP, IDM_FULLSCREEN, 12);
+    {
+        std::wstring text = i18n::tr_w(i18n::S::kFullscreenExit);
+        TBBUTTONINFOW tbi{ sizeof(tbi), TBIF_TEXT };
+        tbi.pszText = text.data();
+        tbi.cchText = static_cast<int>(text.size());
+        SendMessageW(p->toolbar, TB_SETBUTTONINFOW, IDM_FULLSCREEN, reinterpret_cast<LPARAM>(&tbi));
+    }
+    p->fullscreen_window = std::move(fs);
+    p->in_fullscreen = true;
+    ShowWindow(p->hwnd, SW_HIDE);
+}
+
+void Win32UiShell::ExitFullscreen() {
+    auto* p = impl_.get();
+    if (!p->in_fullscreen || !p->fullscreen_window) return;
+
+    HWND tb = p->fullscreen_window->GetToolbarHwnd();
+    if (tb) {
+        manager_.app_settings().fullscreen_toolbar =
+            FloatingToolbar::SaveState(tb);
+        manager_.SaveAppSettings();
+    }
+
+    auto dp = p->fullscreen_window->ReleaseDisplayPanel();
+    p->display_panel = std::move(dp);
+    p->fullscreen_window.reset();
+
+    p->display_panel->SetHintOffsetY(0);
+    p->display_panel->Reparent(p->hwnd);
+    ShowWindow(p->display_panel->Handle(), SW_HIDE);
+
+    ShowWindow(p->hwnd, SW_SHOW);
+    SetWindowPos(p->hwnd, nullptr,
+        p->pre_fullscreen_rect.left, p->pre_fullscreen_rect.top,
+        p->pre_fullscreen_rect.right - p->pre_fullscreen_rect.left,
+        p->pre_fullscreen_rect.bottom - p->pre_fullscreen_rect.top,
+        SWP_NOZORDER);
+
+    LayoutControls(p);
+    // Restore fullscreen button icon + text
+    SendMessage(p->toolbar, TB_CHANGEBITMAP, IDM_FULLSCREEN, 11);
+    {
+        std::wstring text = i18n::tr_w(i18n::S::kToolbarFullscreen);
+        TBBUTTONINFOW tbi{ sizeof(tbi), TBIF_TEXT };
+        tbi.pszText = text.data();
+        tbi.cchText = static_cast<int>(text.size());
+        SendMessageW(p->toolbar, TB_SETBUTTONINFOW, IDM_FULLSCREEN, reinterpret_cast<LPARAM>(&tbi));
+    }
+    p->vm_listview.Populate(p->records, p->selected_index);
+    InvalidateRect(p->hwnd, nullptr, TRUE);
+    p->in_fullscreen = false;
+}
+
 void Win32UiShell::Run() {
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
         bool forwarded = false;
+
+        // ESC long press (2s) exits fullscreen — handled here before DispatchMessage
+        if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
+            auto* p = impl_.get();
+            if (p->in_fullscreen && !p->esc_timer) {
+                p->esc_tick = GetTickCount64();
+                p->esc_timer = SetTimer(impl_->hwnd, 3, 250, nullptr);
+            }
+        }
+        if (msg.message == WM_KEYUP && msg.wParam == VK_ESCAPE) {
+            auto* p = impl_.get();
+            if (p->esc_timer) {
+                KillTimer(impl_->hwnd, p->esc_timer);
+                p->esc_timer = 0;
+            }
+        }
+        if (msg.message == WM_TIMER && msg.wParam == 3) {
+            auto* p = impl_.get();
+            if (p->in_fullscreen && p->esc_timer) {
+                if (GetTickCount64() - p->esc_tick >= 2000) {
+                    KillTimer(impl_->hwnd, p->esc_timer);
+                    p->esc_timer = 0;
+                    ExitFullscreen();
+                }
+            } else {
+                KillTimer(impl_->hwnd, 3);
+            }
+            continue;
+        }
+
         if (msg.message == WM_KEYDOWN || msg.message == WM_KEYUP ||
             msg.message == WM_SYSKEYDOWN || msg.message == WM_SYSKEYUP) {
             int cur_tab = static_cast<int>(SendMessage(impl_->tab, TCM_GETCURSEL, 0, 0));

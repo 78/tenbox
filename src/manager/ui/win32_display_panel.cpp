@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstring>
 
+extern HWND g_main_hwnd;
+
 static const wchar_t* kDisplayPanelClass = L"TenBoxDisplayPanel";
 static bool g_class_registered = false;
 
@@ -237,6 +239,14 @@ void DisplayPanel::SetVisible(bool visible) {
     if (hwnd_) ShowWindow(hwnd_, visible ? SW_SHOW : SW_HIDE);
 }
 
+void DisplayPanel::Reparent(HWND new_parent) {
+    if (!hwnd_) return;
+    SetParent(hwnd_, new_parent);
+    RECT rc;
+    GetClientRect(new_parent, &rc);
+    SetBounds(0, 0, rc.right, rc.bottom);
+}
+
 void DisplayPanel::CalcDisplayRect(int cw, int ch, RECT* out) const {
     if (fb_width_ == 0 || fb_height_ == 0 || cw <= 0 || ch <= 0) {
         *out = {0, 0, cw, ch};
@@ -334,7 +344,7 @@ void DisplayPanel::OnPaint() {
         int pill_w = text_sz.cx + pad_x * 2;
         int pill_h = text_sz.cy + pad_y * 2;
         int pill_x = (rc.right - pill_w) / 2;
-        int pill_y = 6;
+        int pill_y = 6 + hint_offset_y_;
 
         RECT pill_rc = {pill_x, pill_y, pill_x + pill_w, pill_y + pill_h};
         HBRUSH bg_brush = CreateSolidBrush(RGB(48, 48, 48));
@@ -522,19 +532,24 @@ LRESULT CALLBACK DisplayPanel::LowLevelKeyboardProc(int nCode, WPARAM wp, LPARAM
             return 1;
         }
 
-        // Distinguish left/right modifiers
+        // Distinguish left/right modifiers for evdev mapping
         if (vk == VK_CONTROL) vk = extended ? VK_RCONTROL : VK_LCONTROL;
         if (vk == VK_MENU)    vk = extended ? VK_RMENU : VK_LMENU;
         if (vk == VK_SHIFT) {
             vk = (kb->scanCode == 0x36) ? VK_RSHIFT : VK_LSHIFT;
         }
 
+        // Forward to guest
         uint32_t evdev = VkToEvdev(vk);
         if (evdev && g_captured_panel->key_cb_) {
             g_captured_panel->key_cb_(evdev, pressed);
         }
 
-        // Swallow the key so the host OS does not act on it
+        // ESC passes through for long-press exit; everything else swallowed
+        if (vk == VK_ESCAPE) {
+            return CallNextHookEx(nullptr, nCode, wp, lp);
+        }
+
         return 1;
     }
     return CallNextHookEx(nullptr, nCode, wp, lp);

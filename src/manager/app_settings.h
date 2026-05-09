@@ -19,6 +19,12 @@ struct WindowGeometry {
     int width = 1024, height = 680;
 };
 
+struct FullscreenToolbarState {
+    int snap_edge = 0;    // 0=top, 1=bottom, 2=left, 3=right
+    int offset = -1;       // pixel offset along edge, -1 = centered
+    bool pinned = false;
+};
+
 enum class LlmApiType : uint8_t {
     kOpenAiCompletions = 0,  // POST /v1/chat/completions
     // Future:
@@ -41,6 +47,8 @@ struct LlmProxySettings {
 
 struct AppSettings {
     WindowGeometry window;
+    FullscreenToolbarState fullscreen_toolbar;
+    int fullscreen_monitor_index = 0;  // last monitor used for fullscreen
     std::vector<std::string> vm_paths;
     bool show_toolbar = true;
     bool close_to_tray = true;      // X button hides to system tray instead of quitting
