@@ -4,6 +4,7 @@
 #include "../resource.h"
 #include <commctrl.h>
 #include <windowsx.h>
+#include <climits>
 
 namespace {
 constexpr const wchar_t* kWndClass = L"TenBoxFloatingToolbar";
@@ -90,6 +91,12 @@ HWND FloatingToolbar::Create(HINSTANCE hinst, HWND fullscreen_hwnd) {
         reinterpret_cast<LPARAM>(LoadBitmapW(hinst, MAKEINTRESOURCEW(IDB_FS_EXIT))));
 
     LayoutButtons(hwnd);
+    {
+        RECT pr;
+        GetWindowRect(fullscreen_hwnd, &pr);
+        st->free_pos.x = (pr.left + pr.right - st->tb_width) / 2;
+        st->free_pos.y = pr.top + 15;
+    }
     UpdatePosition(hwnd);
 
     // Create tooltip control
@@ -321,7 +328,7 @@ void FloatingToolbar::UpdatePosition(HWND hwnd) {
     switch (st->snap) {
     case SnapEdge::Top:
         x = (st->offset >= 0) ? pr.left + st->offset : cx;
-        y = pr.top + 15; break;
+        y = pr.top + 2; break;
     case SnapEdge::Bottom:
         x = (st->offset >= 0) ? pr.left + st->offset : cx;
         y = pr.bottom - st->tb_height - 2; break;
@@ -350,14 +357,27 @@ void FloatingToolbar::SnapToNearestEdge(HWND hwnd) {
     int d_right = pr.right - tr.right;
     int cx = (tr.left + tr.right) / 2;
     int cy = (tr.top + tr.bottom) / 2;
-    const int kSnapDist = 80;
-    int min_d = d_top;
+    const int kSnapDistTop = 8;
+    const int kSnapDistBot = 80;
+    const int kSnapDistLeft = 80;
+    const int kSnapDistRight = 80;
+
+    int best_d = INT_MAX;
     SnapEdge best = SnapEdge::Top;
-    int best_off = cx - pr.left;
-    if (d_bot < min_d) { min_d = d_bot; best = SnapEdge::Bottom; best_off = cx - pr.left; }
-    if (d_left < min_d) { min_d = d_left; best = SnapEdge::Left;   best_off = cy - pr.top; }
-    if (d_right < min_d) { min_d = d_right; best = SnapEdge::Right; best_off = cy - pr.top; }
-    if (min_d <= kSnapDist) {
+    int best_off = 0;
+    if (d_top <= kSnapDistTop && d_top < best_d) {
+        best_d = d_top; best = SnapEdge::Top; best_off = cx - pr.left;
+    }
+    if (d_bot <= kSnapDistBot && d_bot < best_d) {
+        best_d = d_bot; best = SnapEdge::Bottom; best_off = cx - pr.left;
+    }
+    if (d_left <= kSnapDistLeft && d_left < best_d) {
+        best_d = d_left; best = SnapEdge::Left; best_off = cy - pr.top;
+    }
+    if (d_right <= kSnapDistRight && d_right < best_d) {
+        best_d = d_right; best = SnapEdge::Right; best_off = cy - pr.top;
+    }
+    if (best_d < INT_MAX) {
         st->snap = best;
         st->offset = best_off;
         st->snapped = true;
@@ -383,11 +403,11 @@ void FloatingToolbar::CheckMouseNearEdge(HWND hwnd, POINT cursor) {
     int screen_cx = (pr.left + pr.right) / 2;
     const int kSafeZoneHalfW = screen_w / 3;  // 2/3 of screen width
 
-    // "Safe zone": top center 2/3 of screen — always snap to default position and show full toolbar
+    // "Safe zone": top center 2/3 of screen — show at initial position
     if (cursor.y <= pr.top + 10 && abs(cursor.x - screen_cx) <= kSafeZoneHalfW) {
-        st->snap = SnapEdge::Top;
-        st->offset = -1;
-        st->snapped = true;
+        st->snapped = false;
+        st->free_pos.x = (pr.left + pr.right - st->tb_width) / 2;
+        st->free_pos.y = pr.top + 15;
         st->tab_mode = false;
         UpdatePosition(hwnd);
         ShowBar(hwnd);

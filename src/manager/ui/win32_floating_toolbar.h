@@ -45,7 +45,7 @@ private:
 
     struct ToolbarState {
         bool pinned = true;
-        bool snapped = true;       // false = free-floating
+        bool snapped = false;      // false = free-floating
         SnapEdge snap = SnapEdge::Top;
         int offset = -1;
         POINT free_pos{};          // position when free-floating
