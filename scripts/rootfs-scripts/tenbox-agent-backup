@@ -95,7 +95,7 @@ write_status() {
   "updated_at": "$(now_utc)"
 }
 EOF
-    chmod 600 "$dir/status.json"
+    chmod 600 "$dir/status.json" 2>/dev/null || true
 }
 
 write_backup_manifest() {
