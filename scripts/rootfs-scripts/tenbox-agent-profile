@@ -25,6 +25,12 @@ need_tool() {
     command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"
 }
 
+make_tmp_dir() {
+    base="${TENBOX_TMP_DIR:-$HOME_DIR/.cache/tenbox-agent-profile}"
+    mkdir -p "$base"
+    mktemp -d "$base/work.XXXXXX"
+}
+
 agent_path() {
     case "$1" in
         hermes) printf '%s/.hermes\n' "$HOME_DIR" ;;
@@ -126,7 +132,7 @@ export_profile() {
     need_tool zstd
     need_tool sha256sum
 
-    tmp="$(mktemp -d)"
+    tmp="$(make_tmp_dir)"
     trap 'rm -rf "$tmp"' EXIT INT TERM
     mkdir -p "$tmp/files"
 
@@ -162,7 +168,7 @@ import_profile() {
     need_tool zstd
     need_tool sha256sum
 
-    tmp="$(mktemp -d)"
+    tmp="$(make_tmp_dir)"
     trap 'rm -rf "$tmp"' EXIT INT TERM
     tar --zstd -xf "$input" -C "$tmp"
 
