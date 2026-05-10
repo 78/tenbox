@@ -24,6 +24,18 @@ The exported package is a gzip tar archive:
 - `agent_type`: `hermes` or `openclaw`
 - `archive`: `files.tar.gz`
 
+`files.tar.gz` contains the Agent data directory relative to the guest home:
+
+- Hermes: `.hermes`
+- OpenClaw: `.openclaw`
+
+Excluded paths:
+
+- Hermes: `.hermes/logs`, `.hermes/image_cache`, `.hermes/audio_cache`,
+  `.hermes/hermes-agent`, `.hermes/bin`, `.hermes/gateway.pid`,
+  `.hermes/gateway.lock`
+- OpenClaw: `.openclaw/cache`, `.openclaw/.cache`, `.openclaw/workspace/.cache`
+
 Import rejects packages whose `agent_type` does not match the selected Agent.
 Before replacing existing data, it renames the current directory to
 `*.pre-import-YYYYMMDDHHMMSS`.
