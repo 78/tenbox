@@ -150,8 +150,11 @@ final class AgentToolsService {
             let package = try backupPackageURL(vmId: vm.id, agent: agent)
             withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
                 let guestPackage = "/mnt/shared/\(share.tag)/\(agent.rawValue)/\(package.lastPathComponent)"
-                let command = "mkdir -p \(Self.shellQuote("/mnt/shared/\(share.tag)/\(agent.rawValue)"))\n" +
-                    Self.profileExportCommand(agent: agent, outputPath: guestPackage)
+                let command = Self.withSharedFolderReady(
+                    tag: share.tag,
+                    body: "mkdir -p \(Self.shellQuote("/mnt/shared/\(share.tag)/\(agent.rawValue)"))\n" +
+                        Self.profileExportCommand(agent: agent, outputPath: guestPackage)
+                )
                 session.runShellCommand(command, timeout: 420) { result in
                     cleanup()
                     switch result {
@@ -186,7 +189,10 @@ final class AgentToolsService {
             }
             withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
                 let guestPackage = "/mnt/shared/\(share.tag)/\(agent.rawValue)/\(latest.lastPathComponent)"
-                let command = Self.profileImportCommand(agent: agent, inputPath: guestPackage)
+                let command = Self.withSharedFolderReady(
+                    tag: share.tag,
+                    body: Self.profileImportCommand(agent: agent, inputPath: guestPackage)
+                )
                 session.runShellCommand(command, timeout: 420) { result in
                     cleanup()
                     switch result {
@@ -247,7 +253,10 @@ final class AgentToolsService {
                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
             let guestDir = "/mnt/shared/\(share.tag)"
-            let command = Self.diagnosticsCommand(agent: agent, outputDir: guestDir)
+            let command = Self.withSharedFolderReady(
+                tag: share.tag,
+                body: Self.diagnosticsCommand(agent: agent, outputDir: guestDir)
+            )
             session.runShellCommand(command, timeout: 180) { result in
                 cleanup()
                 switch result {
@@ -296,9 +305,12 @@ final class AgentToolsService {
             let package = try backupPackageURL(vmId: vm.id, agent: agent)
             withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
                 let guestPackage = "/mnt/shared/\(share.tag)/\(agent.rawValue)/\(package.lastPathComponent)"
-                let command = "mkdir -p \(Self.shellQuote("/mnt/shared/\(share.tag)/\(agent.rawValue)"))\n" +
-                    Self.profileExportCommand(agent: agent, outputPath: guestPackage) + "\n" +
-                    repairCommand
+                let command = Self.withSharedFolderReady(
+                    tag: share.tag,
+                    body: "mkdir -p \(Self.shellQuote("/mnt/shared/\(share.tag)/\(agent.rawValue)"))\n" +
+                        Self.profileExportCommand(agent: agent, outputPath: guestPackage) + "\n" +
+                        repairCommand
+                )
                 session.runShellCommand(command, timeout: 420) { result in
                     cleanup()
                     switch result {
