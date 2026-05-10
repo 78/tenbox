@@ -138,7 +138,8 @@ export_profile() {
     (cd "$tmp" && find files -type f | LC_ALL=C sort | while IFS= read -r file; do sha256sum "$file"; done > checksums.txt)
 
     mkdir -p "$(dirname "$output")"
-    (cd "$tmp" && tar --zstd -cf "$output.tmp" manifest.json files checksums.txt)
+    (cd "$tmp" && tar --zstd -cf "$tmp/package.tar.zst" manifest.json files checksums.txt)
+    cp "$tmp/package.tar.zst" "$output.tmp"
     mv "$output.tmp" "$output"
     chmod 600 "$output"
     echo "$output"
