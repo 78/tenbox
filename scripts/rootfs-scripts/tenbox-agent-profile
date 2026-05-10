@@ -141,7 +141,7 @@ export_profile() {
     (cd "$tmp" && tar --zstd -cf "$tmp/package.tar.zst" manifest.json files checksums.txt)
     rm -f "$output"
     cp "$tmp/package.tar.zst" "$output"
-    chmod 600 "$output"
+    chmod 600 "$output" 2>/dev/null || true
     echo "$output"
 }
 
