@@ -477,6 +477,39 @@ class AppState: ObservableObject {
                                  sourceURL: sourceURL, completion: completion)
     }
 
+    func agentBackupStatus(vmId: String, agent: AgentKind,
+                           completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("VM not found")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.backupStatus(vm: vm, session: session, appState: self, agent: agent,
+                                completion: completion)
+    }
+
+    func snapshotAgentBackup(vmId: String, agent: AgentKind,
+                             completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("VM not found")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.snapshotBackup(vm: vm, session: session, appState: self, agent: agent,
+                                  completion: completion)
+    }
+
+    func restoreLatestAgentBackup(vmId: String, agent: AgentKind,
+                                  completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("VM not found")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.restoreLatestBackup(vm: vm, session: session, appState: self, agent: agent,
+                                       completion: completion)
+    }
+
     // MARK: - LLM Proxy settings
 
     private var settingsPath: String {
