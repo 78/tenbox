@@ -111,5 +111,5 @@ or dotfile paths.
 
 Repair actions create an Agent data snapshot through `tenbox-agent-backup`
 before changing service state or restoring default model configuration.
-Diagnostics are exported to `/mnt/shared/tenbox-agent-diagnostics-*.tar.gz` with
+Diagnostics are exported to the same writable shared folder as backups with
 common token patterns redacted.
