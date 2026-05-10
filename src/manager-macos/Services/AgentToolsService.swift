@@ -119,6 +119,54 @@ final class AgentToolsService {
         }
     }
 
+    func backupStatus(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                      completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        runBackupCommand(vm: vm, session: session, appState: appState, agent: agent,
+                         command: "status", successMessage: "备份状态已更新",
+                         completion: completion)
+    }
+
+    func snapshotBackup(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                        completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        runBackupCommand(vm: vm, session: session, appState: appState, agent: agent,
+                         command: "snapshot", successMessage: "已创建 Agent 数据备份",
+                         completion: completion)
+    }
+
+    func restoreLatestBackup(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                             completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        runBackupCommand(vm: vm, session: session, appState: appState, agent: agent,
+                         command: "restore", successMessage: "已从最近备份恢复 Agent 数据",
+                         completion: completion)
+    }
+
+    private func runBackupCommand(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                                  command: String, successMessage: String,
+                                  completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
+            let guestDir = "/mnt/shared/\(share.tag)"
+            let shellCommand = "TENBOX_SHARED_DIR=\(Self.shellQuote(guestDir)) TENBOX_VM_ID=\(Self.shellQuote(vm.id)) tenbox-agent-backup \(command) --agent \(agent.rawValue) --vm-id \(Self.shellQuote(vm.id))"
+            session.runShellCommand(shellCommand, timeout: 300) { result in
+                cleanup()
+                switch result {
+                case .success(let commandResult):
+                    guard commandResult.exitCode == 0 else {
+                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent backup command failed" : commandResult.output)))
+                        return
+                    }
+                    completion(.success(AgentToolResult(
+                        message: successMessage,
+                        output: commandResult.output
+                    )))
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+            }
+        } failure: { error in
+            completion(.failure(error))
+        }
+    }
+
     private func withOperationShare(vmId: String, appState: AppState,
                                     perform: (SharedFolder, @escaping () -> Void) -> Void,
                                     failure: (Error) -> Void) {
@@ -150,6 +198,37 @@ final class AgentToolsService {
             create: true
         )
         let dir = appSupport.appendingPathComponent("TenBox/AgentOperations", isDirectory: true)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func withBackupShare(vmId: String, appState: AppState,
+                                 perform: (SharedFolder, @escaping () -> Void) -> Void,
+                                 failure: (Error) -> Void) {
+        do {
+            let dir = try backupDirectory(vmId: vmId)
+            let tag = "tenbox-agent-backups-\(UUID().uuidString.prefix(8).lowercased())"
+            let share = SharedFolder(tag: tag, hostPath: dir.path, readonly: false)
+            appState.addSharedFolder(share, toVm: vmId)
+            let cleanup: () -> Void = { [weak appState] in
+                DispatchQueue.main.async {
+                    appState?.removeSharedFolder(tag: tag, fromVm: vmId)
+                }
+            }
+            perform(share, cleanup)
+        } catch {
+            failure(error)
+        }
+    }
+
+    private func backupDirectory(vmId: String) throws -> URL {
+        let appSupport = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let dir = appSupport.appendingPathComponent("TenBox/AgentBackups/\(vmId)", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

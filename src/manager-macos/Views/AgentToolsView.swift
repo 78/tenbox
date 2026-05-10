@@ -53,6 +53,34 @@ struct AgentToolsSheet: View {
                 .disabled(!canRun)
             }
 
+            Divider()
+
+            Text("Backups")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                Button {
+                    showBackupStatus()
+                } label: {
+                    Label("Status", systemImage: "checklist")
+                }
+                .disabled(!canRun)
+
+                Button {
+                    snapshotBackup()
+                } label: {
+                    Label("Back Up Now", systemImage: "clock.arrow.circlepath")
+                }
+                .disabled(!canRun)
+
+                Button {
+                    restoreLatestBackup()
+                } label: {
+                    Label("Restore Latest", systemImage: "arrow.uturn.backward")
+                }
+                .disabled(!canRun)
+            }
+
             if isRunningOperation {
                 ProgressView()
                     .controlSize(.small)
@@ -78,7 +106,7 @@ struct AgentToolsSheet: View {
             Spacer(minLength: 0)
         }
         .padding()
-        .frame(width: 460, height: 300)
+        .frame(width: 520, height: 390)
     }
 
     private func exportProfile() {
@@ -106,6 +134,27 @@ struct AgentToolsSheet: View {
         }
     }
 
+    private func showBackupStatus() {
+        guard let vm = vm else { return }
+        runOperation {
+            appState.agentBackupStatus(vmId: vm.id, agent: selectedAgent, completion: $0)
+        }
+    }
+
+    private func snapshotBackup() {
+        guard let vm = vm else { return }
+        runOperation {
+            appState.snapshotAgentBackup(vmId: vm.id, agent: selectedAgent, completion: $0)
+        }
+    }
+
+    private func restoreLatestBackup() {
+        guard let vm = vm else { return }
+        runOperation {
+            appState.restoreLatestAgentBackup(vmId: vm.id, agent: selectedAgent, completion: $0)
+        }
+    }
+
     private func runOperation(_ operation: (@escaping (Result<AgentToolResult, Error>) -> Void) -> Void) {
         resultText = ""
         errorText = ""
@@ -115,7 +164,7 @@ struct AgentToolsSheet: View {
                 isRunningOperation = false
                 switch result {
                 case .success(let output):
-                    resultText = output.message
+                    resultText = output.output.isEmpty ? output.message : "\(output.message)\n\(output.output)"
                 case .failure(let error):
                     errorText = error.localizedDescription
                 }
