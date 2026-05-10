@@ -74,10 +74,11 @@ tenbox-agent-backup status --agent hermes --vm-id <vm-id>
 tenbox-agent-backup restore --agent hermes --vm-id <vm-id>
 ```
 
-By default backups are written under:
+By default backups are written under the first writable shared folder. With the
+default TenBox share tag this is usually:
 
 ```text
-/mnt/shared/tenbox-agent-backups/<vm-id>/<agent>/
+/mnt/shared/shared/tenbox-agent-backups/<vm-id>/<agent>/
 ├── agent-data-YYYYMMDDHHMMSS.tar.zst
 ├── agent-data-YYYYMMDDHHMMSS.tar.zst.manifest.json
 └── status.json
