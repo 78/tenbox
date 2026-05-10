@@ -112,6 +112,12 @@ struct ContentView: View {
                     }
                     .help("Manage LLM proxy settings")
 
+                    Button(action: { appState.showAgentToolsSheet = true }) {
+                        Label("Agent Data", systemImage: "externaldrive.badge.person.crop")
+                    }
+                    .disabled(vm.state != .running)
+                    .help("Export or import Agent data")
+
                     Picker("", selection: appState.activeTabBinding(for: vm.id)) {
                         Image(systemName: "info.circle").tag(0)
                         Image(systemName: "terminal").tag(1)
@@ -143,6 +149,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $appState.showLlmProxySheet) {
             LlmProxySheet()
+        }
+        .sheet(isPresented: $appState.showAgentToolsSheet) {
+            if let vm = selectedVm {
+                AgentToolsSheet(vmId: vm.id)
+            }
         }
         .alert("Delete VM", isPresented: $appState.showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
