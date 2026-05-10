@@ -157,6 +157,7 @@ class AppState: ObservableObject {
     private var bridge = TenBoxBridgeWrapper()
     let clipboardHandler = ClipboardHandler()
     private var activeSessions: [String: VmSession] = [:]
+    private var runtimeSharedFolders: [String: [SharedFolder]] = [:]
     private var sessionCancellables: [String: AnyCancellable] = [:]
     private var stateObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
@@ -164,6 +165,7 @@ class AppState: ObservableObject {
     private var sleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
 
     init() {
+        bridge.configStore.purgeAgentToolSharedFolders()
         refreshVmList()
         NSLog("[TenBoxApp] Loaded %d VM(s):", vms.count)
         for vm in vms {
@@ -431,6 +433,20 @@ class AppState: ObservableObject {
         sendSharedFoldersUpdateIfRunning(vmId: vmId)
     }
 
+    func addRuntimeSharedFolder(_ folder: SharedFolder, toVm vmId: String) {
+        runtimeSharedFolders[vmId, default: []].removeAll { $0.tag == folder.tag }
+        runtimeSharedFolders[vmId, default: []].append(folder)
+        sendSharedFoldersUpdateIfRunning(vmId: vmId)
+    }
+
+    func removeRuntimeSharedFolder(tag: String, fromVm vmId: String) {
+        runtimeSharedFolders[vmId]?.removeAll { $0.tag == tag }
+        if runtimeSharedFolders[vmId]?.isEmpty == true {
+            runtimeSharedFolders.removeValue(forKey: vmId)
+        }
+        sendSharedFoldersUpdateIfRunning(vmId: vmId)
+    }
+
     func addHostForward(_ pf: HostForward, toVm vmId: String) {
         _ = bridge.addHostForward(pf, toVm: vmId)
         refreshVmList()
@@ -582,7 +598,8 @@ class AppState: ObservableObject {
     private func sendSharedFoldersUpdateIfRunning(vmId: String) {
         guard let session = activeSessions[vmId], session.ipcClient.isConnected,
               let vm = vms.first(where: { $0.id == vmId }) else { return }
-        let entries = vm.sharedFolders.map { f in
+        let folders = vm.sharedFolders + (runtimeSharedFolders[vmId] ?? [])
+        let entries = folders.map { f in
             "\(f.tag)|\(f.hostPath)|\(f.readonly ? "1" : "0")"
         }
         session.ipcClient.sendSharedFoldersUpdate(entries: entries)

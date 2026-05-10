@@ -87,9 +87,11 @@ struct AgentToolsSheet: View {
         panel.title = "Export Agent Data"
         panel.nameFieldStringValue = "\(vm.name)-\(selectedAgent.rawValue)-profile.tar.gz"
         panel.allowedContentTypes = []
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        runOperation {
-            appState.exportAgentProfile(vmId: vm.id, agent: selectedAgent, destinationURL: url, completion: $0)
+        presentPanel(panel) { response in
+            guard response == .OK, let url = panel.url else { return }
+            runOperation {
+                appState.exportAgentProfile(vmId: vm.id, agent: selectedAgent, destinationURL: url, completion: $0)
+            }
         }
     }
 
@@ -100,9 +102,19 @@ struct AgentToolsSheet: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        runOperation {
-            appState.importAgentProfile(vmId: vm.id, agent: selectedAgent, sourceURL: url, completion: $0)
+        presentPanel(panel) { response in
+            guard response == .OK, let url = panel.url else { return }
+            runOperation {
+                appState.importAgentProfile(vmId: vm.id, agent: selectedAgent, sourceURL: url, completion: $0)
+            }
+        }
+    }
+
+    private func presentPanel(_ panel: NSSavePanel, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = NSApplication.shared.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
         }
     }
 

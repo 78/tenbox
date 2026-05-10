@@ -345,11 +345,11 @@ final class AgentToolsService {
             let dir = base.appendingPathComponent("\(vmId)-\(tag)", isDirectory: true)
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
             let share = SharedFolder(tag: tag, hostPath: dir.path, readonly: false)
-            appState.addSharedFolder(share, toVm: vmId)
+            appState.addRuntimeSharedFolder(share, toVm: vmId)
 
             let cleanup: () -> Void = { [weak appState, weak self] in
                 DispatchQueue.main.async {
-                    appState?.removeSharedFolder(tag: tag, fromVm: vmId)
+                    appState?.removeRuntimeSharedFolder(tag: tag, fromVm: vmId)
                     try? self?.fileManager.removeItem(at: dir)
                 }
             }
@@ -366,10 +366,10 @@ final class AgentToolsService {
             let dir = try backupDirectory(vmId: vmId)
             let tag = "tenbox-agent-backups-\(UUID().uuidString.prefix(8).lowercased())"
             let share = SharedFolder(tag: tag, hostPath: dir.path, readonly: false)
-            appState.addSharedFolder(share, toVm: vmId)
+            appState.addRuntimeSharedFolder(share, toVm: vmId)
             let cleanup: () -> Void = { [weak appState] in
                 DispatchQueue.main.async {
-                    appState?.removeSharedFolder(tag: tag, fromVm: vmId)
+                    appState?.removeRuntimeSharedFolder(tag: tag, fromVm: vmId)
                 }
             }
             perform(share, cleanup)
