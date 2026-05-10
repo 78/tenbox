@@ -127,7 +127,7 @@ rotate_backups() {
 snapshot() {
     agent="$1"
     [ -d "$SHARED_DIR" ] || die "shared folder is not mounted"
-    if [ -z "${TENBOX_SHARED_DIR:-}" ] && command -v mountpoint >/dev/null 2>&1 && ! mountpoint -q "$SHARED_DIR"; then
+    if [ -z "${TENBOX_SHARED_DIR:-}" ] && command -v mountpoint >/dev/null 2>&1 && ! mountpoint -q /mnt/shared; then
         die "shared folder is not mounted"
     fi
     [ -d "$(agent_path "$agent")" ] || die "Agent data is not initialized"
