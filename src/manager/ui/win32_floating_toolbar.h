@@ -36,6 +36,7 @@ public:
     static void SetDpiZoomState(HWND hwnd, bool enabled);
 
     static void OnFullscreenDeactivated(HWND hwnd);
+    static void OnFullscreenActivated(HWND hwnd);
     static void CheckMouseNearEdge(HWND hwnd, POINT cursor_screen);
 
 private:

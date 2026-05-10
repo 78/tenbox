@@ -218,11 +218,22 @@ LRESULT CALLBACK FullscreenWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
 
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) {
-            if (self && self->toolbar_hwnd_) {
+            // Don't hide toolbar if it's the window gaining activation (e.g. user clicked it)
+            if (self && self->toolbar_hwnd_ && reinterpret_cast<HWND>(lp) != self->toolbar_hwnd_) {
                 FloatingToolbar::OnFullscreenDeactivated(self->toolbar_hwnd_);
             }
+            return 0;
         }
-        return 0;
+        {
+            LRESULT lr = DefWindowProcW(hwnd, msg, wp, lp);
+            if (self && self->display_panel_) {
+                SetFocus(self->display_panel_->Handle());
+            }
+            if (self && self->toolbar_hwnd_) {
+                FloatingToolbar::OnFullscreenActivated(self->toolbar_hwnd_);
+            }
+            return lr;
+        }
 
     case WM_DISPLAYCHANGE:
         // Re-anchor to current monitor on display config changes

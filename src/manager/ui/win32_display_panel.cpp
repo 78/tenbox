@@ -494,6 +494,7 @@ void DisplayPanel::SetCaptured(bool captured) {
             if (hwnd_) SetTimer(hwnd_, kHintTimerId, kHintDurationMs, nullptr);
         }
     } else {
+        ReleaseAllModifiers();
         UninstallKeyboardHook();
         capture_hint_visible_ = false;
         if (hwnd_) KillTimer(hwnd_, kHintTimerId);
@@ -612,6 +613,7 @@ LRESULT CALLBACK DisplayPanel::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         return 0;
 
     case WM_KILLFOCUS:
+        self->ReleaseAllModifiers();
         self->SetCaptured(false);
         self->mouse_buttons_ = 0;
         return 0;

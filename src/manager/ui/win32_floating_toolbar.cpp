@@ -9,17 +9,17 @@
 namespace {
 constexpr const wchar_t* kWndClass = L"TenBoxFloatingToolbar";
 
-constexpr int kBarHeight = 56;
+constexpr int kBarHeight = 62;
 constexpr int kBtnH = 38;
-constexpr int kPad = 12;
-constexpr int kGripW = 52;
+constexpr int kPad = 10;
+constexpr int kGripW = 56;
 constexpr int kVmBtnMinW = 280;
 constexpr int kIconBtnW = 40;
 constexpr int kRightPadding = 14;
 constexpr UINT_PTR kHideTimerId = 1;
-constexpr DWORD kAutoHideMs = 3000;
+constexpr DWORD kAutoHideMs = 1500;
 
-enum BtnId { kBtnVm = 301, kBtnDpi = 302, kBtnPin = 303, kBtnExit = 304 };
+enum BtnId { kBtnDrag = 300, kBtnVm = 301, kBtnDpi = 302, kBtnPin = 303, kBtnExit = 304 };
 }
 
 HWND FloatingToolbar::Create(HINSTANCE hinst, HWND fullscreen_hwnd) {
@@ -55,11 +55,11 @@ HWND FloatingToolbar::Create(HINSTANCE hinst, HWND fullscreen_hwnd) {
 
     // Drag handle — TenBox icon
     st->drag_handle = CreateWindowExW(0, WC_STATICW, L"",
-        WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE,
-        0, 0, 0, 0, hwnd, nullptr, hinst, nullptr);
+        WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE | SS_NOTIFY,
+        0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(kBtnDrag), hinst, nullptr);
     {
         HICON icon = static_cast<HICON>(LoadImageW(hinst, MAKEINTRESOURCEW(IDI_APP_ICON),
-            IMAGE_ICON, 48, 48, LR_SHARED));
+            IMAGE_ICON, 54, 54, LR_SHARED));
         SendMessageW(st->drag_handle, STM_SETICON, reinterpret_cast<WPARAM>(icon), 0);
     }
 
@@ -121,6 +121,8 @@ HWND FloatingToolbar::Create(HINSTANCE hinst, HWND fullscreen_hwnd) {
     AddTool(st->btn_exit, L"✕ 退出全屏 (或长按 ESC 2 秒)");
     AddTool(st->btn_vm,   L"切换虚拟机");
 
+    AddTool(st->drag_handle, L"可拖拽至窗口边缘以吸附");
+
     return hwnd;
 }
 
@@ -181,7 +183,7 @@ void FloatingToolbar::SetVmInfo(HWND hwnd, const std::string& current_id, const 
     if (new_w < 420) new_w = 420;
     st->tb_width = new_w;
 
-    SetWindowPos(hwnd, nullptr, 0, 0, st->tb_width, kBarHeight, SWP_NOMOVE | SWP_NOZORDER);
+    SetWindowPos(hwnd, nullptr, 0, 0, st->tb_width, kBarHeight, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     LayoutButtons(hwnd);
     UpdatePosition(hwnd);
     InvalidateRect(hwnd, nullptr, TRUE);  // force full redraw, erase background
@@ -196,9 +198,11 @@ void FloatingToolbar::SetDpiZoomState(HWND hwnd, bool enabled) {
 }
 
 void FloatingToolbar::OnFullscreenDeactivated(HWND hwnd) {
-    auto* st = GetState(hwnd);
-    if (!st) return;
-    if (!st->pinned) HideBar(hwnd);
+    ShowWindow(hwnd, SW_HIDE);
+}
+
+void FloatingToolbar::OnFullscreenActivated(HWND hwnd) {
+    ShowBar(hwnd);
 }
 
 FloatingToolbar::ToolbarState* FloatingToolbar::GetState(HWND hwnd) {
@@ -226,7 +230,7 @@ void FloatingToolbar::ShowBar(HWND hwnd) {
     st->tab_mode = false;
     // Restore full size
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, st->tb_width, st->tb_height,
-        SWP_NOMOVE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InvalidateRect(hwnd, nullptr, TRUE);
     // Show all children
     ShowWindow(st->drag_handle, SW_SHOW);
@@ -293,9 +297,10 @@ void FloatingToolbar::LayoutButtons(HWND hwnd) {
     rx -= kIconBtnW + 2; MoveWindow(st->btn_pin, rx, y, kIconBtnW, kBtnH, FALSE);
     rx -= kIconBtnW + 2; MoveWindow(st->btn_dpi, rx, y, kIconBtnW, kBtnH, FALSE);
 
-    // Drag handle at left
+    // Drag handle at left — taller to fill more vertical space
     int lx = kPad;
-    MoveWindow(st->drag_handle, lx, y, kGripW, kBtnH, FALSE);
+    int grip_h = kBarHeight - 10;
+    MoveWindow(st->drag_handle, lx, 5, kGripW, grip_h, FALSE);
     lx += kGripW + 2;
 
     // VM button fills space between drag handle and icon buttons
@@ -304,7 +309,7 @@ void FloatingToolbar::LayoutButtons(HWND hwnd) {
     MoveWindow(st->btn_vm, lx, y, vm_w, kBtnH, FALSE);
 
     st->tb_height = kBarHeight;
-    SetWindowPos(hwnd, nullptr, 0, 0, st->tb_width, kBarHeight, SWP_NOMOVE | SWP_NOZORDER);
+    SetWindowPos(hwnd, nullptr, 0, 0, st->tb_width, kBarHeight, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void FloatingToolbar::UpdatePosition(HWND hwnd) {
@@ -396,7 +401,7 @@ void FloatingToolbar::SnapToNearestEdge(HWND hwnd) {
 
 void FloatingToolbar::CheckMouseNearEdge(HWND hwnd, POINT cursor) {
     auto* st = GetState(hwnd);
-    if (!st || !st->fullscreen_parent) return;
+    if (!st || !st->fullscreen_parent || st->dragging) return;
     RECT pr;
     GetWindowRect(st->fullscreen_parent, &pr);
     int screen_w = pr.right - pr.left;
@@ -498,7 +503,7 @@ LRESULT CALLBACK FloatingToolbar::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             ClientToScreen(hwnd, &pt);
             int dx = pt.x - st->drag_start.x, dy = pt.y - st->drag_start.y;
             RECT rc; GetWindowRect(hwnd, &rc);
-            SetWindowPos(hwnd, nullptr, rc.left + dx, rc.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            SetWindowPos(hwnd, nullptr, rc.left + dx, rc.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
             st->drag_start = pt;
         }
         return 0;
@@ -520,6 +525,13 @@ LRESULT CALLBACK FloatingToolbar::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
         if (st && !st->pinned) { KillAutoHideTimer(hwnd); StartAutoHideTimer(hwnd); }
         UINT id = LOWORD(wp);
         switch (id) {
+        case kBtnDrag:
+            if (st && !st->dragging) {
+                st->dragging = true;
+                GetCursorPos(&st->drag_start);
+                SetCapture(hwnd);
+            }
+            return 0;
         case kBtnVm: {
             if (st->running_vm_ids.empty()) break;
             HMENU menu = CreatePopupMenu();
