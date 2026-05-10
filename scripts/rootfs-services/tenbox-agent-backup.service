@@ -1,6 +1,0 @@
-[Unit]
-Description=Protect TenBox Agent data
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/tenbox-agent-backup snapshot

@@ -88,10 +88,10 @@ Win/macOS: tenbox-manager ──IPC v1──► tenbox-vm-runtime (WHVP / HVF)
 - **LLM proxy** exists in two places: `src/daemon/llm_proxy.cpp` (Linux) and `src/manager/llm_proxy.cpp` (Windows); change both when the protocol changes.
 - **RemoteSession** is single-instance per VM. Read `remote_webrtc.cpp`'s `force` takeover path before adding DataChannels.
 - **macOS Caps Lock forwarding**: send Caps Lock as a tap (`down` then `up`) on each `flagsChanged` event; AppKit exposes it as a toggle state, but the guest input stack needs a full key press for every switch.
-- **Agent data profile packages**: Hermes/OpenClaw images include `tenbox-agent-profile export|import` for `/mnt/shared/*.tar.zst` migration packages. Keep the format documented in `docs/agent-profile.md` and reject cross-agent imports.
-- **Agent data backups**: Hermes/OpenClaw images include `tenbox-agent-backup` and a systemd timer that writes profile packages to the first writable `/mnt/shared/*` folder, retaining the latest 5 packages by default.
-- **macOS Agent data UI**: `TenBox.app` exposes Agent data export/import from the VM toolbar/menu while a VM is running. It uses a temporary shared folder plus the console channel to call `tenbox-agent-profile` inside the guest.
-- **macOS Agent backup UI**: `TenBox.app` exposes backup status, immediate backup, and restore latest backup actions. Host-triggered backups use `~/Library/Application Support/TenBox/AgentBackups/<vm-id>` as the durable shared folder.
+- **Agent data profile packages**: `TenBox.app` exports/imports Hermes/OpenClaw data without image changes by using a temporary shared folder and console-injected standard shell commands. Keep the gzip package format documented in `docs/agent-profile.md` and reject cross-agent imports.
+- **Agent data backups**: `TenBox.app` writes host-managed backups to `~/Library/Application Support/TenBox/AgentBackups/<vm-id>/<agent>` and retains the latest 5 packages.
+- **macOS Agent data UI**: `TenBox.app` exposes Agent data export/import from the VM toolbar/menu while a VM is running. It must not depend on preinstalled guest TenBox scripts.
+- **macOS Agent backup UI**: `TenBox.app` exposes backup status, immediate backup, and restore latest backup actions. Host-triggered backups use the durable host-managed backup directory.
 - **Static build** (`TENBOX_STATIC_FFMPEG=ON`) requires `/opt/tenbox-deps` (only present inside the CI/packaging container). Dev builds use system shared libs — keep `ON` off by default.
 - **Release**: `docs/release.md` — VERSION bump → commit → push → tag → push tag. Always push commit before tag.
 
