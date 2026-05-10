@@ -32,6 +32,7 @@ class VmSession: ObservableObject {
         let beginMarker: String
         let endPrefix: String
         let completion: (Result<ConsoleCommandResult, Error>) -> Void
+        let beginTimeoutWorkItem: DispatchWorkItem
         let timeoutWorkItem: DispatchWorkItem
     }
 
@@ -233,9 +234,19 @@ class VmSession: ObservableObject {
             let beginMarker = "__TENBOX_CMD_BEGIN_\(token)__"
             let endPrefix = "__TENBOX_CMD_END_\(token)__:"
             let quotedCommand = Self.shellQuote(command)
+            let beginTimeoutWorkItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                guard let pending = self.pendingConsoleCommands[token] else { return }
+                if self.consoleText.range(of: pending.beginMarker, options: .backwards) == nil {
+                    pending.timeoutWorkItem.cancel()
+                    self.pendingConsoleCommands.removeValue(forKey: token)
+                    pending.completion(.failure(ConsoleCommandError("VM shell did not start the command")))
+                }
+            }
             let timeoutWorkItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 if let pending = self.pendingConsoleCommands.removeValue(forKey: token) {
+                    pending.beginTimeoutWorkItem.cancel()
                     pending.completion(.failure(ConsoleCommandError("Command timed out")))
                 }
             }
@@ -244,9 +255,11 @@ class VmSession: ObservableObject {
                 beginMarker: beginMarker,
                 endPrefix: endPrefix,
                 completion: completion,
+                beginTimeoutWorkItem: beginTimeoutWorkItem,
                 timeoutWorkItem: timeoutWorkItem
             )
 
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: beginTimeoutWorkItem)
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
             let wrapped = "stty -echo 2>/dev/null; printf '\\n\(beginMarker)\\n'; /bin/sh -lc \(quotedCommand); rc=$?; printf '\\n\(endPrefix)%s\\n' \"$rc\"; stty echo 2>/dev/null\n"
             self.sendConsoleInput(wrapped)
@@ -283,6 +296,7 @@ class VmSession: ObservableObject {
             }
 
             pending.timeoutWorkItem.cancel()
+            pending.beginTimeoutWorkItem.cancel()
             pendingConsoleCommands.removeValue(forKey: token)
             pending.completion(.success(ConsoleCommandResult(exitCode: exitCode, output: output)))
         }
