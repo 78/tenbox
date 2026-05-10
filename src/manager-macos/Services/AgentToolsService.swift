@@ -43,7 +43,10 @@ final class AgentToolsService {
                 ? "\(vm.name)-\(agent.rawValue)-profile.tar.gz"
                 : destinationURL.lastPathComponent
             let guestPackage = "/mnt/shared/\(share.tag)/\(packageName)"
-            let command = Self.profileExportCommand(agent: agent, outputPath: guestPackage)
+            let command = Self.withSharedFolderReady(
+                tag: share.tag,
+                body: Self.profileExportCommand(agent: agent, outputPath: guestPackage)
+            )
 
             session.runShellCommand(command, timeout: 420) { result in
                 switch result {
@@ -96,7 +99,10 @@ final class AgentToolsService {
             }
 
             let guestPackage = "/mnt/shared/\(share.tag)/\(packageName)"
-            let command = Self.profileImportCommand(agent: agent, inputPath: guestPackage)
+            let command = Self.withSharedFolderReady(
+                tag: share.tag,
+                body: Self.profileImportCommand(agent: agent, inputPath: guestPackage)
+            )
             session.runShellCommand(command, timeout: 420) { result in
                 cleanup()
                 switch result {
@@ -467,6 +473,25 @@ final class AgentToolsService {
         """
     }
 
+    private static func withSharedFolderReady(tag: String, body: String) -> String {
+        let path = "/mnt/shared/\(tag)"
+        return """
+        set -eu
+        share_dir=\(shellQuote(path))
+        i=0
+        while [ "$i" -lt 100 ]; do
+          if [ -d "$share_dir" ] && [ -w "$share_dir" ]; then
+            break
+          fi
+          i=$((i + 1))
+          sleep 0.2
+        done
+        [ -d "$share_dir" ] || { echo "shared folder not mounted: $share_dir" >&2; exit 1; }
+        [ -w "$share_dir" ] || { echo "shared folder is not writable: $share_dir" >&2; exit 1; }
+        \(body)
+        """
+    }
+
     private static func profileImportCommand(agent: AgentKind, inputPath: String) -> String {
         let relPath = agentDataRelativePath(agent)
         return """
@@ -614,6 +639,10 @@ final class AgentToolsService {
                 "--exclude", ".hermes/logs",
                 "--exclude", ".hermes/image_cache",
                 "--exclude", ".hermes/audio_cache",
+                "--exclude", ".hermes/hermes-agent",
+                "--exclude", ".hermes/bin",
+                "--exclude", ".hermes/gateway.pid",
+                "--exclude", ".hermes/gateway.lock",
             ].map(shellQuote).joined(separator: " ")
         case .openclaw:
             return [
