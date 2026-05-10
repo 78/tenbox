@@ -3,7 +3,22 @@ set -eu
 
 USER_NAME="${TENBOX_USER:-tenbox}"
 HOME_DIR="${TENBOX_HOME_DIR:-/home/$USER_NAME}"
-SHARED_DIR="${TENBOX_SHARED_DIR:-/mnt/shared}"
+
+default_shared_dir() {
+    base="/mnt/shared"
+    if [ -d "$base/shared" ]; then
+        echo "$base/shared"
+        return
+    fi
+    first="$(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1 || true)"
+    if [ -n "$first" ]; then
+        echo "$first"
+    else
+        echo "$base"
+    fi
+}
+
+SHARED_DIR="${TENBOX_SHARED_DIR:-$(default_shared_dir)}"
 RETENTION="${TENBOX_BACKUP_RETENTION:-5}"
 VM_ID="${TENBOX_VM_ID:-$(hostname 2>/dev/null || echo local-vm)}"
 BACKUP_ROOT="${TENBOX_BACKUP_ROOT:-$SHARED_DIR/tenbox-agent-backups}"
