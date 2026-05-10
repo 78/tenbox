@@ -85,7 +85,7 @@ struct AgentToolsSheet: View {
         guard let vm = vm else { return }
         let panel = NSSavePanel()
         panel.title = "Export Agent Data"
-        panel.nameFieldStringValue = "\(vm.name)-\(selectedAgent.rawValue)-profile.tar.zst"
+        panel.nameFieldStringValue = "\(vm.name)-\(selectedAgent.rawValue)-profile.tar.gz"
         panel.allowedContentTypes = []
         guard panel.runModal() == .OK, let url = panel.url else { return }
         runOperation {

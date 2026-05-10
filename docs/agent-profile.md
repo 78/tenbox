@@ -1,64 +1,39 @@
-# Agent Data Profile Packages
+# Agent Data Export and Import
 
-TenBox Agent data export/import uses a versioned archive so migration,
-backup, and restore flows can share one artifact shape without exposing
-guest dotfile paths to non-technical users.
+TenBox.app exports and imports Hermes/OpenClaw Agent data without requiring
+images to preinstall TenBox-specific scripts.
 
-## Package Format
+The macOS manager creates a temporary shared folder, then sends a short shell
+command through the existing VM console channel. The command uses standard guest
+tools such as `tar` and `gzip`.
 
-`tenbox-agent-profile.tar.zst` is a zstd-compressed tar archive:
+## Package format
+
+The exported package is a gzip tar archive:
 
 ```text
-tenbox-agent-profile.tar.zst
+<vm>-<agent>-profile.tar.gz
 ├── manifest.json
-├── files/
-└── checksums.txt
+└── files.tar.gz
 ```
 
-`manifest.json` records:
+`manifest.json` contains:
 
 - `format`: `tenbox-agent-profile`
-- `format_version`: currently `1`
+- `format_version`: `2`
 - `agent_type`: `hermes` or `openclaw`
-- `tenbox_version`
-- `created_at`
-- `home`
-- `source_path`
-- `paths`
-- `excluded`
-- `checksums`
+- `archive`: `files.tar.gz`
 
-`checksums.txt` stores SHA-256 hashes for files under `files/`. It never
-contains secret values directly.
+`files.tar.gz` contains the Agent data directory relative to the guest home:
 
-## Supported Agents
+- Hermes: `.hermes`
+- OpenClaw: `.openclaw`
 
-Hermes profile:
+Excluded paths:
 
-- Includes `/home/tenbox/.hermes`
-- Excludes `.hermes/logs`, `.hermes/image_cache`, `.hermes/audio_cache`
-- Sensitive files such as API keys remain inside the package payload; logs
-  and manifest output must not print their values.
+- Hermes: `.hermes/logs`, `.hermes/image_cache`, `.hermes/audio_cache`
+- OpenClaw: `.openclaw/cache`, `.openclaw/.cache`, `.openclaw/workspace/.cache`
 
-OpenClaw profile:
-
-- Includes `/home/tenbox/.openclaw`
-- Excludes `.openclaw/cache`, `.openclaw/.cache`, `.openclaw/workspace/.cache`
-- Sensitive files remain inside the package payload; manifest and logs must
-  not print token values.
-
-QwenPaw is intentionally not included in this version because `.qwenpaw.secret`
-needs a separate sensitivity policy.
-
-## Guest CLI
-
-Inside Hermes and OpenClaw images:
-
-```sh
-tenbox-agent-profile export --agent hermes --output /mnt/shared/agent-data.tar.zst
-tenbox-agent-profile import --agent hermes --input /mnt/shared/agent-data.tar.zst
-```
-
-The import path verifies the archive manifest and checksums, rejects cross-agent
-imports, backs up existing data to `*.pre-import-*`, and then restores ownership
-and permissions for the `tenbox` user.
+Import rejects packages whose `agent_type` does not match the selected Agent.
+Before replacing existing data, it renames the current directory to
+`*.pre-import-YYYYMMDDHHMMSS`.
