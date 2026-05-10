@@ -261,7 +261,7 @@ diagnostics() {
     df -h > "$tmp/disk.txt" 2>&1 || true
     sed -Ei 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1***/g; s/(api[_-]?key[=: ]+)[^ ]+/\1***/Ig' "$tmp"/*.txt "$tmp"/*.json 2>/dev/null || true
     tar -czf "$out" -C "$tmp" .
-    chmod 600 "$out"
+    chmod 600 "$out" 2>/dev/null || true
     echo "$out"
 }
 
