@@ -36,7 +36,7 @@ less,vim,bash-completion,\
 openssh-client,gnupg,apt-transport-https,\
 lsof,strace,sysstat,\
 kmod,pciutils,usbutils,\
-coreutils,findutils,grep,gawk,sed,tar,gzip,bzip2,xz-utils,\
+coreutils,findutils,grep,gawk,sed,tar,gzip,bzip2,xz-utils,zstd,\
 linux-image-arm64,iptables,util-linux,util-linux-extra"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -768,6 +768,8 @@ cp /tmp/rootfs-scripts/virtiofs-automount /usr/local/bin/
 chmod +x /usr/local/bin/virtiofs-automount
 cp /tmp/rootfs-scripts/virtiofs-desktop-sync /usr/local/bin/
 chmod +x /usr/local/bin/virtiofs-desktop-sync
+cp /tmp/rootfs-scripts/tenbox-agent-profile /usr/local/bin/
+chmod +x /usr/local/bin/tenbox-agent-profile
 cp /tmp/rootfs-services/virtiofs-automount.service /etc/systemd/system/
 systemctl enable virtiofs-automount.service 2>/dev/null || true
 cp /tmp/rootfs-services/virtiofs-desktop-sync.service /etc/systemd/system/
