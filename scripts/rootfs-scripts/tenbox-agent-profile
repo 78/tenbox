@@ -139,8 +139,8 @@ export_profile() {
 
     mkdir -p "$(dirname "$output")"
     (cd "$tmp" && tar --zstd -cf "$tmp/package.tar.zst" manifest.json files checksums.txt)
-    cp "$tmp/package.tar.zst" "$output.tmp"
-    mv "$output.tmp" "$output"
+    rm -f "$output"
+    cp "$tmp/package.tar.zst" "$output"
     chmod 600 "$output"
     echo "$output"
 }
