@@ -88,3 +88,27 @@ path estimates source size before export and stops with a clear `space_low`
 status when the host-side shared folder does not have enough free space. Restore
 uses `tenbox-agent-profile import`, so existing Agent data is still protected by
 the `*.pre-import-*` backup before replacement.
+
+## Agent Health and Repair
+
+`tenbox-agent-health` provides a deterministic health report and a small set of
+operator actions:
+
+```sh
+tenbox-agent-health status --agent hermes
+tenbox-agent-health restart --agent hermes
+tenbox-agent-health test-model --agent hermes
+tenbox-agent-health reset-config --agent hermes
+tenbox-agent-health diagnostics --agent hermes
+```
+
+The status report separates Agent service state, gateway reachability, TenBox
+LLM proxy reachability, browser availability, disk space, and the latest
+redacted error summary. User-facing messages use "Agent" and "model
+configuration" wording instead of requiring users to understand systemd, QEMU,
+or dotfile paths.
+
+Repair actions create an Agent data snapshot through `tenbox-agent-backup`
+before changing service state or restoring default model configuration.
+Diagnostics are exported to `/mnt/shared/tenbox-agent-diagnostics-*.tar.gz` with
+common token patterns redacted.

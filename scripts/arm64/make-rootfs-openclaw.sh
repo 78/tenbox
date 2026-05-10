@@ -762,6 +762,8 @@ cp /tmp/rootfs-scripts/tenbox-agent-profile /usr/local/bin/
 chmod +x /usr/local/bin/tenbox-agent-profile
 cp /tmp/rootfs-scripts/tenbox-agent-backup /usr/local/bin/
 chmod +x /usr/local/bin/tenbox-agent-backup
+cp /tmp/rootfs-scripts/tenbox-agent-health /usr/local/bin/
+chmod +x /usr/local/bin/tenbox-agent-health
 cp /tmp/rootfs-services/tenbox-agent-backup.service /etc/systemd/system/
 cp /tmp/rootfs-services/tenbox-agent-backup.timer /etc/systemd/system/
 systemctl enable tenbox-agent-backup.timer 2>/dev/null || true

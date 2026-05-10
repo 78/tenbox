@@ -90,6 +90,7 @@ Win/macOS: tenbox-manager ──IPC v1──► tenbox-vm-runtime (WHVP / HVF)
 - **macOS Caps Lock forwarding**: send Caps Lock as a tap (`down` then `up`) on each `flagsChanged` event; AppKit exposes it as a toggle state, but the guest input stack needs a full key press for every switch.
 - **Agent data profile packages**: Hermes/OpenClaw images include `tenbox-agent-profile export|import` for `/mnt/shared/*.tar.zst` migration packages. Keep the format documented in `docs/agent-profile.md` and reject cross-agent imports.
 - **Agent data backups**: Hermes/OpenClaw images include `tenbox-agent-backup` and a systemd timer that writes profile packages to `/mnt/shared/tenbox-agent-backups/<vm-id>/<agent>/`, retaining the latest 5 packages by default.
+- **Agent health checks**: Hermes/OpenClaw images include `tenbox-agent-health status|restart|test-model|reset-config|diagnostics`; repair actions must snapshot Agent data first and keep user-facing messages in "Agent/model/browser/disk" terms.
 - **Static build** (`TENBOX_STATIC_FFMPEG=ON`) requires `/opt/tenbox-deps` (only present inside the CI/packaging container). Dev builds use system shared libs — keep `ON` off by default.
 - **Release**: `docs/release.md` — VERSION bump → commit → push → tag → push tag. Always push commit before tag.
 

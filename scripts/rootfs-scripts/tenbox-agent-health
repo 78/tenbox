@@ -1,0 +1,274 @@
+#!/bin/sh
+set -eu
+
+USER_NAME="${TENBOX_USER:-tenbox}"
+HOME_DIR="${TENBOX_HOME_DIR:-/home/$USER_NAME}"
+SHARED_DIR="${TENBOX_SHARED_DIR:-/mnt/shared}"
+BACKUP_TOOL="${TENBOX_BACKUP_TOOL:-tenbox-agent-backup}"
+
+usage() {
+    cat >&2 <<EOF
+Usage:
+  tenbox-agent-health status --agent hermes|openclaw
+  tenbox-agent-health restart --agent hermes|openclaw
+  tenbox-agent-health test-model --agent hermes|openclaw
+  tenbox-agent-health reset-config --agent hermes|openclaw
+  tenbox-agent-health diagnostics --agent hermes|openclaw
+EOF
+}
+
+die() {
+    echo "tenbox-agent-health: $*" >&2
+    exit 1
+}
+
+json_quote() {
+    python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))'
+}
+
+now_utc() {
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+agent_path() {
+    case "$1" in
+        hermes) printf '%s/.hermes\n' "$HOME_DIR" ;;
+        openclaw) printf '%s/.openclaw\n' "$HOME_DIR" ;;
+        *) die "unsupported agent: $1" ;;
+    esac
+}
+
+service_name() {
+    case "$1" in
+        hermes) echo hermes-gateway.service ;;
+        openclaw) echo openclaw-gateway.service ;;
+    esac
+}
+
+gateway_port() {
+    case "$1" in
+        hermes) echo "" ;;
+        openclaw) echo 18789 ;;
+    esac
+}
+
+default_agent() {
+    if [ -d "$HOME_DIR/.hermes" ] && [ ! -d "$HOME_DIR/.openclaw" ]; then
+        echo hermes
+    elif [ -d "$HOME_DIR/.openclaw" ] && [ ! -d "$HOME_DIR/.hermes" ]; then
+        echo openclaw
+    else
+        die "use --agent hermes or --agent openclaw"
+    fi
+}
+
+systemctl_user() {
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user "$@" 2>/dev/null
+}
+
+check_service() {
+    svc="$(service_name "$1")"
+    if systemctl_user is-active --quiet "$svc"; then
+        echo ok
+    elif systemctl_user is-enabled --quiet "$svc"; then
+        echo starting
+    else
+        echo error
+    fi
+}
+
+check_port() {
+    port="$(gateway_port "$1")"
+    if [ -z "$port" ]; then
+        echo skipped
+    elif nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
+        echo ok
+    else
+        echo error
+    fi
+}
+
+check_model() {
+    if curl -fsS --max-time 5 http://10.0.2.3/v1/models >/dev/null 2>&1; then
+        echo ok
+    else
+        echo error
+    fi
+}
+
+check_browser() {
+    if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
+        echo ok
+    else
+        echo error
+    fi
+}
+
+check_disk() {
+    free_kb="$(df -Pk "$HOME_DIR" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [ "${free_kb:-0}" -gt 1048576 ]; then
+        echo ok
+    else
+        echo space_low
+    fi
+}
+
+last_error() {
+    svc="$(service_name "$1")"
+    journalctl --user -u "$svc" -n 80 --no-pager 2>/dev/null |
+        sed -n '/error\|Error\|ERROR\|failed\|Failed\|FAILED/p' |
+        tail -n 1 |
+        sed -E 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\\1***/g; s/(api[_-]?key[=: ]+)[^ ]+/\\1***/Ig'
+}
+
+summary_state() {
+    service="$1"
+    port="$2"
+    model="$3"
+    browser="$4"
+    disk="$5"
+    if [ "$disk" = "space_low" ]; then
+        echo "error|磁盘空间不足，请先清理空间或调整备份位置"
+    elif [ "$service" = "error" ]; then
+        echo "error|Agent 没有正常启动，可以点“重新启动 Agent”"
+    elif [ "$port" = "error" ]; then
+        echo "error|Agent 本地入口暂时不可用，可以点“重新启动 Agent”"
+    elif [ "$model" = "error" ]; then
+        echo "error|模型连接不可用，请先重新测试模型或检查模型配置"
+    elif [ "$browser" = "error" ]; then
+        echo "error|浏览器不可用，请修复镜像或重新下载镜像"
+    elif [ "$service" = "starting" ]; then
+        echo "starting|Agent 正在启动，请稍后再试"
+    else
+        echo "ok|Agent 正常"
+    fi
+}
+
+status() {
+    agent="$1"
+    service="$(check_service "$agent")"
+    port="$(check_port "$agent")"
+    model="$(check_model)"
+    browser="$(check_browser)"
+    disk="$(check_disk)"
+    summary="$(summary_state "$service" "$port" "$model" "$browser" "$disk")"
+    state="${summary%%|*}"
+    message="${summary#*|}"
+    error="$(last_error "$agent")"
+    svc="$(service_name "$agent")"
+    port_value="$(gateway_port "$agent")"
+
+    cat <<EOF
+{
+  "agent_type": "$agent",
+  "state": "$state",
+  "message": $(printf '%s' "$message" | json_quote),
+  "updated_at": "$(now_utc)",
+  "checks": {
+    "agent_service": {"state": "$service", "action": "restart_agent"},
+    "gateway_port": {"state": "$port", "port": $( [ -n "$port_value" ] && echo "$port_value" || echo "null" )},
+    "llm_proxy": {"state": "$model", "action": "test_model"},
+    "browser": {"state": "$browser", "action": "repair_image"},
+    "disk": {"state": "$disk", "action": "free_space"}
+  },
+  "service": "$svc",
+  "recent_error": $(printf '%s' "$error" | json_quote)
+}
+EOF
+}
+
+snapshot_before_repair() {
+    agent="$1"
+    command -v "$BACKUP_TOOL" >/dev/null 2>&1 || die "missing $BACKUP_TOOL"
+    "$BACKUP_TOOL" snapshot --agent "$agent" >/dev/null
+}
+
+restart_agent() {
+    agent="$1"
+    snapshot_before_repair "$agent"
+    systemctl_user restart "$(service_name "$agent")" || die "Agent restart failed"
+    status "$agent"
+}
+
+test_model() {
+    agent="$1"
+    result="$(check_model)"
+    if [ "$result" = "ok" ]; then
+        printf '{"agent_type":"%s","state":"ok","message":"模型连接正常"}\n' "$agent"
+    else
+        printf '{"agent_type":"%s","state":"error","message":"模型连接不可用，请检查模型配置"}\n' "$agent"
+        exit 1
+    fi
+}
+
+reset_config() {
+    agent="$1"
+    snapshot_before_repair "$agent"
+    case "$agent" in
+        hermes)
+            mkdir -p "$HOME_DIR/.hermes"
+            cat > "$HOME_DIR/.hermes/config.yaml" <<'EOF'
+model:
+  default: "default"
+  provider: "custom"
+  base_url: "http://10.0.2.3/v1"
+
+terminal:
+  backend: local
+
+approvals:
+  mode: off
+  timeout: 60
+
+display:
+  streaming: true
+EOF
+            ;;
+        openclaw)
+            command -v openclaw >/dev/null 2>&1 || die "OpenClaw command is missing"
+            openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":65536,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}' >/dev/null
+            openclaw config set models.mode merge >/dev/null
+            openclaw config set agents.defaults '{"model":{"primary":"tenbox/default"},"compaction":{"mode":"safeguard"},"workspace":"'"$HOME_DIR"'/.openclaw/workspace","models":{"tenbox/default":{}}}' >/dev/null
+            ;;
+    esac
+    status "$agent"
+}
+
+diagnostics() {
+    agent="$1"
+    [ -d "$SHARED_DIR" ] || die "shared folder is not mounted"
+    out="$SHARED_DIR/tenbox-agent-diagnostics-$agent-$(date -u +%Y%m%d%H%M%S).tar.gz"
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT INT TERM
+    status "$agent" > "$tmp/health.json"
+    systemctl_user status "$(service_name "$agent")" --no-pager > "$tmp/service.txt" 2>&1 || true
+    journalctl --user -u "$(service_name "$agent")" -n 200 --no-pager > "$tmp/journal.txt" 2>&1 || true
+    df -h > "$tmp/disk.txt" 2>&1 || true
+    sed -Ei 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1***/g; s/(api[_-]?key[=: ]+)[^ ]+/\1***/Ig' "$tmp"/*.txt "$tmp"/*.json 2>/dev/null || true
+    tar -czf "$out" -C "$tmp" .
+    chmod 600 "$out"
+    echo "$out"
+}
+
+cmd="${1:-}"
+[ -n "$cmd" ] || { usage; exit 2; }
+shift || true
+
+agent=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --agent) agent="${2:-}"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown option: $1" ;;
+    esac
+done
+[ -n "$agent" ] || agent="$(default_agent)"
+
+case "$cmd" in
+    status) status "$agent" ;;
+    restart) restart_agent "$agent" ;;
+    test-model) test_model "$agent" ;;
+    reset-config) reset_config "$agent" ;;
+    diagnostics) diagnostics "$agent" ;;
+    *) usage; exit 2 ;;
+esac
