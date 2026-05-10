@@ -26,6 +26,14 @@ class VmSession: ObservableObject {
     private weak var clipboardHandler: ClipboardHandler?
     private var connecting = false
     private static let maxConsoleSize = 64 * 1024
+    private var pendingConsoleCommands: [String: PendingConsoleCommand] = [:]
+
+    private struct PendingConsoleCommand {
+        let beginMarker: String
+        let endPrefix: String
+        let completion: (Result<ConsoleCommandResult, Error>) -> Void
+        let timeoutWorkItem: DispatchWorkItem
+    }
 
     init(vmId: String, clipboardHandler: ClipboardHandler) {
         self.vmId = vmId
@@ -213,12 +221,75 @@ class VmSession: ObservableObject {
         ipcClient.sendConsoleInput(text)
     }
 
+    func runShellCommand(_ command: String, timeout: TimeInterval = 120,
+                         completion: @escaping (Result<ConsoleCommandResult, Error>) -> Void) {
+        DispatchQueue.main.async {
+            guard self.connected, self.ipcClient.isConnected else {
+                completion(.failure(ConsoleCommandError("VM console is not connected")))
+                return
+            }
+
+            let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            let beginMarker = "__TENBOX_CMD_BEGIN_\(token)__"
+            let endPrefix = "__TENBOX_CMD_END_\(token)__:"
+            let quotedCommand = Self.shellQuote(command)
+            let timeoutWorkItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                if let pending = self.pendingConsoleCommands.removeValue(forKey: token) {
+                    pending.completion(.failure(ConsoleCommandError("Command timed out")))
+                }
+            }
+
+            self.pendingConsoleCommands[token] = PendingConsoleCommand(
+                beginMarker: beginMarker,
+                endPrefix: endPrefix,
+                completion: completion,
+                timeoutWorkItem: timeoutWorkItem
+            )
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
+            let wrapped = "stty -echo 2>/dev/null; printf '\\n\(beginMarker)\\n'; /bin/sh -lc \(quotedCommand); rc=$?; printf '\\n\(endPrefix)%s\\n' \"$rc\"; stty echo 2>/dev/null\n"
+            self.sendConsoleInput(wrapped)
+        }
+    }
+
     private func appendConsoleText(_ text: String) {
         consoleText.append(text)
         if consoleText.count > Self.maxConsoleSize {
             let excess = consoleText.count - Self.maxConsoleSize * 3 / 4
             consoleText.removeFirst(excess)
         }
+        checkPendingConsoleCommands()
+    }
+
+    private func checkPendingConsoleCommands() {
+        for token in Array(pendingConsoleCommands.keys) {
+            guard let pending = pendingConsoleCommands[token],
+                  let endRange = consoleText.range(of: pending.endPrefix, options: .backwards) else {
+                continue
+            }
+            let afterEnd = consoleText[endRange.upperBound...]
+            guard let lineEnd = afterEnd.firstIndex(where: { $0 == "\n" }) else { continue }
+            let exitText = afterEnd[..<lineEnd].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let exitCode = Int32(exitText) else { continue }
+
+            let beforeEnd = consoleText[..<endRange.lowerBound]
+            let output: String
+            if let beginRange = beforeEnd.range(of: pending.beginMarker, options: .backwards) {
+                output = String(beforeEnd[beginRange.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                output = ""
+            }
+
+            pending.timeoutWorkItem.cancel()
+            pendingConsoleCommands.removeValue(forKey: token)
+            pending.completion(.success(ConsoleCommandResult(exitCode: exitCode, output: output)))
+        }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     static func filterAnsi(_ input: String) -> String {

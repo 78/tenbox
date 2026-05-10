@@ -143,12 +143,14 @@ class AppState: ObservableObject {
     @Published var showForceStopConfirm = false
     @Published var showSharedFoldersSheet = false
     @Published var showPortForwardsSheet = false
+    @Published var showAgentToolsSheet = false
     @Published var startVmError: String?
     @Published var hostForwardError: String?
     @Published var llmMappings: [LlmModelMapping] = []
     @Published var llmLoggingEnabled = false
 
     let llmProxy = LlmProxyService()
+    private let agentTools = AgentToolsService()
     private static let kLlmGuestIp = "10.0.2.3"
     private static let kLlmGuestPort: UInt16 = 80
 
@@ -453,6 +455,28 @@ class AppState: ObservableObject {
         sendNetworkUpdateIfRunning(vmId: vmId)
     }
 
+    func exportAgentProfile(vmId: String, agent: AgentKind, destinationURL: URL,
+                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("VM not found")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.exportProfile(vm: vm, session: session, appState: self, agent: agent,
+                                 destinationURL: destinationURL, completion: completion)
+    }
+
+    func importAgentProfile(vmId: String, agent: AgentKind, sourceURL: URL,
+                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("VM not found")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.importProfile(vm: vm, session: session, appState: self, agent: agent,
+                                 sourceURL: sourceURL, completion: completion)
+    }
+
     // MARK: - LLM Proxy settings
 
     private var settingsPath: String {
@@ -676,5 +700,10 @@ private struct VmCommandMenuContent: View {
             appState.showPortForwardsSheet = true
         }
         .disabled(vm == nil)
+
+        Button("Agent Data...") {
+            appState.showAgentToolsSheet = true
+        }
+        .disabled(vm == nil || !isRunning)
     }
 }
