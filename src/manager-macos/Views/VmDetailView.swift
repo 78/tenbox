@@ -261,7 +261,8 @@ class VmSession: ObservableObject {
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: beginTimeoutWorkItem)
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
-            let wrapped = "stty -echo 2>/dev/null; printf '\\n\(beginMarker)\\n'; /bin/sh -lc \(quotedCommand); rc=$?; printf '\\n\(endPrefix)%s\\n' \"$rc\"; stty echo 2>/dev/null\n"
+            let quotedToken = Self.shellQuote(token)
+            let wrapped = "stty -echo 2>/dev/null; __tenbox_token=\(quotedToken); __tenbox_begin=\"__TENBOX_CMD_BEGIN_${__tenbox_token}__\"; __tenbox_end=\"__TENBOX_CMD_END_${__tenbox_token}__:\"; printf '\\n%s\\n' \"$__tenbox_begin\"; /bin/sh -lc \(quotedCommand); rc=$?; printf '\\n%s%s\\n' \"$__tenbox_end\" \"$rc\"; stty echo 2>/dev/null\n"
             self.sendConsoleInput(wrapped)
         }
     }

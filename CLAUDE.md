@@ -99,6 +99,7 @@ Win/macOS: tenbox-manager ──IPC v1──► tenbox-vm-runtime (WHVP / HVF)
 - **macOS Agent backup UI**: `TenBox.app` exposes backup status, immediate backup, and restore latest backup actions. Host-triggered backups use `~/Library/Application Support/TenBox/AgentBackups/<vm-id>` as the durable shared folder.
 - **macOS Agent health UI**: `TenBox.app` exposes health check, restart, model test, config reset, and diagnostics actions while a VM is running. Repair actions run through app-generated shell commands so no image rebuild is required.
 - **macOS console commands**: Agent tool commands fail quickly if the VM shell does not echo the begin marker, and they wait for the temporary shared folder to become writable before reading or writing packages.
+- **macOS console markers**: do not put the full begin/end marker literal in console input; build it inside the shell so echoed input cannot satisfy marker detection.
 - **macOS app signing**: the app entitlement includes `com.apple.security.cs.disable-library-validation` so the hardened-runtime app can load the bundled Sparkle framework.
 - **Static build** (`TENBOX_STATIC_FFMPEG=ON`) requires `/opt/tenbox-deps` (only present inside the CI/packaging container). Dev builds use system shared libs — keep `ON` off by default.
 - **Release**: `docs/release.md` — VERSION bump → commit → push → tag → push tag. Always push commit before tag.
