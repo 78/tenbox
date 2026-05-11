@@ -18,6 +18,7 @@ struct AgentToolsSheet: View {
     @State private var backupPackages: [AgentBackupPackage] = []
     @State private var selectedBackupId: String?
     @State private var showsAdvancedActions = false
+    @State private var showsAllBackups = false
 
     init(vmId: String, session: VmSession) {
         self.vmId = vmId
@@ -92,6 +93,7 @@ struct AgentToolsSheet: View {
         .onChange(of: selectedAgent, perform: { _ in
             operationResult = nil
             selectedBackupId = nil
+            showsAllBackups = false
             loadSchedule()
             refreshBackupList()
             refreshBackupSummary()
@@ -177,23 +179,13 @@ struct AgentToolsSheet: View {
             .disabled(!canRun)
             .help("检查 Agent 服务、模型代理、浏览器和磁盘状态")
 
-            HStack(spacing: 10) {
-                Button {
-                    snapshotBackup()
-                } label: {
-                    Label("立即备份", systemImage: "clock.arrow.circlepath")
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(!canRun)
-
-                Button {
-                    exportProfile()
-                } label: {
-                    Label("导出迁移包", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(!canRun)
+            Button {
+                snapshotBackup()
+            } label: {
+                Label("立即备份", systemImage: "clock.arrow.circlepath")
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
+            .disabled(!canRun)
 
             Text("建议先点“一键诊断”。只有需要迁移或人工处理时，再导入、重置配置或导出诊断包。")
                 .font(.caption)
@@ -239,6 +231,12 @@ struct AgentToolsSheet: View {
             Text(scheduleDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if let scheduleStatusText {
+                Text(scheduleStatusText)
+                    .font(.caption)
+                    .foregroundStyle(backupSchedule.lastAttemptStatus == "failed" ? Color.orange : Color.secondary)
+            }
         }
         .padding(12)
         .background(.quaternary.opacity(0.45))
@@ -250,6 +248,18 @@ struct AgentToolsSheet: View {
             return "定时备份未启用。默认时间为 03:00，只有 VM 运行且执行通道已连接时才会执行。"
         }
         return "每天 \(backupSchedule.timeText) 自动备份；\(nextBackupText)。"
+    }
+
+    private var scheduleStatusText: String? {
+        guard let at = backupSchedule.lastAttemptAt,
+              let status = backupSchedule.lastAttemptStatus else {
+            return nil
+        }
+        if status == "success" {
+            return "上次自动备份：\(at) 成功"
+        }
+        let message = backupSchedule.lastAttemptMessage ?? "失败"
+        return "上次自动备份失败：\(message)（\(at)）"
     }
 
     private var nextBackupText: String {
@@ -291,10 +301,11 @@ struct AgentToolsSheet: View {
                     .padding(.vertical, 4)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(backupPackages) { package in
+                    ForEach(displayedBackupPackages) { package in
                         BackupPackageRow(
                             package: package,
-                            isSelected: selectedBackupId == package.id
+                            isSelected: selectedBackupId == package.id,
+                            reveal: { revealBackup(package) }
                         ) {
                             selectedBackupId = package.id
                         }
@@ -310,6 +321,13 @@ struct AgentToolsSheet: View {
                     }
                     .disabled(!canRun || selectedBackupPackage == nil)
 
+                    if backupPackages.count > 3 {
+                        Button(showsAllBackups ? "收起" : "显示全部 \(backupPackages.count) 条") {
+                            showsAllBackups.toggle()
+                        }
+                        .buttonStyle(.link)
+                    }
+
                     Spacer()
                 }
             }
@@ -324,12 +342,19 @@ struct AgentToolsSheet: View {
         return backupPackages.first { $0.id == selectedBackupId }
     }
 
+    private var displayedBackupPackages: [AgentBackupPackage] {
+        if showsAllBackups {
+            return backupPackages
+        }
+        return Array(backupPackages.prefix(3))
+    }
+
     private var advancedActionsPanel: some View {
         DisclosureGroup(isExpanded: $showsAdvancedActions) {
             VStack(alignment: .leading, spacing: 10) {
                 operationSection(
                     title: "高级操作",
-                    operations: [.importProfile, .restartAgent, .resetConfig, .diagnostics]
+                    operations: [.exportProfile, .importProfile, .restartAgent, .resetConfig, .diagnostics]
                 )
                 Text("这些操作会改动配置、覆盖数据或生成排障包，建议在诊断结果提示后再使用。")
                     .font(.caption)
@@ -641,6 +666,10 @@ struct AgentToolsSheet: View {
         selectedBackupId = backupPackages.first?.id
     }
 
+    private func revealBackup(_ package: AgentBackupPackage) {
+        NSWorkspace.shared.activateFileViewerSelecting([package.url])
+    }
+
     private func loadSchedule() {
         backupSchedule = appState.agentBackupSchedule(vmId: vmId, agent: selectedAgent)
     }
@@ -659,15 +688,22 @@ struct AgentToolsSheet: View {
                 runningOperation = nil
                 switch result {
                 case .success(let output):
-                    operationResult = Self.makeSuccessDisplay(
+                    let display = Self.makeSuccessDisplay(
                         operation: operation,
                         result: output,
                         revealPath: revealPath
                     )
+                    operationResult = display
+                    if operation == .healthCheck {
+                        showsAdvancedActions = display.healthReport?.state != "ok"
+                    }
                     refreshBackupSummary()
                     refreshBackupList()
                 case .failure(let error):
                     operationResult = Self.makeFailureDisplay(operation: operation, error: error)
+                    if operation == .healthCheck {
+                        showsAdvancedActions = true
+                    }
                     refreshBackupSummary()
                     refreshBackupList()
                 }
@@ -681,12 +717,14 @@ struct AgentToolsSheet: View {
         let raw = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
         let detectedPath = revealPath ?? operation.revealPath(from: result)
         let health = operation.showsHealth ? HealthReport.parse(from: raw) : nil
-        let summary = result.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawSummary = result.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = health?.state == "ok" ? (health?.message ?? rawSummary) : rawSummary
+        let details = operation == .healthCheck && health?.state == "ok" ? "" : raw
         return AgentOperationDisplay(
             isSuccess: true,
             title: operation.successTitle,
             summary: summary.isEmpty ? "操作已完成" : summary,
-            details: raw,
+            details: details,
             revealPath: detectedPath,
             healthReport: health
         )
@@ -781,7 +819,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .exportProfile: return "导出"
+        case .exportProfile: return "导出迁移包"
         case .importProfile: return "导入"
         case .snapshotBackup: return "立即备份"
         case .restoreBackup: return "恢复备份"
@@ -929,27 +967,37 @@ private struct AgentOperationDisplay: Identifiable {
 private struct BackupPackageRow: View {
     let package: AgentBackupPackage
     let isSelected: Bool
+    let reveal: () -> Void
     let select: () -> Void
 
     var body: some View {
-        Button(action: select) {
-            HStack(spacing: 8) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(package.filename)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text("\(Self.dateText(package.modifiedAt)) · \(Self.sizeText(package.sizeBytes))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Button(action: select) {
+                HStack(spacing: 8) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(package.filename)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("\(Self.dateText(package.modifiedAt)) · \(Self.sizeText(package.sizeBytes))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: reveal) {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless)
+            .help("在 Finder 中显示")
         }
-        .buttonStyle(.plain)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
@@ -987,7 +1035,7 @@ private struct AgentOperationResultView: View {
                 Spacer()
             }
 
-            if let report = result.healthReport {
+            if let report = result.healthReport, report.state != "ok" {
                 HealthReportView(report: report)
             }
 

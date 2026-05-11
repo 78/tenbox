@@ -605,13 +605,16 @@ class AppState: ObservableObject {
             hour: schedule.hour,
             minute: schedule.minute,
             keepCount: schedule.keepCount,
-            lastRunDate: schedule.lastRunDate
+            lastRunDate: schedule.lastRunDate,
+            lastAttemptAt: schedule.lastAttemptAt,
+            lastAttemptStatus: schedule.lastAttemptStatus,
+            lastAttemptMessage: schedule.lastAttemptMessage
         )
         let now = Date()
         let calendar = Calendar.current
         let nowMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
         let scheduledMinutes = normalized.hour * 60 + normalized.minute
-        if !previous.enabled && normalized.enabled && nowMinutes >= scheduledMinutes && normalized.lastRunDate == nil {
+        if !previous.enabled && normalized.enabled && nowMinutes >= scheduledMinutes {
             normalized.lastRunDate = Self.agentBackupDateKey(now)
         }
         agentBackupSchedules[Self.agentBackupScheduleKey(vmId: vmId, agent: agent)] = normalized
@@ -637,7 +640,10 @@ class AppState: ObservableObject {
                 hour: dict["hour"] as? Int ?? AgentBackupSchedule.defaultHour,
                 minute: dict["minute"] as? Int ?? AgentBackupSchedule.defaultMinute,
                 keepCount: dict["keep_count"] as? Int ?? AgentBackupSchedule.defaultKeepCount,
-                lastRunDate: dict["last_run_date"] as? String
+                lastRunDate: dict["last_run_date"] as? String,
+                lastAttemptAt: dict["last_attempt_at"] as? String,
+                lastAttemptStatus: dict["last_attempt_status"] as? String,
+                lastAttemptMessage: dict["last_attempt_message"] as? String
             )
         }
         agentBackupSchedules = loaded
@@ -654,6 +660,15 @@ class AppState: ObservableObject {
             ]
             if let lastRunDate = schedule.lastRunDate {
                 value["last_run_date"] = lastRunDate
+            }
+            if let lastAttemptAt = schedule.lastAttemptAt {
+                value["last_attempt_at"] = lastAttemptAt
+            }
+            if let lastAttemptStatus = schedule.lastAttemptStatus {
+                value["last_attempt_status"] = lastAttemptStatus
+            }
+            if let lastAttemptMessage = schedule.lastAttemptMessage {
+                value["last_attempt_message"] = lastAttemptMessage
             }
             return value
         }
@@ -682,17 +697,25 @@ class AppState: ObservableObject {
 
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             guard parts.count == 2,
-                  let agent = AgentKind(rawValue: parts[1]),
-                  let vm = vms.first(where: { $0.id == parts[0] && $0.state == .running }) else {
+                  let agent = AgentKind(rawValue: parts[1]) else {
+                continue
+            }
+            guard let vm = vms.first(where: { $0.id == parts[0] }) else { continue }
+            guard vm.state == .running else {
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "VM 未运行", at: now, lastRunDate: today)
                 continue
             }
 
             let session = getOrCreateSession(for: vm.id)
             if !session.connected || !session.ipcClient.isConnected {
                 session.connectIfNeeded()
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now, lastRunDate: today)
                 continue
             }
-            guard session.guestAgentConnected else { continue }
+            guard session.guestAgentConnected else {
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now, lastRunDate: today)
+                continue
+            }
 
             scheduledBackupsRunning.insert(key)
             agentTools.snapshotBackup(vm: vm, session: session, appState: self, agent: agent, keepCount: schedule.keepCount) { [weak self] result in
@@ -701,12 +724,10 @@ class AppState: ObservableObject {
                     self.scheduledBackupsRunning.remove(key)
                     switch result {
                     case .success:
-                        var updated = self.agentBackupSchedules[key] ?? schedule
-                        updated.lastRunDate = today
-                        self.agentBackupSchedules[key] = updated
-                        self.saveAgentBackupSchedules()
+                        self.updateAgentBackupAttempt(key: key, base: schedule, status: "success", message: "成功", at: now, lastRunDate: today)
                         NSLog("[AgentBackup] Scheduled backup completed: %@ %@", vm.id, agent.rawValue)
                     case .failure(let error):
+                        self.updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: error.localizedDescription, at: now, lastRunDate: today)
                         NSLog("[AgentBackup] Scheduled backup failed: %@ %@ %@", vm.id, agent.rawValue, error.localizedDescription)
                     }
                 }
@@ -714,11 +735,36 @@ class AppState: ObservableObject {
         }
     }
 
+    private func updateAgentBackupAttempt(key: String,
+                                          base: AgentBackupSchedule,
+                                          status: String,
+                                          message: String,
+                                          at date: Date,
+                                          lastRunDate: String? = nil) {
+        var updated = agentBackupSchedules[key] ?? base
+        updated.lastAttemptAt = Self.agentBackupAttemptTimeText(date)
+        updated.lastAttemptStatus = status
+        updated.lastAttemptMessage = message
+        if let lastRunDate {
+            updated.lastRunDate = lastRunDate
+        }
+        agentBackupSchedules[key] = updated
+        saveAgentBackupSchedules()
+    }
+
     private static func agentBackupDateKey(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func agentBackupAttemptTimeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM-dd HH:mm"
         return formatter.string(from: date)
     }
 

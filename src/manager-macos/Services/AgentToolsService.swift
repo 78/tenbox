@@ -43,17 +43,26 @@ struct AgentBackupSchedule: Codable, Equatable {
     var minute: Int
     var keepCount: Int
     var lastRunDate: String?
+    var lastAttemptAt: String?
+    var lastAttemptStatus: String?
+    var lastAttemptMessage: String?
 
     init(enabled: Bool = false,
          hour: Int = Self.defaultHour,
          minute: Int = Self.defaultMinute,
          keepCount: Int = Self.defaultKeepCount,
-         lastRunDate: String? = nil) {
+         lastRunDate: String? = nil,
+         lastAttemptAt: String? = nil,
+         lastAttemptStatus: String? = nil,
+         lastAttemptMessage: String? = nil) {
         self.enabled = enabled
         self.hour = min(max(hour, 0), 23)
         self.minute = min(max(minute, 0), 59)
         self.keepCount = min(max(keepCount, 1), 99)
         self.lastRunDate = lastRunDate
+        self.lastAttemptAt = lastAttemptAt
+        self.lastAttemptStatus = lastAttemptStatus
+        self.lastAttemptMessage = lastAttemptMessage
     }
 
     var timeText: String {
