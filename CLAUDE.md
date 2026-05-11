@@ -88,17 +88,18 @@ Win/macOS: tenbox-manager ──IPC v1──► tenbox-vm-runtime (WHVP / HVF)
 - **LLM proxy** exists in two places: `src/daemon/llm_proxy.cpp` (Linux) and `src/manager/llm_proxy.cpp` (Windows); change both when the protocol changes.
 - **RemoteSession** is single-instance per VM. Read `remote_webrtc.cpp`'s `force` takeover path before adding DataChannels.
 - **macOS Caps Lock forwarding**: send Caps Lock as a tap (`down` then `up`) on each `flagsChanged` event; AppKit exposes it as a toggle state, but the guest input stack needs a full key press for every switch.
-- **Agent data profile packages**: `TenBox.app` exports/imports Hermes/OpenClaw data without image changes by using a temporary shared folder and console-injected standard shell commands. Keep the gzip package format documented in `docs/agent-profile.md` and reject cross-agent imports.
+- **Agent data profile packages**: `TenBox.app` exports/imports Hermes/OpenClaw data without image changes by using a temporary shared folder and qemu-guest-agent `guest-exec` shell commands. Keep the gzip package format documented in `docs/agent-profile.md` and reject cross-agent imports.
 - **Hermes profile scope**: export user/config/state data, not the reinstallable Hermes app checkout, virtualenv, local binaries, logs, or cache directories.
 - **Agent data backups**: `TenBox.app` writes host-managed backups to `~/Library/Application Support/TenBox/AgentBackups/<vm-id>/<agent>` and retains the latest 5 packages.
-- **Agent health checks**: `TenBox.app` runs health, restart, model test, config reset, and diagnostics through console-injected commands. Repair actions must create a host-managed Agent data backup first.
+- **Agent health checks**: `TenBox.app` runs health, restart, model test, config reset, and diagnostics through qemu-guest-agent `guest-exec`. Repair actions must create a host-managed Agent data backup first.
 - **macOS Agent data UI**: `TenBox.app` exposes Agent data export/import from the VM toolbar/menu while a VM is running. It must not depend on preinstalled guest TenBox scripts.
 - **macOS Agent data shares**: Agent tool temporary shared folders are runtime-only; do not persist operation or backup share tags into VM config.
 - **macOS Agent share cleanup**: drop persisted `tenbox-agent-ops-*` and `tenbox-agent-backups-*` entries on config load/startup to clean old builds.
 - **macOS Agent data panels**: show export/import file panels asynchronously from SwiftUI sheets; do not use blocking `runModal()` from button handlers.
 - **macOS Agent backup UI**: `TenBox.app` exposes backup status, immediate backup, and restore latest backup actions. Host-triggered backups use `~/Library/Application Support/TenBox/AgentBackups/<vm-id>` as the durable shared folder.
 - **macOS Agent health UI**: `TenBox.app` exposes health check, restart, model test, config reset, and diagnostics actions while a VM is running. Repair actions run through app-generated shell commands so no image rebuild is required.
-- **macOS console commands**: Agent tool commands fail quickly if the VM shell does not echo the begin marker, and they wait for the temporary shared folder to become writable before reading or writing packages.
+- **macOS console commands**: keep marker-based console command execution as a fallback path; Agent tools should use qemu-guest-agent `guest-exec` and wait for temporary shared folders before reading or writing packages.
+- **macOS Agent tool commands**: prefer qemu-guest-agent `guest-exec` for command execution, pass multiline scripts as `command_hex`, and run them as guest user `tenbox`; keep shared folders as the data plane for profile packages, backups, and diagnostics.
 - **macOS console markers**: do not put the full begin/end marker literal in console input; build it inside the shell so echoed input cannot satisfy marker detection.
 - **macOS console input**: throttle manager-to-runtime console input before injecting into the guest UART; bulk shell scripts can overflow the emulated FIFO if delivered as one burst.
 - **macOS app signing**: the app entitlement includes `com.apple.security.cs.disable-library-validation` so the hardened-runtime app can load the bundled Sparkle framework.

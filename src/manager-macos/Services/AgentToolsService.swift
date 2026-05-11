@@ -48,7 +48,7 @@ final class AgentToolsService {
                 body: Self.profileExportCommand(agent: agent, outputPath: guestPackage)
             )
 
-            session.runShellCommand(command, timeout: 420) { result in
+            session.runGuestAgentCommand(command, timeout: 420) { result in
                 switch result {
                 case .success(let commandResult):
                     guard commandResult.exitCode == 0 else {
@@ -103,7 +103,7 @@ final class AgentToolsService {
                 tag: share.tag,
                 body: Self.profileImportCommand(agent: agent, inputPath: guestPackage)
             )
-            session.runShellCommand(command, timeout: 420) { result in
+            session.runGuestAgentCommand(command, timeout: 420) { result in
                 cleanup()
                 switch result {
                 case .success(let commandResult):
@@ -155,7 +155,7 @@ final class AgentToolsService {
                     body: "mkdir -p \(Self.shellQuote("/mnt/shared/\(share.tag)/\(agent.rawValue)"))\n" +
                         Self.profileExportCommand(agent: agent, outputPath: guestPackage)
                 )
-                session.runShellCommand(command, timeout: 420) { result in
+                session.runGuestAgentCommand(command, timeout: 420) { result in
                     cleanup()
                     switch result {
                     case .success(let commandResult):
@@ -193,7 +193,7 @@ final class AgentToolsService {
                     tag: share.tag,
                     body: Self.profileImportCommand(agent: agent, inputPath: guestPackage)
                 )
-                session.runShellCommand(command, timeout: 420) { result in
+                session.runGuestAgentCommand(command, timeout: 420) { result in
                     cleanup()
                     switch result {
                     case .success(let commandResult):
@@ -257,7 +257,7 @@ final class AgentToolsService {
                 tag: share.tag,
                 body: Self.diagnosticsCommand(agent: agent, outputDir: guestDir)
             )
-            session.runShellCommand(command, timeout: 180) { result in
+            session.runGuestAgentCommand(command, timeout: 180) { result in
                 cleanup()
                 switch result {
                 case .success(let commandResult):
@@ -281,7 +281,7 @@ final class AgentToolsService {
     private func runHealthCommand(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
                                   command: String, successMessage: String,
                                   completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
-        session.runShellCommand(command, timeout: 180) { result in
+        session.runGuestAgentCommand(command, timeout: 180) { result in
             switch result {
             case .success(let commandResult):
                 guard commandResult.exitCode == 0 else {
@@ -311,7 +311,7 @@ final class AgentToolsService {
                         Self.profileExportCommand(agent: agent, outputPath: guestPackage) + "\n" +
                         repairCommand
                 )
-                session.runShellCommand(command, timeout: 420) { result in
+                session.runGuestAgentCommand(command, timeout: 420) { result in
                     cleanup()
                     switch result {
                     case .success(let commandResult):

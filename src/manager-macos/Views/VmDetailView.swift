@@ -27,12 +27,19 @@ class VmSession: ObservableObject {
     private var connecting = false
     private static let maxConsoleSize = 64 * 1024
     private var pendingConsoleCommands: [String: PendingConsoleCommand] = [:]
+    private var nextGuestExecRequestId: UInt64 = 1
+    private var pendingGuestExecCommands: [UInt64: PendingGuestExecCommand] = [:]
 
     private struct PendingConsoleCommand {
         let beginMarker: String
         let endPrefix: String
         let completion: (Result<ConsoleCommandResult, Error>) -> Void
         let beginTimeoutWorkItem: DispatchWorkItem
+        let timeoutWorkItem: DispatchWorkItem
+    }
+
+    private struct PendingGuestExecCommand {
+        let completion: (Result<ConsoleCommandResult, Error>) -> Void
         let timeoutWorkItem: DispatchWorkItem
     }
 
@@ -55,6 +62,16 @@ class VmSession: ObservableObject {
         }
         ipcClient.onGuestAgentState = { [weak self] conn in
             self?.guestAgentConnected = conn
+        }
+        ipcClient.onGuestExecResult = { [weak self] requestId, ok, exitCode, stdoutText, stderrText, error in
+            self?.finishGuestExecCommand(
+                requestId: requestId,
+                ok: ok,
+                exitCode: exitCode,
+                stdoutText: stdoutText,
+                stderrText: stderrText,
+                error: error
+            )
         }
 
         ipcClient.onFrame = { [weak self] pixelBytes, pixelLength, w, h, stride, resW, resH, dirtyX, dirtyY in
@@ -109,6 +126,7 @@ class VmSession: ObservableObject {
             self.connected = false
             self.connecting = false
             self.displayInitialized = false
+            self.failPendingGuestExecCommands(ConsoleCommandError("VM runtime disconnected"))
         }
 
         setupClipboardCallbacks()
@@ -222,6 +240,42 @@ class VmSession: ObservableObject {
         ipcClient.sendConsoleInput(text)
     }
 
+    func runGuestAgentCommand(_ command: String, timeout: TimeInterval = 120,
+                              completion: @escaping (Result<ConsoleCommandResult, Error>) -> Void) {
+        DispatchQueue.main.async {
+            guard self.connected, self.ipcClient.isConnected else {
+                completion(.failure(ConsoleCommandError("VM runtime is not connected")))
+                return
+            }
+            guard self.guestAgentConnected else {
+                completion(.failure(ConsoleCommandError("Guest agent is not connected")))
+                return
+            }
+
+            let requestId = self.nextGuestExecRequestId
+            self.nextGuestExecRequestId += 1
+            let timeoutMs = UInt32(min(max(timeout * 1000, 1000), 600000))
+            let timeoutWorkItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                if let pending = self.pendingGuestExecCommands.removeValue(forKey: requestId) {
+                    pending.completion(.failure(ConsoleCommandError("Command timed out")))
+                }
+            }
+
+            self.pendingGuestExecCommands[requestId] = PendingGuestExecCommand(
+                completion: completion,
+                timeoutWorkItem: timeoutWorkItem
+            )
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
+
+            if !self.ipcClient.sendGuestExec(command: command, user: "tenbox", requestId: requestId, timeoutMs: timeoutMs) {
+                timeoutWorkItem.cancel()
+                self.pendingGuestExecCommands.removeValue(forKey: requestId)
+                completion(.failure(ConsoleCommandError("Failed to send guest agent command")))
+            }
+        }
+    }
+
     func runShellCommand(_ command: String, timeout: TimeInterval = 120,
                          completion: @escaping (Result<ConsoleCommandResult, Error>) -> Void) {
         DispatchQueue.main.async {
@@ -264,6 +318,38 @@ class VmSession: ObservableObject {
             let quotedToken = Self.shellQuote(token)
             let wrapped = "stty -echo 2>/dev/null; __tenbox_token=\(quotedToken); __tenbox_begin=\"__TENBOX_CMD_BEGIN_${__tenbox_token}__\"; __tenbox_end=\"__TENBOX_CMD_END_${__tenbox_token}__:\"; printf '\\n%s\\n' \"$__tenbox_begin\"; /bin/sh -lc \(quotedCommand); rc=$?; printf '\\n%s%s\\n' \"$__tenbox_end\" \"$rc\"; stty echo 2>/dev/null\n"
             self.sendConsoleInput(wrapped)
+        }
+    }
+
+    private func finishGuestExecCommand(requestId: UInt64, ok: Bool, exitCode: Int32,
+                                        stdoutText: String, stderrText: String,
+                                        error: String?) {
+        guard let pending = pendingGuestExecCommands.removeValue(forKey: requestId) else {
+            return
+        }
+        pending.timeoutWorkItem.cancel()
+
+        let output: String
+        if !stdoutText.isEmpty && !stderrText.isEmpty {
+            output = stdoutText + "\n" + stderrText
+        } else {
+            output = stdoutText + stderrText
+        }
+
+        if ok {
+            pending.completion(.success(ConsoleCommandResult(exitCode: exitCode, output: output)))
+        } else {
+            let message = error ?? (output.isEmpty ? "Guest agent command failed" : output)
+            pending.completion(.failure(ConsoleCommandError(message)))
+        }
+    }
+
+    private func failPendingGuestExecCommands(_ error: Error) {
+        let pending = pendingGuestExecCommands
+        pendingGuestExecCommands.removeAll()
+        for (_, command) in pending {
+            command.timeoutWorkItem.cancel()
+            command.completion(.failure(error))
         }
     }
 

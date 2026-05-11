@@ -25,6 +25,7 @@ class IpcClientWrapper: ObservableObject {
     // VM state
     var onRuntimeState: ((String) -> Void)?
     var onGuestAgentState: ((Bool) -> Void)?
+    var onGuestExecResult: ((UInt64, Bool, Int32, String, String, String?) -> Void)?
 
     // Host-forward errors (host ports that failed to bind)
     var onHostForwardError: (([String]) -> Void)?
@@ -71,6 +72,10 @@ class IpcClientWrapper: ObservableObject {
 
     func sendSyncTime() {
         _ = client.sendSyncTimeCommand()
+    }
+
+    func sendGuestExec(command: String, user: String, requestId: UInt64, timeoutMs: UInt32) -> Bool {
+        client.sendGuestExecCommand(command, user: user, requestId: requestId, timeoutMs: timeoutMs)
     }
 
     func sendKey(code: UInt16, pressed: Bool) {
@@ -151,6 +156,9 @@ class IpcClientWrapper: ObservableObject {
             },
             guestAgentStateHandler: { [weak self] connected in
                 self?.onGuestAgentState?(connected)
+            },
+            guestExecResultHandler: { [weak self] requestId, ok, exitCode, stdoutText, stderrText, error in
+                self?.onGuestExecResult?(requestId, ok, exitCode, stdoutText, stderrText, error)
             },
             displayStateHandler: { [weak self] active, w, h in
                 self?.onDisplayState?(active, w, h)

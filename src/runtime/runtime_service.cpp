@@ -594,6 +594,87 @@ bool RuntimeControlService::SendWithPayload(const ipc::Message& message) {
 void RuntimeControlService::HandleMessage(const ipc::Message& message) {
     if (message.channel == ipc::Channel::kControl &&
         message.kind == ipc::Kind::kRequest &&
+        message.type == "runtime.guest_exec") {
+        ipc::Message resp;
+        resp.kind = ipc::Kind::kResponse;
+        resp.channel = ipc::Channel::kControl;
+        resp.type = "runtime.guest_exec.result";
+        resp.vm_id = vm_id_;
+        resp.request_id = message.request_id;
+
+        std::string command;
+        auto it_hex = message.fields.find("command_hex");
+        if (it_hex != message.fields.end()) {
+            auto command_bytes = DecodeHex(it_hex->second);
+            command.assign(command_bytes.begin(), command_bytes.end());
+        } else {
+            auto it = message.fields.find("command");
+            if (it != message.fields.end()) {
+                command = it->second;
+            }
+        }
+        if (command.empty()) {
+            resp.fields["ok"] = "false";
+            resp.fields["error"] = "missing command";
+            Send(resp);
+            return;
+        }
+        if (!vm_ || !vm_->GetGuestAgentHandler() || !vm_->IsGuestAgentConnected()) {
+            resp.fields["ok"] = "false";
+            resp.fields["error"] = "guest agent not connected";
+            Send(resp);
+            return;
+        }
+
+        int timeout_ms = 120000;
+        auto it_timeout = message.fields.find("timeout_ms");
+        if (it_timeout != message.fields.end()) {
+            auto [p, ec] = std::from_chars(
+                it_timeout->second.data(),
+                it_timeout->second.data() + it_timeout->second.size(),
+                timeout_ms);
+            if (ec != std::errc{} || timeout_ms <= 0) {
+                timeout_ms = 120000;
+            }
+        }
+        timeout_ms = std::clamp(timeout_ms, 1000, 600000);
+
+        const uint64_t req_id = message.request_id;
+        std::string user;
+        auto it_user = message.fields.find("user");
+        if (it_user != message.fields.end()) {
+            user = it_user->second;
+        }
+        bool started = vm_->GetGuestAgentHandler()->RunShellCommand(
+            command,
+            user,
+            std::chrono::milliseconds(timeout_ms),
+            [this, req_id](GuestAgentHandler::ExecResult result) {
+                ipc::Message exec_resp;
+                exec_resp.kind = ipc::Kind::kResponse;
+                exec_resp.channel = ipc::Channel::kControl;
+                exec_resp.type = "runtime.guest_exec.result";
+                exec_resp.vm_id = vm_id_;
+                exec_resp.request_id = req_id;
+                exec_resp.fields["ok"] = result.ok ? "true" : "false";
+                exec_resp.fields["exit_code"] = std::to_string(result.exit_code);
+                exec_resp.fields["out_b64"] = result.out_data;
+                exec_resp.fields["err_b64"] = result.err_data;
+                if (!result.error.empty()) {
+                    exec_resp.fields["error"] = result.error;
+                }
+                Send(exec_resp);
+            });
+        if (!started) {
+            resp.fields["ok"] = "false";
+            resp.fields["error"] = "failed to start guest command";
+            Send(resp);
+        }
+        return;
+    }
+
+    if (message.channel == ipc::Channel::kControl &&
+        message.kind == ipc::Kind::kRequest &&
         message.type == "runtime.command") {
         ipc::Message resp;
         resp.kind = ipc::Kind::kResponse;
@@ -603,14 +684,23 @@ void RuntimeControlService::HandleMessage(const ipc::Message& message) {
         resp.request_id = message.request_id;
         resp.fields["ok"] = "true";
 
-        auto it = message.fields.find("command");
-        if (it == message.fields.end()) {
+        std::string cmd;
+        auto it_hex = message.fields.find("command_hex");
+        if (it_hex != message.fields.end()) {
+            auto command_bytes = DecodeHex(it_hex->second);
+            cmd.assign(command_bytes.begin(), command_bytes.end());
+        } else {
+            auto it = message.fields.find("command");
+            if (it != message.fields.end()) {
+                cmd = it->second;
+            }
+        }
+        if (cmd.empty()) {
             resp.fields["ok"] = "false";
             resp.fields["error"] = "missing command";
             Send(resp);
             return;
         }
-        const std::string& cmd = it->second;
         if (cmd == "stop") {
             if (vm_) vm_->RequestStop();
         } else if (cmd == "shutdown") {
