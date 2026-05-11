@@ -58,12 +58,6 @@ struct AgentToolsSheet: View {
 
                     triagePanel
 
-                    schedulePanel
-
-                    backupPickerPanel
-
-                    advancedActionsPanel
-
                     if let runningOperation {
                         HStack(spacing: 8) {
                             ProgressView()
@@ -79,6 +73,12 @@ struct AgentToolsSheet: View {
                             repairSuggestionPanel(report: report)
                         }
                     }
+
+                    advancedActionsPanel
+
+                    schedulePanel
+
+                    backupPickerPanel
                 }
                 .padding()
             }
