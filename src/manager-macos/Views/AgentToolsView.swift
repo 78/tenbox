@@ -847,7 +847,7 @@ struct AgentToolsSheet: View {
         return AgentOperationDisplay(
             isSuccess: true,
             title: operation.successTitle,
-            summary: summary.isEmpty ? "操作已完成" : summary,
+            summary: compactSummary(summary, fallback: "操作已完成"),
             details: details,
             revealPath: detectedPath,
             healthReport: health
@@ -859,7 +859,7 @@ struct AgentToolsSheet: View {
         return AgentOperationDisplay(
             isSuccess: false,
             title: operation.failureTitle,
-            summary: friendlyErrorMessage(raw),
+            summary: compactSummary(friendlyErrorMessage(raw), fallback: "操作失败"),
             details: raw,
             revealPath: nil,
             healthReport: nil
@@ -929,6 +929,17 @@ struct AgentToolsSheet: View {
             return message
         }
         return raw
+    }
+
+    private static func compactSummary(_ text: String, fallback: String) -> String {
+        let lines = text
+            .split(whereSeparator: { $0.isNewline })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard let first = lines.first else { return fallback }
+        let limit = 180
+        guard first.count > limit else { return first }
+        return "\(first.prefix(limit)) ... 完整输出请复制详情"
     }
 }
 
@@ -1164,6 +1175,8 @@ private struct BackupPackageRow: View {
 
 private struct MigrationProgressView: View {
     let items: [AgentMigrationProgress]
+    private static let maxLineCharacters = 96
+    private static let maxDetailCharacters = 96
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1186,15 +1199,16 @@ private struct MigrationProgressView: View {
                                 .foregroundStyle(item.step == .complete ? Color.green : Color.accentColor)
                                 .padding(.top, 5)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("\(item.step.title)：\(item.message)")
+                                Text(Self.compact("\(item.step.title)：\(item.message)", limit: Self.maxLineCharacters))
                                     .font(.caption)
-                                    .textSelection(.enabled)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                                 if let detail = item.detail, !detail.isEmpty {
-                                    Text(detail)
-                                        .font(.system(.caption2, design: .monospaced))
+                                    Text(Self.compact(detail, limit: Self.maxDetailCharacters))
+                                        .font(.caption2)
                                         .foregroundStyle(.secondary)
-                                        .lineLimit(4)
-                                        .textSelection(.enabled)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
                             }
                             Spacer()
@@ -1207,11 +1221,19 @@ private struct MigrationProgressView: View {
         .background(Color.accentColor.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
+
+    private static func compact(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let headCount = max(1, limit * 2 / 3)
+        let tailCount = max(1, limit - headCount)
+        return "\(text.prefix(headCount)) ... \(text.suffix(tailCount))"
+    }
 }
 
 private struct AgentOperationResultView: View {
     let result: AgentOperationDisplay
     @State private var showsDetails = false
+    private static let maxRenderedDetailCharacters = 12_000
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1224,7 +1246,7 @@ private struct AgentOperationResultView: View {
                     Text(result.summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                        .lineLimit(2)
                 }
                 Spacer()
             }
@@ -1258,16 +1280,18 @@ private struct AgentOperationResultView: View {
 
             if !result.details.isEmpty {
                 DisclosureGroup(isExpanded: $showsDetails) {
-                    ScrollView {
-                        Text(result.details)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
+                    if showsDetails {
+                        ScrollView {
+                            Text(Self.renderedDetails(result.details))
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 4)
+                        }
+                        .frame(maxHeight: 140)
                     }
-                    .frame(maxHeight: 140)
                 } label: {
-                    Text("详情")
+                    Text(result.details.count > Self.maxRenderedDetailCharacters ? "详情（已截断显示，可复制完整内容）" : "详情")
                         .font(.caption)
                 }
             }
@@ -1275,6 +1299,19 @@ private struct AgentOperationResultView: View {
         .padding(12)
         .background(result.isSuccess ? Color.green.opacity(0.08) : Color.red.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private static func renderedDetails(_ details: String) -> String {
+        guard details.count > maxRenderedDetailCharacters else { return details }
+        let headCount = maxRenderedDetailCharacters / 2
+        let tailCount = maxRenderedDetailCharacters - headCount
+        return """
+        \(String(details.prefix(headCount)))
+
+        ... 详情过长，界面只显示前后片段；完整内容可复制，迁移完整日志请查看报告文件 ...
+
+        \(String(details.suffix(tailCount)))
+        """
     }
 }
 

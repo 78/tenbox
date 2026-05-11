@@ -423,7 +423,7 @@ final class AgentToolsService {
                             Self.profileExportCommand(agent: .hermes, outputPath: guestBackup, scope: .backup)
                     )
 
-                    emit(.backup, "正在创建目标 Hermes 迁移前备份", backupPackage.path)
+                    emit(.backup, "正在创建目标 Hermes 迁移前备份", backupPackage.lastPathComponent)
                     targetSession.runGuestAgentCommand(backupCommand, timeout: 420) { backupResult in
                         switch backupResult {
                         case .success(let backupCommandResult):
@@ -465,7 +465,7 @@ final class AgentToolsService {
                                                 completion(.failure(Self.makeError(dryRunCommandResult.output.isEmpty ? "OpenClaw 到 Hermes 迁移预检失败" : dryRunCommandResult.output)))
                                                 return
                                             }
-                                            emit(.migrate, "dry-run 已通过，正在执行正式迁移", Self.compactMigrationOutput(dryRunCommandResult.output))
+                                            emit(.migrate, "dry-run 已通过，正在执行正式迁移", "完整计划已写入 \(reportURL.lastPathComponent)")
                                             let migrateCommand = Self.withSharedFolderReady(
                                                 tag: share.tag,
                                                 body: Self.openClawToHermesMigrationCommand(
@@ -483,7 +483,7 @@ final class AgentToolsService {
                                                         return
                                                     }
                                                     self.rotateBackups(vmId: targetVm.id, agent: .hermes, keep: keepCount)
-                                                    emit(.complete, "迁移完成，报告已保存", reportURL.path)
+                                                    emit(.complete, "迁移完成，报告已保存", reportURL.lastPathComponent)
                                                     completion(.success(AgentToolResult(
                                                         message: "已完成 OpenClaw 到 Hermes 迁移",
                                                         output: """
@@ -493,12 +493,10 @@ final class AgentToolsService {
                                                         目标 VM：\(targetVm.name)
                                                         冲突策略：\(options.skillConflictStrategy.displayName)
                                                         Workspace 目标：\(options.workspaceTarget.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "默认" : options.workspaceTarget)
+                                                        完整 dry-run / migrate 输出见迁移报告。
 
-                                                        [dry-run]
-                                                        \(dryRunCommandResult.output)
-
-                                                        [migrate]
-                                                        \(targetCommandResult.output)
+                                                        [health]
+                                                        \(Self.compactMigrationOutput(targetCommandResult.output) ?? "迁移命令已完成")
                                                         """
                                                     )))
                                                 case .failure(let error):
@@ -785,11 +783,10 @@ final class AgentToolsService {
         input=\(shellQuote(inputPath))
         rel=\(shellQuote(relPath))
         target="$home/$rel"
-        work=\(shellQuote((inputPath as NSString).deletingLastPathComponent + "/.tenbox-profile-import"))
         [ -f "$input" ] || { echo "找不到导入包：$input" >&2; exit 1; }
-        rm -rf "$work"
-        mkdir -p "$work"
-        tar --touch -xzf "$input" -C "$work"
+        work="$(mktemp -d /tmp/tenbox-profile-import.XXXXXX)"
+        trap 'rm -rf "$work"' EXIT
+        tar --touch --no-same-owner -xzf "$input" -C "$work"
         [ -f "$work/manifest.json" ] || { echo "导入包缺少 manifest.json" >&2; exit 1; }
         [ -f "$work/files.tar.gz" ] || { echo "导入包缺少 files.tar.gz" >&2; exit 1; }
         pkg_agent=""
@@ -806,19 +803,38 @@ final class AgentToolsService {
           pkg_agent="$(awk -F\\" '/agent_type/ {print $4; exit}' "$work/manifest.json")"
         fi
         [ "$pkg_agent" = "\(agent.rawValue)" ] || { echo "导入包属于 $pkg_agent，不是 \(agent.rawValue)" >&2; exit 1; }
+        extract_root="$work/files"
+        mkdir -p "$extract_root"
+        if ! tar --touch --no-same-owner -xzf "$work/files.tar.gz" -C "$extract_root"; then
+          echo "解包 Agent 数据失败" >&2
+          exit 1
+        fi
+        extract_target="$extract_root/$rel"
+        [ -d "$extract_target" ] || { echo "导入包缺少 $rel 目录" >&2; exit 1; }
         backup=""
         if [ -e "$target" ]; then
           backup="$target.pre-import-$(date -u +%Y%m%d%H%M%S)"
-          mv "$target" "$backup"
+          cp -a "$target" "$backup"
         fi
-        if ! tar -xzf "$work/files.tar.gz" -C "$home"; then
+        mkdir -p "$target"
+        if ! (
+          cd "$extract_target"
+          for item in .[!.]* ..?* *; do
+            [ -e "$item" ] || continue
+            rm -rf "$target/$item"
+            cp -a "$item" "$target/$item"
+          done
+        ); then
           rm -rf "$target"
           if [ -n "$backup" ] && [ -d "$backup" ]; then mv "$backup" "$target"; fi
           echo "恢复 Agent 数据失败" >&2
           exit 1
         fi
         chmod 700 "$target" 2>/dev/null || true
-        rm -rf "$work"
+        svc="$(\(serviceResolverCommand(agent: agent)))"
+        if [ -n "$svc" ]; then
+          XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user restart "$svc" >/dev/null 2>&1 || true
+        fi
         if [ -n "$backup" ]; then echo "$backup"; else echo "已导入"; fi
         """
     }
@@ -873,24 +889,105 @@ final class AgentToolsService {
         case .hermes:
             return """
             set -eu
-            command -v hermes >/dev/null 2>&1 || { echo "缺少 Hermes 命令" >&2; exit 1; }
-            hermes config set model.default default >/dev/null
-            hermes config set model.provider custom >/dev/null
-            hermes config set model.base_url http://10.0.2.3/v1 >/dev/null
-            hermes config set terminal.backend local >/dev/null
+            home="${HOME:-/home/tenbox}"
+            hermes_cmd="$(\(hermesCommandResolver()))"
+            if [ -n "$hermes_cmd" ]; then
+              "$hermes_cmd" config set model.default default >/dev/null
+              "$hermes_cmd" config set model.provider custom >/dev/null
+              "$hermes_cmd" config set model.base_url http://10.0.2.3/v1 >/dev/null
+              "$hermes_cmd" config set terminal.backend local >/dev/null
+            else
+              mkdir -p "$home/.hermes"
+              cfg="$home/.hermes/config.yaml"
+              env_file="$home/.hermes/.env"
+              if command -v python3 >/dev/null 2>&1; then
+                python3 - "$cfg" "$env_file" <<'PY'
+            from pathlib import Path
+            import sys
+
+            cfg = Path(sys.argv[1])
+            env = Path(sys.argv[2])
+            lines = cfg.read_text(encoding="utf-8").splitlines() if cfg.exists() else []
+            out = []
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if line.startswith("model:") or line.startswith("terminal:"):
+                    i += 1
+                    while i < len(lines) and (lines[i].startswith(" ") or not lines[i].strip()):
+                        i += 1
+                    continue
+                out.append(line)
+                i += 1
+            block = [
+                'model:',
+                '  default: "default"',
+                '  provider: "custom"',
+                '  base_url: "http://10.0.2.3/v1"',
+                '',
+                'terminal:',
+                '  backend: local',
+                ''
+            ]
+            cfg.write_text("\\n".join(block + [line for line in out if line.strip()]) + "\\n", encoding="utf-8")
+
+            env_lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
+            values = {
+                "OPENAI_BASE_URL": "http://10.0.2.3/v1",
+                "OPENAI_API_KEY": "tenbox",
+                "AGENT_BROWSER_HEADED": "true",
+                "AGENT_BROWSER_EXECUTABLE_PATH": "/usr/bin/chromium",
+            }
+            seen = set()
+            patched = []
+            for line in env_lines:
+                key = line.split("=", 1)[0] if "=" in line and not line.startswith("#") else None
+                if key in values:
+                    patched.append(f"{key}={values[key]}")
+                    seen.add(key)
+                else:
+                    patched.append(line)
+            for key, value in values.items():
+                if key not in seen:
+                    patched.append(f"{key}={value}")
+            env.write_text("\\n".join(patched) + "\\n", encoding="utf-8")
+            PY
+              else
+                cat > "$cfg" <<'EOF'
+            model:
+              default: "default"
+              provider: "custom"
+              base_url: "http://10.0.2.3/v1"
+
+            terminal:
+              backend: local
+            EOF
+                {
+                  echo "OPENAI_BASE_URL=http://10.0.2.3/v1"
+                  echo "OPENAI_API_KEY=tenbox"
+                  echo "AGENT_BROWSER_HEADED=true"
+                  echo "AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium"
+                } >> "$env_file"
+              fi
+            fi
+            svc="$(\(serviceResolverCommand(agent: agent)))"
+            if [ -n "$svc" ]; then
+              XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user restart "$svc" >/dev/null 2>&1 || true
+            fi
             \(healthStatusCommand(agent: agent))
             """
         case .openclaw:
             return """
             set -eu
-            command -v openclaw >/dev/null 2>&1 || { echo "缺少 OpenClaw 命令" >&2; exit 1; }
+            openclaw_cmd="$(\(openClawCommandResolver()))"
+            [ -n "$openclaw_cmd" ] || { echo "缺少 OpenClaw 命令" >&2; exit 1; }
             tenbox_provider='{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":65536,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}'
-            openclaw config set models.providers.tenbox "$tenbox_provider" --strict-json --merge >/dev/null 2>&1 || openclaw config set models.providers.tenbox "$tenbox_provider" >/dev/null
-            openclaw config set models.mode merge >/dev/null
-            openclaw config set agents.defaults.model.primary tenbox/default >/dev/null
-            openclaw config set agents.defaults.compaction.mode safeguard >/dev/null
-            openclaw config set agents.defaults.workspace "$HOME/.openclaw/workspace" >/dev/null
-            openclaw config set agents.defaults.models.tenbox/default '{"alias":"TenBox Proxy"}' --strict-json --merge >/dev/null 2>&1 || openclaw config set agents.defaults.models.tenbox/default '{"alias":"TenBox Proxy"}' >/dev/null
+            "$openclaw_cmd" config set models.providers.tenbox "$tenbox_provider" --strict-json --merge >/dev/null 2>&1 || "$openclaw_cmd" config set models.providers.tenbox "$tenbox_provider" >/dev/null
+            "$openclaw_cmd" config set models.mode merge >/dev/null
+            "$openclaw_cmd" config set agents.defaults.model.primary tenbox/default >/dev/null
+            "$openclaw_cmd" config set agents.defaults.compaction.mode safeguard >/dev/null
+            "$openclaw_cmd" config set agents.defaults.workspace "$HOME/.openclaw/workspace" >/dev/null
+            "$openclaw_cmd" config set agents.defaults.models.tenbox/default '{"alias":"TenBox Proxy"}' --strict-json --merge >/dev/null 2>&1 || "$openclaw_cmd" config set agents.defaults.models.tenbox/default '{"alias":"TenBox Proxy"}' >/dev/null
             \(healthStatusCommand(agent: agent))
             """
         }
@@ -951,23 +1048,23 @@ final class AgentToolsService {
     private static func openClawToHermesDryRunCommand(inputPath: String,
                                                       reportPath: String,
                                                       options: AgentMigrationOptions) -> String {
-        let workDir = (inputPath as NSString).deletingLastPathComponent + "/.tenbox-openclaw-to-hermes"
         let flags = openClawMigrationFlags(options: options, includeYes: false)
         return """
         set -eu
-        command -v hermes >/dev/null 2>&1 || { echo "缺少 Hermes 命令" >&2; exit 1; }
+        hermes_cmd="$(\(hermesCommandResolver()))"
+        [ -n "$hermes_cmd" ] || { echo "目标 VM 缺少 Hermes 命令" >&2; exit 1; }
         input=\(shellQuote(inputPath))
         report=\(shellQuote(reportPath))
-        work=\(shellQuote(workDir))
+        work="$(mktemp -d /tmp/tenbox-openclaw-to-hermes.XXXXXX)"
+        trap 'rm -rf "$work"' EXIT
         source_dir="$work/source"
         [ -f "$input" ] || { echo "找不到 OpenClaw 迁移包：$input" >&2; exit 1; }
-        rm -rf "$work"
         mkdir -p "$source_dir"
-        tar -xzf "$input" -C "$source_dir"
+        tar --touch --no-same-owner -xzf "$input" -C "$source_dir"
         [ -d "$source_dir/.openclaw" ] || { echo "迁移包缺少 .openclaw 目录" >&2; exit 1; }
         dry_log="$work/dry-run.txt"
         dry_status=0
-        hermes claw migrate --dry-run --source "$source_dir/.openclaw" \(flags) > "$dry_log" 2>&1 || dry_status=$?
+        "$hermes_cmd" claw migrate --dry-run --source "$source_dir/.openclaw" \(flags) > "$dry_log" 2>&1 || dry_status=$?
         {
           echo "===== OpenClaw -> Hermes dry-run $(date -u +%Y-%m-%dT%H:%M:%SZ) ====="
           cat "$dry_log"
@@ -975,30 +1072,29 @@ final class AgentToolsService {
         } >> "$report"
         \(limitedLogCommand(logVariable: "dry_log"))
         [ "$dry_status" -eq 0 ] || exit "$dry_status"
-        rm -rf "$work"
         """
     }
 
     private static func openClawToHermesMigrationCommand(inputPath: String,
                                                         reportPath: String,
                                                         options: AgentMigrationOptions) -> String {
-        let workDir = (inputPath as NSString).deletingLastPathComponent + "/.tenbox-openclaw-to-hermes"
         let flags = openClawMigrationFlags(options: options, includeYes: true)
         return """
         set -eu
-        command -v hermes >/dev/null 2>&1 || { echo "缺少 Hermes 命令" >&2; exit 1; }
+        hermes_cmd="$(\(hermesCommandResolver()))"
+        [ -n "$hermes_cmd" ] || { echo "目标 VM 缺少 Hermes 命令" >&2; exit 1; }
         input=\(shellQuote(inputPath))
         report=\(shellQuote(reportPath))
-        work=\(shellQuote(workDir))
+        work="$(mktemp -d /tmp/tenbox-openclaw-to-hermes.XXXXXX)"
+        trap 'rm -rf "$work"' EXIT
         source_dir="$work/source"
         [ -f "$input" ] || { echo "找不到 OpenClaw 迁移包：$input" >&2; exit 1; }
-        rm -rf "$work"
         mkdir -p "$source_dir"
-        tar -xzf "$input" -C "$source_dir"
+        tar --touch --no-same-owner -xzf "$input" -C "$source_dir"
         [ -d "$source_dir/.openclaw" ] || { echo "迁移包缺少 .openclaw 目录" >&2; exit 1; }
         migrate_log="$work/migrate.txt"
         migrate_status=0
-        hermes claw migrate --source "$source_dir/.openclaw" \(flags) > "$migrate_log" 2>&1 || migrate_status=$?
+        "$hermes_cmd" claw migrate --source "$source_dir/.openclaw" \(flags) > "$migrate_log" 2>&1 || migrate_status=$?
         {
           echo "===== OpenClaw -> Hermes migrate $(date -u +%Y-%m-%dT%H:%M:%SZ) ====="
           cat "$migrate_log"
@@ -1011,7 +1107,6 @@ final class AgentToolsService {
           XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user restart "$svc" >/dev/null 2>&1 || true
           echo "重启服务：$svc" >> "$report"
         fi
-        rm -rf "$work"
         health_log="$(mktemp)"
         (
         \(healthStatusCommand(agent: .hermes))
@@ -1107,7 +1202,19 @@ final class AgentToolsService {
         }
         let preferred = serviceName(agent)
         return """
-        { preferred=\(shellQuote(preferred)); pattern=\(shellQuote(pattern)); if XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user status "$preferred" >/dev/null 2>&1; then printf '%s' "$preferred"; else XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user list-units --all "$pattern" --no-legend 2>/dev/null | awk 'NR==1 {print $1; exit}'; fi; }
+        { preferred=\(shellQuote(preferred)); pattern=\(shellQuote(pattern)); if XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user status "$preferred" >/dev/null 2>&1; then printf '%s' "$preferred"; else XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user list-units --all "$pattern" --no-legend --plain 2>/dev/null | awk 'NR==1 {if ($1=="●") print $2; else print $1; exit}'; fi; }
+        """
+    }
+
+    private static func hermesCommandResolver() -> String {
+        """
+        { hermes_cmd="$(command -v hermes 2>/dev/null || true)"; if [ -z "$hermes_cmd" ]; then svc="$(\(serviceResolverCommand(agent: .hermes)))"; if [ -n "$svc" ]; then exec_path="$(XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user show "$svc" -p ExecStart --value 2>/dev/null | sed -n 's/.*path=\\([^ ;]*\\).*/\\1/p' | head -n 1)"; if [ -n "$exec_path" ]; then exec_dir="$(dirname "$exec_path")"; for candidate in "$exec_dir/hermes" "$exec_dir/../bin/hermes" "$exec_dir/../../bin/hermes"; do [ -x "$candidate" ] && hermes_cmd="$candidate" && break; done; fi; fi; fi; if [ -z "$hermes_cmd" ]; then for candidate in "$HOME/.hermes/hermes-agent/.venv/bin/hermes" "$HOME/.hermes/hermes-agent/venv/bin/hermes" "$HOME/.local/bin/hermes"; do [ -x "$candidate" ] && hermes_cmd="$candidate" && break; done; fi; printf '%s' "$hermes_cmd"; }
+        """
+    }
+
+    private static func openClawCommandResolver() -> String {
+        """
+        { openclaw_cmd="$(command -v openclaw 2>/dev/null || true)"; if [ -z "$openclaw_cmd" ]; then for candidate in "$HOME/.npm-global/bin/openclaw" "$HOME/.local/bin/openclaw"; do [ -x "$candidate" ] && openclaw_cmd="$candidate" && break; done; fi; printf '%s' "$openclaw_cmd"; }
         """
     }
 
