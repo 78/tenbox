@@ -17,6 +17,7 @@ struct AgentToolsSheet: View {
     @State private var backupSchedule = AgentBackupSchedule()
     @State private var backupPackages: [AgentBackupPackage] = []
     @State private var selectedBackupId: String?
+    @State private var showsAdvancedActions = false
 
     init(vmId: String, session: VmSession) {
         self.vmId = vmId
@@ -55,19 +56,13 @@ struct AgentToolsSheet: View {
                     }
                     .pickerStyle(.segmented)
 
-                    operationSection(
-                        title: "常用操作",
-                        operations: [.snapshotBackup, .exportProfile, .healthCheck]
-                    )
+                    triagePanel
 
                     schedulePanel
 
                     backupPickerPanel
 
-                    operationSection(
-                        title: "维护操作",
-                        operations: [.importProfile, .restartAgent, .testModel, .resetConfig, .diagnostics]
-                    )
+                    advancedActionsPanel
 
                     if let runningOperation {
                         HStack(spacing: 8) {
@@ -80,6 +75,9 @@ struct AgentToolsSheet: View {
 
                     if let operationResult {
                         AgentOperationResultView(result: operationResult)
+                        if let report = operationResult.healthReport, report.state != "ok" {
+                            repairSuggestionPanel(report: report)
+                        }
                     }
                 }
                 .padding()
@@ -164,6 +162,48 @@ struct AgentToolsSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private var triagePanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("急救")
+                .font(.headline)
+
+            Button {
+                checkHealth()
+            } label: {
+                Label("一键诊断", systemImage: "stethoscope")
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .controlSize(.large)
+            .disabled(!canRun)
+            .help("检查 Agent 服务、模型代理、浏览器和磁盘状态")
+
+            HStack(spacing: 10) {
+                Button {
+                    snapshotBackup()
+                } label: {
+                    Label("立即备份", systemImage: "clock.arrow.circlepath")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!canRun)
+
+                Button {
+                    exportProfile()
+                } label: {
+                    Label("导出迁移包", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!canRun)
+            }
+
+            Text("建议先点“一键诊断”。只有需要迁移或人工处理时，再导入、重置配置或导出诊断包。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     private var schedulePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -196,13 +236,36 @@ struct AgentToolsSheet: View {
                 Spacer()
             }
 
-            Text("每天 \(backupSchedule.timeText) 自动备份；只有 VM 运行且执行通道已连接时才会执行。")
+            Text(scheduleDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(12)
         .background(.quaternary.opacity(0.45))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var scheduleDescription: String {
+        guard backupSchedule.enabled else {
+            return "定时备份未启用。默认时间为 03:00，只有 VM 运行且执行通道已连接时才会执行。"
+        }
+        return "每天 \(backupSchedule.timeText) 自动备份；\(nextBackupText)。"
+    }
+
+    private var nextBackupText: String {
+        let calendar = Calendar.current
+        let now = Date()
+        var components = calendar.dateComponents([.year, .month, .day], from: now)
+        components.hour = backupSchedule.hour
+        components.minute = backupSchedule.minute
+        components.second = 0
+        var next = calendar.date(from: components) ?? now
+        if next <= now {
+            next = calendar.date(byAdding: .day, value: 1, to: next) ?? next
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = calendar.isDateInToday(next) ? "今天 HH:mm" : "明天 HH:mm"
+        return "下次预计 \(formatter.string(from: next))"
     }
 
     private var backupPickerPanel: some View {
@@ -259,6 +322,78 @@ struct AgentToolsSheet: View {
     private var selectedBackupPackage: AgentBackupPackage? {
         guard let selectedBackupId else { return nil }
         return backupPackages.first { $0.id == selectedBackupId }
+    }
+
+    private var advancedActionsPanel: some View {
+        DisclosureGroup(isExpanded: $showsAdvancedActions) {
+            VStack(alignment: .leading, spacing: 10) {
+                operationSection(
+                    title: "高级操作",
+                    operations: [.importProfile, .restartAgent, .resetConfig, .diagnostics]
+                )
+                Text("这些操作会改动配置、覆盖数据或生成排障包，建议在诊断结果提示后再使用。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 8)
+        } label: {
+            Text("高级操作")
+                .font(.headline)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func repairSuggestionPanel(report: HealthReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("建议修复")
+                .font(.headline)
+
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10)
+            ], spacing: 10) {
+                if report.isError("agent_service") || report.isError("gateway_port") {
+                    Button {
+                        restartAgent()
+                    } label: {
+                        Label("重启服务", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!canRun)
+                }
+
+                if report.isError("llm_proxy") {
+                    Button {
+                        openLlmProxySettings()
+                    } label: {
+                        Label("检查 LLM Proxy", systemImage: "key.viewfinder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(runningOperation != nil)
+
+                    Button {
+                        pendingConfirmation = .resetConfig
+                    } label: {
+                        Label("重置模型配置", systemImage: "slider.horizontal.2.square")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!canRun)
+                }
+
+                Button {
+                    exportDiagnostics()
+                } label: {
+                    Label("导出诊断包", systemImage: "doc.zipper")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!canRun)
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var scheduleEnabledBinding: Binding<Bool> {
@@ -345,8 +480,6 @@ struct AgentToolsSheet: View {
             checkHealth()
         case .restartAgent:
             restartAgent()
-        case .testModel:
-            testModel()
         case .resetConfig:
             pendingConfirmation = .resetConfig
         case .diagnostics:
@@ -450,10 +583,10 @@ struct AgentToolsSheet: View {
         }
     }
 
-    private func testModel() {
-        guard let vm = vm else { return }
-        runOperation(.testModel) {
-            appState.testAgentModel(vmId: vm.id, agent: selectedAgent, completion: $0)
+    private func openLlmProxySettings() {
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            appState.showLlmProxySheet = true
         }
     }
 
@@ -641,7 +774,6 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
     case restoreBackup
     case healthCheck
     case restartAgent
-    case testModel
     case resetConfig
     case diagnostics
 
@@ -653,9 +785,8 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .importProfile: return "导入"
         case .snapshotBackup: return "立即备份"
         case .restoreBackup: return "恢复备份"
-        case .healthCheck: return "健康检查"
+        case .healthCheck: return "一键诊断"
         case .restartAgent: return "重启服务"
-        case .testModel: return "测试模型"
         case .resetConfig: return "重置配置"
         case .diagnostics: return "导出诊断"
         }
@@ -669,7 +800,6 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .restoreBackup: return "arrow.uturn.backward"
         case .healthCheck: return "stethoscope"
         case .restartAgent: return "arrow.clockwise"
-        case .testModel: return "bolt.horizontal"
         case .resetConfig: return "slider.horizontal.2.square"
         case .diagnostics: return "doc.zipper"
         }
@@ -683,7 +813,6 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .restoreBackup: return "用选中的备份恢复 Agent 数据"
         case .healthCheck: return "检查 Agent 运行状态"
         case .restartAgent: return "重启 Agent 服务"
-        case .testModel: return "测试模型代理连接"
         case .resetConfig: return "重置 Agent 模型配置"
         case .diagnostics: return "导出诊断包"
         }
@@ -695,9 +824,8 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .importProfile: return "导入完成"
         case .snapshotBackup: return "备份完成"
         case .restoreBackup: return "恢复完成"
-        case .healthCheck: return "健康检查完成"
+        case .healthCheck: return "诊断完成"
         case .restartAgent: return "重启完成"
-        case .testModel: return "模型测试完成"
         case .resetConfig: return "配置已重置"
         case .diagnostics: return "诊断包已导出"
         }
@@ -709,9 +837,8 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .importProfile: return "导入失败"
         case .snapshotBackup: return "备份失败"
         case .restoreBackup: return "恢复失败"
-        case .healthCheck: return "健康检查失败"
+        case .healthCheck: return "诊断失败"
         case .restartAgent: return "重启失败"
-        case .testModel: return "模型测试失败"
         case .resetConfig: return "重置失败"
         case .diagnostics: return "诊断导出失败"
         }
@@ -719,7 +846,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
 
     var showsHealth: Bool {
         switch self {
-        case .healthCheck, .restartAgent, .testModel, .resetConfig: return true
+        case .healthCheck, .restartAgent, .resetConfig: return true
         default: return false
         }
     }
@@ -730,9 +857,8 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .importProfile: return "正在导入 \(agent.displayName) 数据..."
         case .snapshotBackup: return "正在备份 \(agent.displayName) 数据..."
         case .restoreBackup: return "正在恢复 \(agent.displayName) 备份..."
-        case .healthCheck: return "正在检查 \(agent.displayName) 状态..."
+        case .healthCheck: return "正在诊断 \(agent.displayName) 状态..."
         case .restartAgent: return "正在重启 \(agent.displayName) 服务..."
-        case .testModel: return "正在测试模型代理..."
         case .resetConfig: return "正在重置 \(agent.displayName) 配置..."
         case .diagnostics: return "正在导出 \(agent.displayName) 诊断包..."
         }
@@ -958,6 +1084,15 @@ private struct HealthReport {
     let message: String
     let checks: [HealthCheckItem]
 
+    func value(_ key: String) -> String {
+        checks.first { $0.key == key }?.value ?? "unknown"
+    }
+
+    func isError(_ key: String) -> Bool {
+        let state = value(key)
+        return state == "error" || state == "space_low"
+    }
+
     static func parse(from raw: String) -> HealthReport? {
         let jsonLine = raw
             .split(whereSeparator: { $0.isNewline })
@@ -973,11 +1108,11 @@ private struct HealthReport {
             state: object["state"] as? String ?? "unknown",
             message: translateMessage(object["message"] as? String ?? ""),
             checks: [
-                HealthCheckItem(title: "Agent 服务", value: checks["agent_service"] as? String ?? "unknown"),
-                HealthCheckItem(title: "网关端口", value: checks["gateway_port"] as? String ?? "unknown"),
-                HealthCheckItem(title: "模型代理", value: checks["llm_proxy"] as? String ?? "unknown"),
-                HealthCheckItem(title: "浏览器", value: checks["browser"] as? String ?? "unknown"),
-                HealthCheckItem(title: "磁盘空间", value: checks["disk"] as? String ?? "unknown")
+                HealthCheckItem(key: "agent_service", title: "Agent 服务", value: checks["agent_service"] as? String ?? "unknown"),
+                HealthCheckItem(key: "gateway_port", title: "网关端口", value: checks["gateway_port"] as? String ?? "unknown"),
+                HealthCheckItem(key: "llm_proxy", title: "模型代理", value: checks["llm_proxy"] as? String ?? "unknown"),
+                HealthCheckItem(key: "browser", title: "浏览器", value: checks["browser"] as? String ?? "unknown"),
+                HealthCheckItem(key: "disk", title: "磁盘空间", value: checks["disk"] as? String ?? "unknown")
             ]
         )
     }
@@ -998,6 +1133,7 @@ private struct HealthReport {
 
 private struct HealthCheckItem: Identifiable {
     let id = UUID()
+    let key: String
     let title: String
     let value: String
 
