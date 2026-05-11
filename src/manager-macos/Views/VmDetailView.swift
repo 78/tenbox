@@ -231,6 +231,7 @@ class VmSession: ObservableObject {
 
     func disconnect() {
         audioPlayer.stop()
+        failPendingGuestExecCommands(ConsoleCommandError("VM runtime disconnected"))
         ipcClient.disconnect()
         connected = false
         connecting = false

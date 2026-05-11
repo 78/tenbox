@@ -4,7 +4,7 @@ TenBox.app provides Agent data export/import, backup/restore, and health actions
 without requiring Hermes/OpenClaw images to preinstall TenBox-specific scripts.
 
 The macOS manager creates a temporary shared folder, then sends a short shell
-command through the existing VM console channel. The command uses standard guest
+command through qemu-guest-agent `guest-exec`. The command uses standard guest
 tools such as `tar`, `gzip`, `systemctl`, `curl`, and `journalctl`.
 
 ## Profile package
@@ -48,8 +48,9 @@ Manual backups are created by TenBox.app in:
 ~/Library/Application Support/TenBox/AgentBackups/<vm-id>/<agent>/
 ```
 
-Backups use the same profile package format and keep the newest five packages.
-Restore uses the newest package for the selected VM and Agent.
+Backups use the same profile package format. Retention is configurable per VM
+and Agent; the default keeps the newest seven packages. Restore uses the package
+selected in the backup list for the selected VM and Agent.
 
 ## Health actions
 
@@ -57,7 +58,6 @@ TenBox.app can run these actions while the VM is running:
 
 - health status
 - restart Agent
-- test model proxy
 - reset Agent config
 - export diagnostics
 
