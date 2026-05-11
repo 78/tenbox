@@ -53,7 +53,7 @@ final class AgentToolsService {
                 case .success(let commandResult):
                     guard commandResult.exitCode == 0 else {
                         cleanup()
-                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent data export failed" : commandResult.output)))
+                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 数据导出失败" : commandResult.output)))
                         return
                     }
                     let hostPackage = URL(fileURLWithPath: share.hostPath).appendingPathComponent(packageName)
@@ -108,7 +108,7 @@ final class AgentToolsService {
                 switch result {
                 case .success(let commandResult):
                     guard commandResult.exitCode == 0 else {
-                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent data import failed" : commandResult.output)))
+                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 数据导入失败" : commandResult.output)))
                         return
                     }
                     completion(.success(AgentToolResult(
@@ -136,7 +136,7 @@ final class AgentToolsService {
             } else {
                 completion(.success(AgentToolResult(
                     message: "还没有备份",
-                    output: "点击 Back Up Now 创建第一份备份。"
+                    output: "点击“立即备份”创建第一份备份。"
                 )))
             }
         } catch {
@@ -160,7 +160,7 @@ final class AgentToolsService {
                     switch result {
                     case .success(let commandResult):
                         guard commandResult.exitCode == 0 else {
-                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent backup failed" : commandResult.output)))
+                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 备份失败" : commandResult.output)))
                             return
                         }
                         self.rotateBackups(vmId: vm.id, agent: agent, keep: 5)
@@ -184,7 +184,7 @@ final class AgentToolsService {
                              completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         do {
             guard let latest = try latestBackupPackage(vmId: vm.id, agent: agent) else {
-                completion(.failure(Self.makeError("No backup package found")))
+                completion(.failure(Self.makeError("没有找到备份包")))
                 return
             }
             withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
@@ -198,7 +198,7 @@ final class AgentToolsService {
                     switch result {
                     case .success(let commandResult):
                         guard commandResult.exitCode == 0 else {
-                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent backup restore failed" : commandResult.output)))
+                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 备份恢复失败" : commandResult.output)))
                             return
                         }
                         completion(.success(AgentToolResult(
@@ -262,7 +262,7 @@ final class AgentToolsService {
                 switch result {
                 case .success(let commandResult):
                     guard commandResult.exitCode == 0 else {
-                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent diagnostics failed" : commandResult.output)))
+                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 诊断导出失败" : commandResult.output)))
                         return
                     }
                     completion(.success(AgentToolResult(
@@ -285,7 +285,7 @@ final class AgentToolsService {
             switch result {
             case .success(let commandResult):
                 guard commandResult.exitCode == 0 else {
-                    completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent health command failed" : commandResult.output)))
+                    completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 健康检查失败" : commandResult.output)))
                     return
                 }
                 completion(.success(AgentToolResult(
@@ -316,7 +316,7 @@ final class AgentToolsService {
                     switch result {
                     case .success(let commandResult):
                         guard commandResult.exitCode == 0 else {
-                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent repair failed" : commandResult.output)))
+                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 修复操作失败" : commandResult.output)))
                             return
                         }
                         self.rotateBackups(vmId: vm.id, agent: agent, keep: 5)
@@ -466,7 +466,7 @@ final class AgentToolsService {
         src="$home/$rel"
         out=\(shellQuote(outputPath))
         work=\(shellQuote(workDir))
-        [ -d "$src" ] || { echo "Agent data is not initialized: $src" >&2; exit 1; }
+        [ -d "$src" ] || { echo "Agent 数据尚未初始化：$src" >&2; exit 1; }
         rm -rf "$work"
         mkdir -p "$work"
         cat > "$work/manifest.json" <<EOF
@@ -500,8 +500,8 @@ final class AgentToolsService {
           i=$((i + 1))
           sleep 0.2
         done
-        [ -d "$share_dir" ] || { echo "shared folder not mounted: $share_dir" >&2; exit 1; }
-        [ -w "$share_dir" ] || { echo "shared folder is not writable: $share_dir" >&2; exit 1; }
+        [ -d "$share_dir" ] || { echo "共享文件夹未挂载：$share_dir" >&2; exit 1; }
+        [ -w "$share_dir" ] || { echo "共享文件夹不可写：$share_dir" >&2; exit 1; }
         \(body)
         """
     }
@@ -515,14 +515,14 @@ final class AgentToolsService {
         rel=\(shellQuote(relPath))
         target="$home/$rel"
         work=\(shellQuote((inputPath as NSString).deletingLastPathComponent + "/.tenbox-profile-import"))
-        [ -f "$input" ] || { echo "package not found: $input" >&2; exit 1; }
+        [ -f "$input" ] || { echo "找不到导入包：$input" >&2; exit 1; }
         rm -rf "$work"
         mkdir -p "$work"
         tar --touch -xzf "$input" -C "$work"
-        [ -f "$work/manifest.json" ] || { echo "manifest.json missing" >&2; exit 1; }
-        [ -f "$work/files.tar.gz" ] || { echo "files.tar.gz missing" >&2; exit 1; }
+        [ -f "$work/manifest.json" ] || { echo "导入包缺少 manifest.json" >&2; exit 1; }
+        [ -f "$work/files.tar.gz" ] || { echo "导入包缺少 files.tar.gz" >&2; exit 1; }
         pkg_agent="$(awk -F\\" '/agent_type/ {print $4; exit}' "$work/manifest.json")"
-        [ "$pkg_agent" = "\(agent.rawValue)" ] || { echo "package is for $pkg_agent, not \(agent.rawValue)" >&2; exit 1; }
+        [ "$pkg_agent" = "\(agent.rawValue)" ] || { echo "导入包属于 $pkg_agent，不是 \(agent.rawValue)" >&2; exit 1; }
         backup=""
         if [ -e "$target" ]; then
           backup="$target.pre-import-$(date -u +%Y%m%d%H%M%S)"
@@ -531,12 +531,12 @@ final class AgentToolsService {
         if ! tar -xzf "$work/files.tar.gz" -C "$home"; then
           rm -rf "$target"
           if [ -n "$backup" ] && [ -d "$backup" ]; then mv "$backup" "$target"; fi
-          echo "failed to restore Agent data" >&2
+          echo "恢复 Agent 数据失败" >&2
           exit 1
         fi
         chmod 700 "$target" 2>/dev/null || true
         rm -rf "$work"
-        if [ -n "$backup" ]; then echo "$backup"; else echo "imported"; fi
+        if [ -n "$backup" ]; then echo "$backup"; else echo "已导入"; fi
         """
     }
 
@@ -555,12 +555,12 @@ final class AgentToolsService {
         free_kb="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')"
         if [ "${free_kb:-0}" -gt 1048576 ]; then disk_state=ok; else disk_state=space_low; fi
         state=ok
-        message="Agent normal"
-        if [ "$disk_state" = space_low ]; then state=error; message="Disk space is low"; fi
-        if [ "$service_state" = error ]; then state=error; message="Agent service is not running"; fi
-        if [ "$port_state" = error ]; then state=error; message="Agent gateway is unavailable"; fi
-        if [ "$model_state" = error ]; then state=error; message="Model proxy is unavailable"; fi
-        if [ "$browser_state" = error ]; then state=error; message="Browser is unavailable"; fi
+        message="Agent 正常"
+        if [ "$disk_state" = space_low ]; then state=error; message="磁盘空间不足"; fi
+        if [ "$service_state" = error ]; then state=error; message="Agent 服务未运行"; fi
+        if [ "$port_state" = error ]; then state=error; message="Agent 网关不可用"; fi
+        if [ "$model_state" = error ]; then state=error; message="模型代理不可用"; fi
+        if [ "$browser_state" = error ]; then state=error; message="浏览器不可用"; fi
         printf '{"agent_type":"%s","state":"%s","message":"%s","checks":{"agent_service":"%s","gateway_port":"%s","llm_proxy":"%s","browser":"%s","disk":"%s"}}\\n' "$agent" "$state" "$message" "$service_state" "$port_state" "$model_state" "$browser_state" "$disk_state"
         """
     }
@@ -576,9 +576,9 @@ final class AgentToolsService {
         """
         set -eu
         if curl -fsS --max-time 5 http://10.0.2.3/v1/models >/dev/null 2>&1; then
-          printf '{"agent_type":"%s","state":"ok","message":"Model proxy is available"}\\n' \(shellQuote(agent.rawValue))
+          printf '{"agent_type":"%s","state":"ok","message":"模型代理可用"}\\n' \(shellQuote(agent.rawValue))
         else
-          printf '{"agent_type":"%s","state":"error","message":"Model proxy is unavailable"}\\n' \(shellQuote(agent.rawValue))
+          printf '{"agent_type":"%s","state":"error","message":"模型代理不可用"}\\n' \(shellQuote(agent.rawValue))
           exit 1
         fi
         """
@@ -611,7 +611,7 @@ final class AgentToolsService {
         case .openclaw:
             return """
             set -eu
-            command -v openclaw >/dev/null 2>&1 || { echo "OpenClaw command is missing" >&2; exit 1; }
+            command -v openclaw >/dev/null 2>&1 || { echo "缺少 OpenClaw 命令" >&2; exit 1; }
             openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":65536,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}' >/dev/null
             openclaw config set models.mode merge >/dev/null
             openclaw config set agents.defaults '{"model":{"primary":"tenbox/default"},"compaction":{"mode":"safeguard"},"workspace":"'"$HOME"'/.openclaw/workspace","models":{"tenbox/default":{}}}' >/dev/null

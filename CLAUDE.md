@@ -92,7 +92,7 @@ Win/macOS: tenbox-manager ──IPC v1──► tenbox-vm-runtime (WHVP / HVF)
 - **Hermes profile scope**: export user/config/state data, not the reinstallable Hermes app checkout, virtualenv, local binaries, logs, or cache directories.
 - **Agent data backups**: `TenBox.app` writes host-managed backups to `~/Library/Application Support/TenBox/AgentBackups/<vm-id>/<agent>` and retains the latest 5 packages. Profile export runs against live Agent data, so GNU tar exit 1 from changed/skipped files is treated as non-fatal; fatal tar errors must still fail the backup.
 - **Agent health checks**: `TenBox.app` runs health, restart, model test, config reset, and diagnostics through qemu-guest-agent `guest-exec`. Repair actions must create a host-managed Agent data backup first.
-- **macOS Agent data UI**: `TenBox.app` exposes Agent data export/import from the VM toolbar/menu while a VM is running. It must not depend on preinstalled guest TenBox scripts.
+- **macOS Agent data UI**: `TenBox.app` exposes Agent data export/import from the VM toolbar/menu while a VM is running. Keep user-facing Agent tool copy in Chinese, show operation status/results in the sheet, and confirm destructive import/restore/reset actions. It must not depend on preinstalled guest TenBox scripts.
 - **macOS Agent data shares**: Agent tool temporary shared folders are runtime-only; do not persist operation or backup share tags into VM config.
 - **macOS Agent share cleanup**: drop persisted `tenbox-agent-ops-*` and `tenbox-agent-backups-*` entries on config load/startup to clean old builds.
 - **macOS Agent data panels**: show export/import file panels asynchronously from SwiftUI sheets; do not use blocking `runModal()` from button handlers.

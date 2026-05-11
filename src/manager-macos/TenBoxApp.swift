@@ -474,7 +474,7 @@ class AppState: ObservableObject {
     func exportAgentProfile(vmId: String, agent: AgentKind, destinationURL: URL,
                             completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -485,7 +485,7 @@ class AppState: ObservableObject {
     func importAgentProfile(vmId: String, agent: AgentKind, sourceURL: URL,
                             completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -496,7 +496,7 @@ class AppState: ObservableObject {
     func agentBackupStatus(vmId: String, agent: AgentKind,
                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -507,7 +507,7 @@ class AppState: ObservableObject {
     func snapshotAgentBackup(vmId: String, agent: AgentKind,
                              completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -518,7 +518,7 @@ class AppState: ObservableObject {
     func restoreLatestAgentBackup(vmId: String, agent: AgentKind,
                                   completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -529,7 +529,7 @@ class AppState: ObservableObject {
     func agentHealthStatus(vmId: String, agent: AgentKind,
                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -540,7 +540,7 @@ class AppState: ObservableObject {
     func restartAgent(vmId: String, agent: AgentKind,
                       completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -551,7 +551,7 @@ class AppState: ObservableObject {
     func testAgentModel(vmId: String, agent: AgentKind,
                         completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -562,7 +562,7 @@ class AppState: ObservableObject {
     func resetAgentConfig(vmId: String, agent: AgentKind,
                           completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -573,7 +573,7 @@ class AppState: ObservableObject {
     func exportAgentDiagnostics(vmId: String, agent: AgentKind,
                                 completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
-            completion(.failure(ConsoleCommandError("VM not found")))
+            completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
@@ -806,7 +806,7 @@ private struct VmCommandMenuContent: View {
         }
         .disabled(vm == nil)
 
-        Button("Agent Data...") {
+        Button("Agent 数据...") {
             appState.showAgentToolsSheet = true
         }
         .disabled(vm == nil || !isRunning)
