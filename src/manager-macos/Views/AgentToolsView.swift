@@ -14,6 +14,9 @@ struct AgentToolsSheet: View {
     @State private var pendingConfirmation: PendingAgentConfirmation?
     @State private var latestBackupText = "正在读取..."
     @State private var latestBackupPath: String?
+    @State private var backupSchedule = AgentBackupSchedule()
+    @State private var backupPackages: [AgentBackupPackage] = []
+    @State private var selectedBackupId: String?
 
     init(vmId: String, session: VmSession) {
         self.vmId = vmId
@@ -57,9 +60,13 @@ struct AgentToolsSheet: View {
                         operations: [.snapshotBackup, .exportProfile, .healthCheck]
                     )
 
+                    schedulePanel
+
+                    backupPickerPanel
+
                     operationSection(
                         title: "维护操作",
-                        operations: [.importProfile, .restoreLatest, .restartAgent, .testModel, .resetConfig, .diagnostics]
+                        operations: [.importProfile, .restartAgent, .testModel, .resetConfig, .diagnostics]
                     )
 
                     if let runningOperation {
@@ -80,10 +87,15 @@ struct AgentToolsSheet: View {
         }
         .frame(width: 640, height: 600)
         .onAppear {
+            loadSchedule()
+            refreshBackupList()
             refreshBackupSummary()
         }
         .onChange(of: selectedAgent, perform: { _ in
             operationResult = nil
+            selectedBackupId = nil
+            loadSchedule()
+            refreshBackupList()
             refreshBackupSummary()
         })
         .alert(pendingConfirmation?.title ?? "", isPresented: confirmationPresented) {
@@ -152,6 +164,136 @@ struct AgentToolsSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private var schedulePanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("定时备份")
+                    .font(.headline)
+                Spacer()
+                Toggle("启用", isOn: scheduleEnabledBinding)
+                    .toggleStyle(.checkbox)
+            }
+
+            HStack(spacing: 12) {
+                Picker("时间", selection: scheduleHourBinding) {
+                    ForEach(0..<24, id: \.self) { hour in
+                        Text(String(format: "%02d", hour)).tag(hour)
+                    }
+                }
+                .frame(width: 112)
+
+                Picker("分钟", selection: scheduleMinuteBinding) {
+                    ForEach(0..<60, id: \.self) { minute in
+                        Text(String(format: "%02d", minute)).tag(minute)
+                    }
+                }
+                .frame(width: 112)
+
+                Stepper(value: scheduleKeepCountBinding, in: 1...99) {
+                    Text("最多保留 \(backupSchedule.keepCount) 条")
+                }
+
+                Spacer()
+            }
+
+            Text("每天 \(backupSchedule.timeText) 自动备份；只有 VM 运行且执行通道已连接时才会执行。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var backupPickerPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("备份列表")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    refreshBackupList()
+                    refreshBackupSummary()
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if backupPackages.isEmpty {
+                Text("还没有备份。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(backupPackages) { package in
+                        BackupPackageRow(
+                            package: package,
+                            isSelected: selectedBackupId == package.id
+                        ) {
+                            selectedBackupId = package.id
+                        }
+                    }
+                }
+
+                HStack {
+                    Button {
+                        guard let package = selectedBackupPackage else { return }
+                        pendingConfirmation = .restoreBackup(package)
+                    } label: {
+                        Label("恢复选中备份", systemImage: "arrow.uturn.backward")
+                    }
+                    .disabled(!canRun || selectedBackupPackage == nil)
+
+                    Spacer()
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var selectedBackupPackage: AgentBackupPackage? {
+        guard let selectedBackupId else { return nil }
+        return backupPackages.first { $0.id == selectedBackupId }
+    }
+
+    private var scheduleEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { backupSchedule.enabled },
+            set: { backupSchedule.enabled = $0; saveSchedule() }
+        )
+    }
+
+    private var scheduleHourBinding: Binding<Int> {
+        Binding(
+            get: { backupSchedule.hour },
+            set: { backupSchedule.hour = $0; saveSchedule() }
+        )
+    }
+
+    private var scheduleMinuteBinding: Binding<Int> {
+        Binding(
+            get: { backupSchedule.minute },
+            set: { backupSchedule.minute = $0; saveSchedule() }
+        )
+    }
+
+    private var scheduleKeepCountBinding: Binding<Int> {
+        Binding(
+            get: { backupSchedule.keepCount },
+            set: {
+                backupSchedule.keepCount = $0
+                saveSchedule()
+                refreshBackupList()
+                refreshBackupSummary()
+            }
+        )
+    }
+
     private var vmStateText: String {
         switch vm?.state {
         case .running: return "运行中"
@@ -195,8 +337,10 @@ struct AgentToolsSheet: View {
             importProfile()
         case .snapshotBackup:
             snapshotBackup()
-        case .restoreLatest:
-            pendingConfirmation = .restoreLatest
+        case .restoreBackup:
+            if let package = selectedBackupPackage {
+                pendingConfirmation = .restoreBackup(package)
+            }
         case .healthCheck:
             checkHealth()
         case .restartAgent:
@@ -271,8 +415,8 @@ struct AgentToolsSheet: View {
             runOperation(.importProfile) {
                 appState.importAgentProfile(vmId: vm.id, agent: selectedAgent, sourceURL: url, completion: $0)
             }
-        case .restoreLatest:
-            restoreLatestBackup()
+        case .restoreBackup(let package):
+            restoreBackup(package)
         case .resetConfig:
             resetConfig()
         }
@@ -285,10 +429,10 @@ struct AgentToolsSheet: View {
         }
     }
 
-    private func restoreLatestBackup() {
+    private func restoreBackup(_ package: AgentBackupPackage) {
         guard let vm = vm else { return }
-        runOperation(.restoreLatest) {
-            appState.restoreLatestAgentBackup(vmId: vm.id, agent: selectedAgent, completion: $0)
+        runOperation(.restoreBackup) {
+            appState.restoreAgentBackup(vmId: vm.id, agent: selectedAgent, packageURL: package.url, completion: $0)
         }
     }
 
@@ -351,6 +495,27 @@ struct AgentToolsSheet: View {
         }
     }
 
+    private func refreshBackupList() {
+        guard let vm = vm else {
+            backupPackages = []
+            selectedBackupId = nil
+            return
+        }
+        backupPackages = appState.listAgentBackups(vmId: vm.id, agent: selectedAgent)
+        if let selectedBackupId, backupPackages.contains(where: { $0.id == selectedBackupId }) {
+            return
+        }
+        selectedBackupId = backupPackages.first?.id
+    }
+
+    private func loadSchedule() {
+        backupSchedule = appState.agentBackupSchedule(vmId: vmId, agent: selectedAgent)
+    }
+
+    private func saveSchedule() {
+        appState.setAgentBackupSchedule(backupSchedule, vmId: vmId, agent: selectedAgent)
+    }
+
     private func runOperation(_ operation: AgentToolOperation,
                               revealPath: String? = nil,
                               _ action: (@escaping (Result<AgentToolResult, Error>) -> Void) -> Void) {
@@ -367,9 +532,11 @@ struct AgentToolsSheet: View {
                         revealPath: revealPath
                     )
                     refreshBackupSummary()
+                    refreshBackupList()
                 case .failure(let error):
                     operationResult = Self.makeFailureDisplay(operation: operation, error: error)
                     refreshBackupSummary()
+                    refreshBackupList()
                 }
             }
         }
@@ -471,7 +638,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
     case exportProfile
     case importProfile
     case snapshotBackup
-    case restoreLatest
+    case restoreBackup
     case healthCheck
     case restartAgent
     case testModel
@@ -485,7 +652,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .exportProfile: return "导出"
         case .importProfile: return "导入"
         case .snapshotBackup: return "立即备份"
-        case .restoreLatest: return "恢复最近备份"
+        case .restoreBackup: return "恢复备份"
         case .healthCheck: return "健康检查"
         case .restartAgent: return "重启服务"
         case .testModel: return "测试模型"
@@ -499,7 +666,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .exportProfile: return "square.and.arrow.up"
         case .importProfile: return "square.and.arrow.down"
         case .snapshotBackup: return "clock.arrow.circlepath"
-        case .restoreLatest: return "arrow.uturn.backward"
+        case .restoreBackup: return "arrow.uturn.backward"
         case .healthCheck: return "stethoscope"
         case .restartAgent: return "arrow.clockwise"
         case .testModel: return "bolt.horizontal"
@@ -513,7 +680,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .exportProfile: return "导出当前 Agent 数据"
         case .importProfile: return "从归档包导入 Agent 数据"
         case .snapshotBackup: return "创建一份主机侧备份"
-        case .restoreLatest: return "用最近备份恢复 Agent 数据"
+        case .restoreBackup: return "用选中的备份恢复 Agent 数据"
         case .healthCheck: return "检查 Agent 运行状态"
         case .restartAgent: return "重启 Agent 服务"
         case .testModel: return "测试模型代理连接"
@@ -527,7 +694,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .exportProfile: return "导出完成"
         case .importProfile: return "导入完成"
         case .snapshotBackup: return "备份完成"
-        case .restoreLatest: return "恢复完成"
+        case .restoreBackup: return "恢复完成"
         case .healthCheck: return "健康检查完成"
         case .restartAgent: return "重启完成"
         case .testModel: return "模型测试完成"
@@ -541,7 +708,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .exportProfile: return "导出失败"
         case .importProfile: return "导入失败"
         case .snapshotBackup: return "备份失败"
-        case .restoreLatest: return "恢复失败"
+        case .restoreBackup: return "恢复失败"
         case .healthCheck: return "健康检查失败"
         case .restartAgent: return "重启失败"
         case .testModel: return "模型测试失败"
@@ -562,7 +729,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .exportProfile: return "正在导出 \(agent.displayName) 数据..."
         case .importProfile: return "正在导入 \(agent.displayName) 数据..."
         case .snapshotBackup: return "正在备份 \(agent.displayName) 数据..."
-        case .restoreLatest: return "正在恢复 \(agent.displayName) 最近备份..."
+        case .restoreBackup: return "正在恢复 \(agent.displayName) 备份..."
         case .healthCheck: return "正在检查 \(agent.displayName) 状态..."
         case .restartAgent: return "正在重启 \(agent.displayName) 服务..."
         case .testModel: return "正在测试模型代理..."
@@ -574,7 +741,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
     func revealPath(from result: AgentToolResult) -> String? {
         let raw = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
         switch self {
-        case .snapshotBackup, .restoreLatest, .diagnostics:
+        case .snapshotBackup, .restoreBackup, .diagnostics:
             return raw.split(whereSeparator: { $0.isNewline }).map(String.init).last
         default:
             return nil
@@ -584,13 +751,13 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
 
 private enum PendingAgentConfirmation: Identifiable {
     case importProfile(URL)
-    case restoreLatest
+    case restoreBackup(AgentBackupPackage)
     case resetConfig
 
     var id: String {
         switch self {
         case .importProfile(let url): return "import-\(url.path)"
-        case .restoreLatest: return "restore"
+        case .restoreBackup(let package): return "restore-\(package.id)"
         case .resetConfig: return "reset"
         }
     }
@@ -598,7 +765,7 @@ private enum PendingAgentConfirmation: Identifiable {
     var title: String {
         switch self {
         case .importProfile: return "确认导入 Agent 数据？"
-        case .restoreLatest: return "确认恢复最近备份？"
+        case .restoreBackup: return "确认恢复这个备份？"
         case .resetConfig: return "确认重置配置？"
         }
     }
@@ -607,8 +774,8 @@ private enum PendingAgentConfirmation: Identifiable {
         switch self {
         case .importProfile(let url):
             return "导入会替换当前 Agent 数据。文件：\(url.lastPathComponent)"
-        case .restoreLatest:
-            return "恢复会用最近一份备份覆盖当前 Agent 数据。"
+        case .restoreBackup(let package):
+            return "恢复会用选中的备份覆盖当前 Agent 数据。文件：\(package.filename)"
         case .resetConfig:
             return "重置会覆盖当前 Agent 模型配置。"
         }
@@ -617,7 +784,7 @@ private enum PendingAgentConfirmation: Identifiable {
     var confirmTitle: String {
         switch self {
         case .importProfile: return "导入"
-        case .restoreLatest: return "恢复"
+        case .restoreBackup: return "恢复"
         case .resetConfig: return "重置"
         }
     }
@@ -631,6 +798,47 @@ private struct AgentOperationDisplay: Identifiable {
     let details: String
     let revealPath: String?
     let healthReport: HealthReport?
+}
+
+private struct BackupPackageRow: View {
+    let package: AgentBackupPackage
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(package.filename)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("\(Self.dateText(package.modifiedAt)) · \(Self.sizeText(package.sizeBytes))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private static func dateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
+
+    private static func sizeText(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
 }
 
 private struct AgentOperationResultView: View {

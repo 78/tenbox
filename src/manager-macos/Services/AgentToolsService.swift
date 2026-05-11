@@ -24,6 +24,43 @@ struct AgentToolResult {
     let output: String
 }
 
+struct AgentBackupPackage: Identifiable, Equatable {
+    let url: URL
+    let modifiedAt: Date
+    let sizeBytes: Int64
+
+    var id: String { url.path }
+    var filename: String { url.lastPathComponent }
+}
+
+struct AgentBackupSchedule: Codable, Equatable {
+    static let defaultHour = 3
+    static let defaultMinute = 0
+    static let defaultKeepCount = 7
+
+    var enabled: Bool
+    var hour: Int
+    var minute: Int
+    var keepCount: Int
+    var lastRunDate: String?
+
+    init(enabled: Bool = false,
+         hour: Int = Self.defaultHour,
+         minute: Int = Self.defaultMinute,
+         keepCount: Int = Self.defaultKeepCount,
+         lastRunDate: String? = nil) {
+        self.enabled = enabled
+        self.hour = min(max(hour, 0), 23)
+        self.minute = min(max(minute, 0), 59)
+        self.keepCount = min(max(keepCount, 1), 99)
+        self.lastRunDate = lastRunDate
+    }
+
+    var timeText: String {
+        String(format: "%02d:%02d", hour, minute)
+    }
+}
+
 struct ConsoleCommandError: LocalizedError {
     let errorDescription: String?
 
@@ -145,6 +182,7 @@ final class AgentToolsService {
     }
 
     func snapshotBackup(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                        keepCount: Int = AgentBackupSchedule.defaultKeepCount,
                         completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         do {
             let package = try backupPackageURL(vmId: vm.id, agent: agent)
@@ -163,7 +201,7 @@ final class AgentToolsService {
                             completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 备份失败" : commandResult.output)))
                             return
                         }
-                        self.rotateBackups(vmId: vm.id, agent: agent, keep: 5)
+                        self.rotateBackups(vmId: vm.id, agent: agent, keep: keepCount)
                         completion(.success(AgentToolResult(
                             message: "已创建 Agent 数据备份",
                             output: package.path
@@ -180,39 +218,32 @@ final class AgentToolsService {
         }
     }
 
-    func restoreLatestBackup(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
-                             completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
-        do {
-            guard let latest = try latestBackupPackage(vmId: vm.id, agent: agent) else {
-                completion(.failure(Self.makeError("没有找到备份包")))
-                return
-            }
-            withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
-                let guestPackage = "/mnt/shared/\(share.tag)/\(agent.rawValue)/\(latest.lastPathComponent)"
-                let command = Self.withSharedFolderReady(
-                    tag: share.tag,
-                    body: Self.profileImportCommand(agent: agent, inputPath: guestPackage)
-                )
-                session.runGuestAgentCommand(command, timeout: 420) { result in
-                    cleanup()
-                    switch result {
-                    case .success(let commandResult):
-                        guard commandResult.exitCode == 0 else {
-                            completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 备份恢复失败" : commandResult.output)))
-                            return
-                        }
-                        completion(.success(AgentToolResult(
-                            message: "已从最近备份恢复 Agent 数据",
-                            output: latest.path
-                        )))
-                    case .failure(let error):
-                        completion(.failure(error))
+    func restoreBackup(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                       packageURL: URL,
+                       completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        withBackupShare(vmId: vm.id, appState: appState) { share, cleanup in
+            let guestPackage = "/mnt/shared/\(share.tag)/\(agent.rawValue)/\(packageURL.lastPathComponent)"
+            let command = Self.withSharedFolderReady(
+                tag: share.tag,
+                body: Self.profileImportCommand(agent: agent, inputPath: guestPackage)
+            )
+            session.runGuestAgentCommand(command, timeout: 420) { result in
+                cleanup()
+                switch result {
+                case .success(let commandResult):
+                    guard commandResult.exitCode == 0 else {
+                        completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 备份恢复失败" : commandResult.output)))
+                        return
                     }
+                    completion(.success(AgentToolResult(
+                        message: "已恢复 Agent 数据备份",
+                        output: packageURL.path
+                    )))
+                case .failure(let error):
+                    completion(.failure(error))
                 }
-            } failure: { error in
-                completion(.failure(error))
             }
-        } catch {
+        } failure: { error in
             completion(.failure(error))
         }
     }
@@ -226,10 +257,12 @@ final class AgentToolsService {
     }
 
     func restartAgent(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                      keepCount: Int = AgentBackupSchedule.defaultKeepCount,
                       completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         runRepairCommand(vm: vm, session: session, appState: appState, agent: agent,
                          repairCommand: Self.restartCommand(agent: agent),
                          successMessage: "已重新启动 Agent",
+                         keepCount: keepCount,
                          completion: completion)
     }
 
@@ -242,10 +275,12 @@ final class AgentToolsService {
     }
 
     func resetAgentConfig(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
+                          keepCount: Int = AgentBackupSchedule.defaultKeepCount,
                           completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         runRepairCommand(vm: vm, session: session, appState: appState, agent: agent,
                          repairCommand: Self.resetConfigCommand(agent: agent),
                          successMessage: "已重置 Agent 配置",
+                         keepCount: keepCount,
                          completion: completion)
     }
 
@@ -300,6 +335,7 @@ final class AgentToolsService {
 
     private func runRepairCommand(vm: VmInfo, session: VmSession, appState: AppState, agent: AgentKind,
                                   repairCommand: String, successMessage: String,
+                                  keepCount: Int = AgentBackupSchedule.defaultKeepCount,
                                   completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         do {
             let package = try backupPackageURL(vmId: vm.id, agent: agent)
@@ -319,7 +355,7 @@ final class AgentToolsService {
                             completion(.failure(Self.makeError(commandResult.output.isEmpty ? "Agent 修复操作失败" : commandResult.output)))
                             return
                         }
-                        self.rotateBackups(vmId: vm.id, agent: agent, keep: 5)
+                        self.rotateBackups(vmId: vm.id, agent: agent, keep: keepCount)
                         completion(.success(AgentToolResult(
                             message: successMessage,
                             output: "修复前备份：\(package.path)\n\(commandResult.output)"
@@ -412,45 +448,39 @@ final class AgentToolsService {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyyMMddHHmmss"
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         return try backupPackageDirectory(vmId: vmId, agent: agent)
             .appendingPathComponent("agent-data-\(formatter.string(from: Date())).tar.gz")
     }
 
-    private func latestBackupPackage(vmId: String, agent: AgentKind) throws -> URL? {
+    func listBackupPackages(vmId: String, agent: AgentKind) throws -> [AgentBackupPackage] {
         let dir = try backupPackageDirectory(vmId: vmId, agent: agent)
         let items = (try? fileManager.contentsOfDirectory(
             at: dir,
-            includingPropertiesForKeys: [.contentModificationDateKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         )) ?? []
         return items
             .filter { $0.pathExtension == "gz" && $0.lastPathComponent.hasPrefix("agent-data-") }
-            .sorted { lhs, rhs in
-                let lm = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let rm = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return lm > rm
+            .map { url in
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                return AgentBackupPackage(
+                    url: url,
+                    modifiedAt: values?.contentModificationDate ?? .distantPast,
+                    sizeBytes: Int64(values?.fileSize ?? 0)
+                )
             }
-            .first
+            .sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    private func rotateBackups(vmId: String, agent: AgentKind, keep: Int) {
-        guard let dir = try? backupPackageDirectory(vmId: vmId, agent: agent),
-              let items = try? fileManager.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-              ) else { return }
-        let packages = items
-            .filter { $0.pathExtension == "gz" && $0.lastPathComponent.hasPrefix("agent-data-") }
-            .sorted { lhs, rhs in
-                let lm = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let rm = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return lm > rm
-            }
+    private func latestBackupPackage(vmId: String, agent: AgentKind) throws -> URL? {
+        try listBackupPackages(vmId: vmId, agent: agent).first?.url
+    }
+
+    func rotateBackups(vmId: String, agent: AgentKind, keep: Int) {
+        guard let packages = try? listBackupPackages(vmId: vmId, agent: agent) else { return }
         for old in packages.dropFirst(keep) {
-            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: old.url)
         }
     }
 

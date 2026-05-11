@@ -148,6 +148,7 @@ class AppState: ObservableObject {
     @Published var hostForwardError: String?
     @Published var llmMappings: [LlmModelMapping] = []
     @Published var llmLoggingEnabled = false
+    @Published var agentBackupSchedules: [String: AgentBackupSchedule] = [:]
 
     let llmProxy = LlmProxyService()
     private let agentTools = AgentToolsService()
@@ -161,6 +162,8 @@ class AppState: ObservableObject {
     private var sessionCancellables: [String: AnyCancellable] = [:]
     private var stateObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
+    private var agentBackupTimer: Timer?
+    private var scheduledBackupsRunning: Set<String> = []
     private var pendingVmStartId: String?
     private var sleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
 
@@ -173,6 +176,8 @@ class AppState: ObservableObject {
         }
         loadLlmMappings()
         startLlmProxyIfNeeded()
+        loadAgentBackupSchedules()
+        startAgentBackupScheduler()
         setupClipboard()
         stateObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("TenBoxVmStateChanged"),
@@ -228,6 +233,7 @@ class AppState: ObservableObject {
 
     deinit {
         clipboardHandler.stopMonitoring()
+        agentBackupTimer?.invalidate()
         releaseSleepAssertion()
         if let obs = stateObserver {
             NotificationCenter.default.removeObserver(obs)
@@ -504,6 +510,10 @@ class AppState: ObservableObject {
                                 completion: completion)
     }
 
+    func listAgentBackups(vmId: String, agent: AgentKind) -> [AgentBackupPackage] {
+        (try? agentTools.listBackupPackages(vmId: vmId, agent: agent)) ?? []
+    }
+
     func snapshotAgentBackup(vmId: String, agent: AgentKind,
                              completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
@@ -512,18 +522,19 @@ class AppState: ObservableObject {
         }
         let session = getOrCreateSession(for: vmId)
         agentTools.snapshotBackup(vm: vm, session: session, appState: self, agent: agent,
+                                  keepCount: agentBackupSchedule(vmId: vmId, agent: agent).keepCount,
                                   completion: completion)
     }
 
-    func restoreLatestAgentBackup(vmId: String, agent: AgentKind,
-                                  completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+    func restoreAgentBackup(vmId: String, agent: AgentKind, packageURL: URL,
+                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard let vm = vms.first(where: { $0.id == vmId }) else {
             completion(.failure(ConsoleCommandError("找不到 VM")))
             return
         }
         let session = getOrCreateSession(for: vmId)
-        agentTools.restoreLatestBackup(vm: vm, session: session, appState: self, agent: agent,
-                                       completion: completion)
+        agentTools.restoreBackup(vm: vm, session: session, appState: self, agent: agent,
+                                 packageURL: packageURL, completion: completion)
     }
 
     func agentHealthStatus(vmId: String, agent: AgentKind,
@@ -545,6 +556,7 @@ class AppState: ObservableObject {
         }
         let session = getOrCreateSession(for: vmId)
         agentTools.restartAgent(vm: vm, session: session, appState: self, agent: agent,
+                                keepCount: agentBackupSchedule(vmId: vmId, agent: agent).keepCount,
                                 completion: completion)
     }
 
@@ -567,6 +579,7 @@ class AppState: ObservableObject {
         }
         let session = getOrCreateSession(for: vmId)
         agentTools.resetAgentConfig(vm: vm, session: session, appState: self, agent: agent,
+                                    keepCount: agentBackupSchedule(vmId: vmId, agent: agent).keepCount,
                                     completion: completion)
     }
 
@@ -581,6 +594,134 @@ class AppState: ObservableObject {
                                      completion: completion)
     }
 
+    func agentBackupSchedule(vmId: String, agent: AgentKind) -> AgentBackupSchedule {
+        agentBackupSchedules[Self.agentBackupScheduleKey(vmId: vmId, agent: agent)] ?? AgentBackupSchedule()
+    }
+
+    func setAgentBackupSchedule(_ schedule: AgentBackupSchedule, vmId: String, agent: AgentKind) {
+        let previous = agentBackupSchedule(vmId: vmId, agent: agent)
+        var normalized = AgentBackupSchedule(
+            enabled: schedule.enabled,
+            hour: schedule.hour,
+            minute: schedule.minute,
+            keepCount: schedule.keepCount,
+            lastRunDate: schedule.lastRunDate
+        )
+        let now = Date()
+        let calendar = Calendar.current
+        let nowMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+        let scheduledMinutes = normalized.hour * 60 + normalized.minute
+        if !previous.enabled && normalized.enabled && nowMinutes >= scheduledMinutes && normalized.lastRunDate == nil {
+            normalized.lastRunDate = Self.agentBackupDateKey(now)
+        }
+        agentBackupSchedules[Self.agentBackupScheduleKey(vmId: vmId, agent: agent)] = normalized
+        saveAgentBackupSchedules()
+        agentTools.rotateBackups(vmId: vmId, agent: agent, keep: normalized.keepCount)
+    }
+
+    private static func agentBackupScheduleKey(vmId: String, agent: AgentKind) -> String {
+        "\(vmId)|\(agent.rawValue)"
+    }
+
+    private func loadAgentBackupSchedules() {
+        guard let agentBackups = readSettingsJSON()["agent_backups"] as? [String: Any],
+              let schedules = agentBackups["schedules"] as? [String: Any] else {
+            agentBackupSchedules = [:]
+            return
+        }
+        var loaded: [String: AgentBackupSchedule] = [:]
+        for (key, value) in schedules {
+            guard let dict = value as? [String: Any] else { continue }
+            loaded[key] = AgentBackupSchedule(
+                enabled: dict["enabled"] as? Bool ?? false,
+                hour: dict["hour"] as? Int ?? AgentBackupSchedule.defaultHour,
+                minute: dict["minute"] as? Int ?? AgentBackupSchedule.defaultMinute,
+                keepCount: dict["keep_count"] as? Int ?? AgentBackupSchedule.defaultKeepCount,
+                lastRunDate: dict["last_run_date"] as? String
+            )
+        }
+        agentBackupSchedules = loaded
+    }
+
+    private func saveAgentBackupSchedules() {
+        var json = readSettingsJSON()
+        let schedules: [String: [String: Any]] = agentBackupSchedules.mapValues { schedule in
+            var value: [String: Any] = [
+                "enabled": schedule.enabled,
+                "hour": schedule.hour,
+                "minute": schedule.minute,
+                "keep_count": schedule.keepCount,
+            ]
+            if let lastRunDate = schedule.lastRunDate {
+                value["last_run_date"] = lastRunDate
+            }
+            return value
+        }
+        json["agent_backups"] = ["schedules": schedules] as [String: Any]
+        writeSettingsJSON(json)
+    }
+
+    private func startAgentBackupScheduler() {
+        agentBackupTimer?.invalidate()
+        agentBackupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.runDueAgentBackups()
+        }
+        runDueAgentBackups()
+    }
+
+    private func runDueAgentBackups(now: Date = Date()) {
+        let calendar = Calendar.current
+        let today = Self.agentBackupDateKey(now)
+        let nowMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+
+        for (key, schedule) in agentBackupSchedules {
+            guard schedule.enabled, schedule.lastRunDate != today else { continue }
+            let scheduledMinutes = schedule.hour * 60 + schedule.minute
+            guard nowMinutes >= scheduledMinutes else { continue }
+            guard !scheduledBackupsRunning.contains(key) else { continue }
+
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2,
+                  let agent = AgentKind(rawValue: parts[1]),
+                  let vm = vms.first(where: { $0.id == parts[0] && $0.state == .running }) else {
+                continue
+            }
+
+            let session = getOrCreateSession(for: vm.id)
+            if !session.connected || !session.ipcClient.isConnected {
+                session.connectIfNeeded()
+                continue
+            }
+            guard session.guestAgentConnected else { continue }
+
+            scheduledBackupsRunning.insert(key)
+            agentTools.snapshotBackup(vm: vm, session: session, appState: self, agent: agent, keepCount: schedule.keepCount) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.scheduledBackupsRunning.remove(key)
+                    switch result {
+                    case .success:
+                        var updated = self.agentBackupSchedules[key] ?? schedule
+                        updated.lastRunDate = today
+                        self.agentBackupSchedules[key] = updated
+                        self.saveAgentBackupSchedules()
+                        NSLog("[AgentBackup] Scheduled backup completed: %@ %@", vm.id, agent.rawValue)
+                    case .failure(let error):
+                        NSLog("[AgentBackup] Scheduled backup failed: %@ %@ %@", vm.id, agent.rawValue, error.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func agentBackupDateKey(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     // MARK: - LLM Proxy settings
 
     private var settingsPath: String {
@@ -590,10 +731,22 @@ class AppState: ObservableObject {
         return dir + "/settings.json"
     }
 
-    func loadLlmMappings() {
+    private func readSettingsJSON() -> [String: Any] {
         guard let data = FileManager.default.contents(atPath: settingsPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let llmProxy = json["llm_proxy"] as? [String: Any],
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return json
+    }
+
+    private func writeSettingsJSON(_ json: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
+            try? data.write(to: URL(fileURLWithPath: settingsPath))
+        }
+    }
+
+    func loadLlmMappings() {
+        guard let llmProxy = readSettingsJSON()["llm_proxy"] as? [String: Any],
               let mappingsArray = llmProxy["mappings"] as? [[String: Any]] else {
             llmMappings = []
             return
@@ -612,11 +765,7 @@ class AppState: ObservableObject {
     }
 
     private func saveLlmMappings() {
-        var json: [String: Any] = [:]
-        if let data = FileManager.default.contents(atPath: settingsPath),
-           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = existing
-        }
+        var json = readSettingsJSON()
         let mappingsArray: [[String: Any]] = llmMappings.map { m in
             [
                 "alias": m.alias,
@@ -630,9 +779,7 @@ class AppState: ObservableObject {
             "mappings": mappingsArray,
             "enable_logging": llmLoggingEnabled,
         ] as [String: Any]
-        if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
-            try? data.write(to: URL(fileURLWithPath: settingsPath))
-        }
+        writeSettingsJSON(json)
     }
 
     func addLlmMapping(_ mapping: LlmModelMapping) {
