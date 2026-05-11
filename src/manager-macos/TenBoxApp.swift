@@ -953,7 +953,7 @@ private struct VmCommandMenuContent: View {
         }
         .disabled(vm == nil)
 
-        Button("Agent 数据...") {
+        Button("Agent急救箱...") {
             appState.showAgentToolsSheet = true
         }
         .disabled(vm == nil || !isRunning)

@@ -114,7 +114,7 @@ struct AgentToolsSheet: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Agent 数据")
+            Text("Agent急救箱")
                 .font(.title3)
                 .fontWeight(.semibold)
 

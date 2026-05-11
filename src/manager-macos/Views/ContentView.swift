@@ -85,6 +85,12 @@ struct ContentView: View {
 
                     Divider()
 
+                    Button(action: { appState.showAgentToolsSheet = true }) {
+                        Label("Agent急救箱", systemImage: "cross.case")
+                    }
+                    .disabled(vm.state != .running)
+                    .help("打开 Agent 急救箱")
+
                     Button(action: { appState.showSharedFoldersSheet = true }) {
                         ToolbarBadgeLabel(
                             title: "Shared Folders",
@@ -111,12 +117,6 @@ struct ContentView: View {
                         )
                     }
                     .help("Manage LLM proxy settings")
-
-                    Button(action: { appState.showAgentToolsSheet = true }) {
-                        Label("Agent 数据", systemImage: "externaldrive.badge.person.crop")
-                    }
-                    .disabled(vm.state != .running)
-                    .help("管理 Agent 数据")
 
                     Picker("", selection: appState.activeTabBinding(for: vm.id)) {
                         Image(systemName: "info.circle").tag(0)
