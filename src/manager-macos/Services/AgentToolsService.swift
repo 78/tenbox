@@ -477,7 +477,9 @@ final class AgentToolsService {
           "archive": "files.tar.gz"
         }
         EOF
-        (cd "$home" && tar \(excludes) -czf "$work/files.tar.gz" "$rel")
+        tar_status=0
+        (cd "$home" && tar --warning=no-file-changed --ignore-failed-read \(excludes) -czf "$work/files.tar.gz" "$rel") || tar_status=$?
+        [ "$tar_status" -le 1 ] || exit "$tar_status"
         rm -f "$out"
         tar -czf "$out" -C "$work" manifest.json files.tar.gz
         rm -rf "$work"
