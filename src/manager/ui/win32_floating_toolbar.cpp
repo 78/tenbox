@@ -410,9 +410,16 @@ void FloatingToolbar::CheckMouseNearEdge(HWND hwnd, POINT cursor) {
 
     // "Safe zone": top center 2/3 of screen — show at initial position
     if (cursor.y <= pr.top + 10 && abs(cursor.x - screen_cx) <= kSafeZoneHalfW) {
+        int init_x = (pr.left + pr.right - st->tb_width) / 2;
+        int init_y = pr.top + 15;
+        // Already at initial position and visible — don't re-trigger
+        if (!st->snapped && !st->tab_mode && IsWindowVisible(hwnd) &&
+            st->free_pos.x == init_x && st->free_pos.y == init_y) {
+            return;
+        }
         st->snapped = false;
-        st->free_pos.x = (pr.left + pr.right - st->tb_width) / 2;
-        st->free_pos.y = pr.top + 15;
+        st->free_pos.x = init_x;
+        st->free_pos.y = init_y;
         st->tab_mode = false;
         UpdatePosition(hwnd);
         ShowBar(hwnd);
