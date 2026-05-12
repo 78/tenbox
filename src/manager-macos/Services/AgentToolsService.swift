@@ -806,8 +806,16 @@ final class AgentToolsService {
           pkg_agent="$(awk -F\\" '/agent_type/ {print $4; exit}' "$work/manifest.json")"
         fi
         [ "$pkg_agent" = "\(agent.rawValue)" ] || { echo "导入包属于 $pkg_agent，不是 \(agent.rawValue)" >&2; exit 1; }
-        if ! tar -tzf "$work/files.tar.gz" "$rel" >/dev/null 2>&1; then
-          echo "导入包缺少 $rel 目录" >&2
+        tar -tzf "$work/files.tar.gz" > "$work/files.list"
+        if ! awk -v rel="$rel" '
+        BEGIN { prefix = rel "/"; found = 0; bad = 0 }
+        { name = $0; if (name == rel || name == prefix) { found = 1; next }
+          if (index(name, prefix) == 1) { found = 1 } else { bad = 1 }
+          if (name ~ /^\\// || name ~ /(^|\\/)\\.\\.(\\/|$)/) { bad = 1 }
+          if (bad) exit 1 }
+        END { if (!found) exit 2; exit 0 }
+        ' "$work/files.list"; then
+          echo "导入包包含非法路径或缺少 $rel 目录" >&2
           exit 1
         fi
         backup=""
@@ -822,7 +830,7 @@ final class AgentToolsService {
           fi
         fi
         mkdir -p "$target"
-        tar -tzf "$work/files.tar.gz" | awk -v rel="$rel/" 'index($0, rel) == 1 { rest=substr($0, length(rel)+1); split(rest, a, "/"); if (a[1] != "") print a[1] }' | sort -u | while IFS= read -r item; do
+        awk -v rel="$rel/" 'index($0, rel) == 1 { rest=substr($0, length(rel)+1); split(rest, a, "/"); if (a[1] != "") print a[1] }' "$work/files.list" | sort -u | while IFS= read -r item; do
           [ -n "$item" ] || continue
           rm -rf "$target/$item"
         done

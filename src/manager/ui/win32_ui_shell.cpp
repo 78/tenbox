@@ -1503,7 +1503,6 @@ void Win32UiShell::RunDueAgentBackups() {
         auto vm = manager_.GetVm(vm_id);
         if (!vm || vm->state != VmPowerState::kRunning || !vm->guest_agent_connected) {
             auto& s = manager_.app_settings().agent_backup_schedules[key];
-            s.last_run_date = today;
             s.last_attempt_at = AgentBackupTimestamp(now);
             s.last_attempt_status = "failed";
             s.last_attempt_message = !vm ? "VM 不存在" : "VM 未运行或 Guest Agent 未连接";
@@ -1518,10 +1517,10 @@ void Win32UiShell::RunDueAgentBackups() {
                 InvokeOnUiThread([this, key, today, now, result = std::move(result)]() mutable {
                     impl_->scheduled_agent_backups_running.erase(key);
                     auto& s = manager_.app_settings().agent_backup_schedules[key];
-                    s.last_run_date = today;
                     s.last_attempt_at = AgentBackupTimestamp(now);
                     s.last_attempt_status = result.ok ? "success" : "failed";
                     s.last_attempt_message = result.ok ? "成功" : result.message;
+                    s.last_run_date = today;
                     manager_.SaveAppSettings();
                 });
             });

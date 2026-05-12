@@ -89,6 +89,7 @@ struct VmRecord {
     VmPowerState state = VmPowerState::kStopped;
     std::optional<VmMutablePatch> pending_patch;
     VmRuntimeHandle runtime;
+    std::vector<SharedFolder> runtime_shared_folders;
     int last_exit_code = 0;
     bool reboot_pending = false;
     bool guest_agent_connected = false;

@@ -759,18 +759,18 @@ class AppState: ObservableObject {
             }
             guard let vm = vms.first(where: { $0.id == parts[0] }) else { continue }
             guard vm.state == .running else {
-                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "VM 未运行", at: now, lastRunDate: today)
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "VM 未运行", at: now)
                 continue
             }
 
             let session = getOrCreateSession(for: vm.id)
             if !session.connected || !session.ipcClient.isConnected {
                 session.connectIfNeeded()
-                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now, lastRunDate: today)
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now)
                 continue
             }
             guard session.guestAgentConnected else {
-                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now, lastRunDate: today)
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now)
                 continue
             }
 

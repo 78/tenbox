@@ -102,11 +102,11 @@ void SetBusy(HWND dlg, DialogData* data, bool busy) {
 std::string SaveFileDialog(HWND dlg, const std::string& filename) {
     wchar_t file_buf[MAX_PATH]{};
     MultiByteToWideChar(CP_UTF8, 0, filename.c_str(), -1, file_buf, MAX_PATH);
-    std::wstring filter = L"Agent Profile (*.tar.gz)\0*.tar.gz\0All Files\0*.*\0\0";
+    static constexpr wchar_t filter[] = L"Agent Profile (*.tar.gz)\0*.tar.gz\0All Files\0*.*\0\0";
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = dlg;
-    ofn.lpstrFilter = filter.c_str();
+    ofn.lpstrFilter = filter;
     ofn.lpstrFile = file_buf;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;

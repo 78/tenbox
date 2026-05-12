@@ -435,19 +435,7 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
     }
 
     if (running && patch.shared_folders) {
-        ipc::Message msg;
-        msg.channel = ipc::Channel::kControl;
-        msg.kind = ipc::Kind::kRequest;
-        msg.type = "runtime.update_shared_folders";
-        msg.vm_id = vm_id;
-        msg.request_id = GetTickCount64();
-        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
-        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
-            const auto& f = vm.spec.shared_folders[i];
-            msg.fields["folder_" + std::to_string(i)] =
-                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
-        }
-        SendRuntimeMessage(vm, msg);
+        SendSharedFoldersUpdateLocked(vm_id, vm);
     }
 
     return true;
@@ -884,15 +872,18 @@ bool ManagerService::SendRuntimeMessage(VmRecord& vm, const ipc::Message& msg) {
 
 void ManagerService::SendSharedFoldersUpdateLocked(const std::string& vm_id, VmRecord& vm) {
     if (vm.state != VmPowerState::kRunning) return;
+    std::vector<SharedFolder> folders = vm.spec.shared_folders;
+    folders.insert(folders.end(), vm.runtime_shared_folders.begin(), vm.runtime_shared_folders.end());
+
     ipc::Message msg;
     msg.channel = ipc::Channel::kControl;
     msg.kind = ipc::Kind::kRequest;
     msg.type = "runtime.update_shared_folders";
     msg.vm_id = vm_id;
     msg.request_id = GetTickCount64();
-    msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
-    for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
-        const auto& f = vm.spec.shared_folders[i];
+    msg.fields["folder_count"] = std::to_string(folders.size());
+    for (size_t i = 0; i < folders.size(); ++i) {
+        const auto& f = folders[i];
         msg.fields["folder_" + std::to_string(i)] =
             f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
     }
@@ -924,6 +915,7 @@ void ManagerService::CleanupRuntimeHandles(VmRecord& vm) {
         vm.runtime.process_handle = nullptr;
     }
     vm.runtime.process_id = 0;
+    vm.runtime_shared_folders.clear();
     vm.runtime.recv_pending.clear();
     vm.runtime.recv_payload_needed = 0;
     vm.runtime.recv_pending_msg = {};
@@ -1252,6 +1244,12 @@ bool ManagerService::AddSharedFolder(const std::string& vm_id, const SharedFolde
             return false;
         }
     }
+    for (const auto& sf : vm.runtime_shared_folders) {
+        if (sf.tag == folder.tag) {
+            if (error) *error = "shared folder with tag '" + folder.tag + "' already exists";
+            return false;
+        }
+    }
     
     // Check host path exists
     DWORD attrs = GetFileAttributesA(folder.host_path.c_str());
@@ -1325,12 +1323,18 @@ bool ManagerService::AddRuntimeSharedFolder(const std::string& vm_id, const Shar
             return false;
         }
     }
+    for (const auto& sf : vm.runtime_shared_folders) {
+        if (sf.tag == folder.tag) {
+            if (error) *error = "shared folder with tag '" + folder.tag + "' already exists";
+            return false;
+        }
+    }
     DWORD attrs = GetFileAttributesA(folder.host_path.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
         if (error) *error = "host path does not exist or is not a directory";
         return false;
     }
-    vm.spec.shared_folders.push_back(folder);
+    vm.runtime_shared_folders.push_back(folder);
     SendSharedFoldersUpdateLocked(vm_id, vm);
     return true;
 }
@@ -1344,13 +1348,13 @@ bool ManagerService::RemoveRuntimeSharedFolder(const std::string& vm_id, const s
         return false;
     }
     VmRecord& vm = *vmp;
-    auto it = std::find_if(vm.spec.shared_folders.begin(), vm.spec.shared_folders.end(),
+    auto it = std::find_if(vm.runtime_shared_folders.begin(), vm.runtime_shared_folders.end(),
                            [&tag](const SharedFolder& sf) { return sf.tag == tag; });
-    if (it == vm.spec.shared_folders.end()) {
+    if (it == vm.runtime_shared_folders.end()) {
         if (error) *error = "shared folder with tag '" + tag + "' not found";
         return false;
     }
-    vm.spec.shared_folders.erase(it);
+    vm.runtime_shared_folders.erase(it);
     SendSharedFoldersUpdateLocked(vm_id, vm);
     return true;
 }

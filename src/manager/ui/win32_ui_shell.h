@@ -16,6 +16,7 @@ public:
     void Run();
     void Quit();
     void RefreshVmList();
+    void RunDueAgentBackups();
 
     static void InvokeOnUiThread(std::function<void()> fn);
     static void SetClipboardFromVm(bool value);
@@ -25,7 +26,6 @@ public:
 
 private:
     void UpdateSleepPrevention();
-    void RunDueAgentBackups();
 
     std::unique_ptr<Impl> impl_;
     bool sleep_prevented_ = false;

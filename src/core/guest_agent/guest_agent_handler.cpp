@@ -1,6 +1,7 @@
 #include "core/guest_agent/guest_agent_handler.h"
 #include "core/device/virtio/virtio_serial.h"
 #include "core/vmm/types.h"
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -438,11 +439,30 @@ void GuestAgentHandler::RunShellCommandWorker(const std::string& command,
     if (!user.empty()) {
         const std::string quoted_user = ShellQuote(user);
         const std::string quoted_command = ShellQuote(command);
+        const std::string missing_user = ShellQuote("guest user not found: " + user);
+        const std::string switch_error = ShellQuote("cannot switch guest user: " + user);
         exec_command =
-            "if command -v runuser >/dev/null 2>&1 && id " + quoted_user + " >/dev/null 2>&1; then "
-            "exec runuser -l " + quoted_user + " -c " + quoted_command + "; "
-            "else exec /bin/sh -lc " + quoted_command + "; fi";
+            "if ! id " + quoted_user + " >/dev/null 2>&1; then printf '%s\\n' " + missing_user + " >&2; exit 126; fi; "
+            "if command -v runuser >/dev/null 2>&1; then exec runuser -l " + quoted_user + " -c " + quoted_command + "; fi; "
+            "if command -v su >/dev/null 2>&1; then exec su -s /bin/sh " + quoted_user + " -c " + quoted_command + "; fi; "
+            "printf '%s\\n' " + switch_error + " >&2; exit 126";
     }
+
+    const auto timeout_seconds = std::max<int64_t>(
+        1, std::chrono::duration_cast<std::chrono::seconds>(timeout).count());
+    const std::string quoted_exec_command = ShellQuote(exec_command);
+    exec_command =
+        "if command -v timeout >/dev/null 2>&1; then "
+        "exec timeout -k 5s " + std::to_string(timeout_seconds) + "s /bin/sh -lc " + quoted_exec_command + "; "
+        "fi; "
+        "/bin/sh -lc " + quoted_exec_command + " & __tenbox_child=$!; "
+        "( sleep " + std::to_string(timeout_seconds) + "; "
+        "kill -TERM \"$__tenbox_child\" >/dev/null 2>&1 || true; "
+        "sleep 5; kill -KILL \"$__tenbox_child\" >/dev/null 2>&1 || true ) & __tenbox_watchdog=$!; "
+        "wait \"$__tenbox_child\"; __tenbox_rc=$?; "
+        "kill \"$__tenbox_watchdog\" >/dev/null 2>&1 || true; "
+        "wait \"$__tenbox_watchdog\" 2>/dev/null || true; "
+        "exit \"$__tenbox_rc\"";
 
     const std::string args =
         R"({"path":"/bin/sh","arg":["-lc",")" + JsonEscape(exec_command) +
