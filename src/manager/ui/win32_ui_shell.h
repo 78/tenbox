@@ -25,6 +25,7 @@ public:
 
 private:
     void UpdateSleepPrevention();
+    void RunDueAgentBackups();
 
     std::unique_ptr<Impl> impl_;
     bool sleep_prevented_ = false;

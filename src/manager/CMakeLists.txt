@@ -2,6 +2,7 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/main.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/manager_service.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/app_settings.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/agent_tools_service.cpp
     ${CMAKE_SOURCE_DIR}/src/common/image_source.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/http_download.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/app.manifest
@@ -13,6 +14,7 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/ui/shared_folders_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/port_forward_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/llm_proxy_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/ui/agent_tools_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/settings_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_display_panel.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/info_tab.cpp
@@ -43,6 +45,7 @@ target_link_libraries(tenbox-manager
         ole32
         winhttp
         bcrypt
+        crypt32
         ws2_32
 )
 

@@ -33,17 +33,17 @@ enum AgentSkillConflictStrategy: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .skip: return "保留 Hermes"
-        case .overwrite: return "覆盖 Hermes"
-        case .rename: return "重命名导入"
+        case .skip: return "技能保留 Hermes"
+        case .overwrite: return "技能覆盖 Hermes"
+        case .rename: return "技能重命名导入"
         }
     }
 
     var help: String {
         switch self {
-        case .skip: return "遇到同名技能时保留目标 Hermes 版本"
-        case .overwrite: return "遇到同名技能时使用 OpenClaw 版本覆盖"
-        case .rename: return "遇到同名技能时将 OpenClaw 版本重命名导入"
+        case .skip: return "遇到同名技能时保留目标 Hermes 版本；目标级配置冲突会按 Hermes 迁移规则覆盖"
+        case .overwrite: return "遇到同名技能时使用 OpenClaw 版本覆盖；目标级配置冲突会按 Hermes 迁移规则覆盖"
+        case .rename: return "遇到同名技能时将 OpenClaw 版本重命名导入；目标级配置冲突会按 Hermes 迁移规则覆盖"
         }
     }
 }
@@ -1120,6 +1120,9 @@ final class AgentToolsService {
         migrate_log="$work/migrate.txt"
         migrate_status=0
         "$hermes_cmd" claw migrate --source "$source_dir/.openclaw" \(flags) > "$migrate_log" 2>&1 || migrate_status=$?
+        if grep -q "Refusing to apply" "$migrate_log"; then
+          migrate_status=1
+        fi
         {
           echo "===== OpenClaw -> Hermes migrate $(date -u +%Y-%m-%dT%H:%M:%SZ) ====="
           cat "$migrate_log"
@@ -1127,6 +1130,8 @@ final class AgentToolsService {
         } >> "$report"
         \(limitedLogCommand(logVariable: "migrate_log"))
         [ "$migrate_status" -eq 0 ] || exit "$migrate_status"
+        \(hermesOpenClawChannelConfigCommand())
+        \(hermesTenBoxModelConfigCommand())
         svc="$(\(serviceResolverCommand(agent: .hermes)))"
         if [ -n "$svc" ]; then
           XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user restart "$svc" >/dev/null 2>&1 || true
@@ -1146,10 +1151,143 @@ final class AgentToolsService {
         """
     }
 
+    private static func hermesOpenClawChannelConfigCommand() -> String {
+        """
+        if command -v python3 >/dev/null 2>&1; then
+          python3 - "$source_dir/.openclaw/openclaw.json" "${HOME:-/home/tenbox}/.hermes/.env" <<'PY' >> "$report" 2>&1
+        import json
+        import sys
+        from pathlib import Path
+
+        source = Path(sys.argv[1])
+        env_file = Path(sys.argv[2])
+        if not source.exists():
+            print("OpenClaw channel 配置未迁移：找不到 openclaw.json")
+            raise SystemExit(0)
+
+        try:
+            data = json.loads(source.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"OpenClaw channel 配置未迁移：openclaw.json 解析失败：{exc}")
+            raise SystemExit(0)
+
+        channels = data.get("channels") or {}
+        updates = {}
+        notes = []
+
+        feishu = channels.get("feishu") or {}
+        if feishu.get("enabled"):
+            app_id = feishu.get("appId") or feishu.get("app_id")
+            app_secret = feishu.get("appSecret") or feishu.get("app_secret")
+            if app_id:
+                updates["FEISHU_APP_ID"] = str(app_id)
+            if app_secret:
+                updates["FEISHU_APP_SECRET"] = str(app_secret)
+            if feishu.get("domain"):
+                updates["FEISHU_DOMAIN"] = str(feishu["domain"])
+            if feishu.get("connectionMode") or feishu.get("connection_mode"):
+                updates["FEISHU_CONNECTION_MODE"] = str(feishu.get("connectionMode") or feishu.get("connection_mode"))
+            if feishu.get("groupPolicy") or feishu.get("group_policy"):
+                updates["FEISHU_GROUP_POLICY"] = str(feishu.get("groupPolicy") or feishu.get("group_policy"))
+            allowed = feishu.get("allowFrom") or feishu.get("allowedUsers") or feishu.get("allowed_users")
+            if isinstance(allowed, list) and allowed:
+                updates["FEISHU_ALLOWED_USERS"] = ",".join(str(item) for item in allowed)
+            notes.append("Feishu")
+
+        wecom = channels.get("wecom") or {}
+        if wecom.get("enabled"):
+            bot_id = wecom.get("botId") or wecom.get("bot_id")
+            secret = wecom.get("secret")
+            if bot_id:
+                updates["WECOM_BOT_ID"] = str(bot_id)
+            if secret:
+                updates["WECOM_SECRET"] = str(secret)
+            if wecom.get("dmPolicy") or wecom.get("dm_policy"):
+                updates["WECOM_DM_POLICY"] = str(wecom.get("dmPolicy") or wecom.get("dm_policy"))
+            if wecom.get("groupPolicy") or wecom.get("group_policy"):
+                updates["WECOM_GROUP_POLICY"] = str(wecom.get("groupPolicy") or wecom.get("group_policy"))
+            allowed = wecom.get("allowFrom") or wecom.get("allow_from") or wecom.get("allowedUsers") or wecom.get("allowed_users")
+            if isinstance(allowed, list) and allowed:
+                updates["WECOM_ALLOWED_USERS"] = ",".join(str(item) for item in allowed)
+            notes.append("WeCom")
+
+        if updates:
+            env_file.parent.mkdir(parents=True, exist_ok=True)
+            lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
+            seen = set()
+            patched = []
+            for line in lines:
+                key = line.split("=", 1)[0] if "=" in line and not line.startswith("#") else None
+                if key in updates:
+                    patched.append(f"{key}={updates[key]}")
+                    seen.add(key)
+                else:
+                    patched.append(line)
+            for key, value in updates.items():
+                if key not in seen:
+                    patched.append(f"{key}={value}")
+            env_file.write_text("\\n".join(patched) + "\\n", encoding="utf-8")
+
+        if notes:
+            print("已迁移 OpenClaw channel 配置：" + "、".join(notes))
+            print("提示：插件安装态、pairing/device 运行态未自动复制；如 Hermes channel adapter 版本不兼容，仍需手动检查。")
+        else:
+            print("未发现可迁移的 Feishu/WeCom channel 配置")
+        PY
+          if grep -q '^FEISHU_APP_ID=' "${HOME:-/home/tenbox}/.hermes/.env" 2>/dev/null; then
+            "$hermes_cmd" config set platforms.feishu.enabled true >/dev/null 2>&1 || true
+          fi
+          if grep -q '^WECOM_BOT_ID=' "${HOME:-/home/tenbox}/.hermes/.env" 2>/dev/null; then
+            "$hermes_cmd" config set platforms.wecom.enabled true >/dev/null 2>&1 || true
+            wecom_dm_policy="$(grep '^WECOM_DM_POLICY=' "${HOME:-/home/tenbox}/.hermes/.env" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"
+            if [ -n "$wecom_dm_policy" ]; then
+              "$hermes_cmd" config set platforms.wecom.extra.dm_policy "$wecom_dm_policy" >/dev/null 2>&1 || true
+            fi
+          fi
+        fi
+        """
+    }
+
+    private static func hermesTenBoxModelConfigCommand() -> String {
+        """
+        if [ -n "$hermes_cmd" ]; then
+          "$hermes_cmd" config set model.default default >/dev/null
+          "$hermes_cmd" config set model.provider custom >/dev/null
+          "$hermes_cmd" config set model.base_url http://10.0.2.3/v1 >/dev/null
+          "$hermes_cmd" config set terminal.backend local >/dev/null
+          "$hermes_cmd" config set auxiliary.compression.provider custom >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.compression.model default >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.compression.base_url http://10.0.2.3/v1 >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.vision.provider custom >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.vision.model default >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.vision.base_url http://10.0.2.3/v1 >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.session_search.provider custom >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.session_search.model default >/dev/null 2>&1 || true
+          "$hermes_cmd" config set auxiliary.session_search.base_url http://10.0.2.3/v1 >/dev/null 2>&1 || true
+          env_file="${HOME:-/home/tenbox}/.hermes/.env"
+          mkdir -p "$(dirname "$env_file")"
+          touch "$env_file"
+          set_env_value() {
+            key="$1"
+            value="$2"
+            if grep -q "^$key=" "$env_file"; then
+              sed -i "s|^$key=.*|$key=$value|" "$env_file"
+            else
+              printf '%s=%s\\n' "$key" "$value" >> "$env_file"
+            fi
+          }
+          set_env_value OPENAI_BASE_URL http://10.0.2.3/v1
+          set_env_value OPENAI_API_KEY tenbox
+          echo "已恢复 TenBox 模型代理配置" >> "$report"
+        fi
+        """
+    }
+
     private static func openClawMigrationFlags(options: AgentMigrationOptions, includeYes: Bool) -> String {
         var flags = [
             "--preset", "full",
             "--migrate-secrets",
+            "--overwrite",
             "--skill-conflict", options.skillConflictStrategy.rawValue
         ].map(shellQuote).joined(separator: " ")
 
