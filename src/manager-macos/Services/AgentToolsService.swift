@@ -784,7 +784,10 @@ final class AgentToolsService {
         rel=\(shellQuote(relPath))
         target="$home/$rel"
         [ -f "$input" ] || { echo "找不到导入包：$input" >&2; exit 1; }
-        work="$(mktemp -d /tmp/tenbox-profile-import.XXXXXX)"
+        input_dir="$(dirname "$input")"
+        work="$input_dir/.tenbox-profile-import-$(date -u +%Y%m%d%H%M%S)-$$"
+        rm -rf "$work"
+        mkdir -p "$work"
         trap 'rm -rf "$work"' EXIT
         tar --touch --no-same-owner -xzf "$input" -C "$work"
         [ -f "$work/manifest.json" ] || { echo "导入包缺少 manifest.json" >&2; exit 1; }
@@ -803,30 +806,29 @@ final class AgentToolsService {
           pkg_agent="$(awk -F\\" '/agent_type/ {print $4; exit}' "$work/manifest.json")"
         fi
         [ "$pkg_agent" = "\(agent.rawValue)" ] || { echo "导入包属于 $pkg_agent，不是 \(agent.rawValue)" >&2; exit 1; }
-        extract_root="$work/files"
-        mkdir -p "$extract_root"
-        if ! tar --touch --no-same-owner -xzf "$work/files.tar.gz" -C "$extract_root"; then
-          echo "解包 Agent 数据失败" >&2
+        if ! tar -tzf "$work/files.tar.gz" "$rel" >/dev/null 2>&1; then
+          echo "导入包缺少 $rel 目录" >&2
           exit 1
         fi
-        extract_target="$extract_root/$rel"
-        [ -d "$extract_target" ] || { echo "导入包缺少 $rel 目录" >&2; exit 1; }
         backup=""
         if [ -e "$target" ]; then
-          backup="$target.pre-import-$(date -u +%Y%m%d%H%M%S)"
-          cp -a "$target" "$backup"
+          backup="$input_dir/pre-import-\(agent.rawValue)-$(date -u +%Y%m%d%H%M%S).tar.gz"
+          backup_status=0
+          (cd "$home" && tar --warning=no-file-changed --ignore-failed-read -czf "$backup" "$rel") || backup_status=$?
+          if [ "$backup_status" -gt 1 ]; then
+            rm -f "$backup"
+            echo "创建导入前备份失败" >&2
+            exit "$backup_status"
+          fi
         fi
         mkdir -p "$target"
-        if ! (
-          cd "$extract_target"
-          for item in .[!.]* ..?* *; do
-            [ -e "$item" ] || continue
-            rm -rf "$target/$item"
-            cp -a "$item" "$target/$item"
-          done
-        ); then
+        tar -tzf "$work/files.tar.gz" | awk -v rel="$rel/" 'index($0, rel) == 1 { rest=substr($0, length(rel)+1); split(rest, a, "/"); if (a[1] != "") print a[1] }' | sort -u | while IFS= read -r item; do
+          [ -n "$item" ] || continue
+          rm -rf "$target/$item"
+        done
+        if ! tar --touch --no-same-owner -xzf "$work/files.tar.gz" -C "$home"; then
           rm -rf "$target"
-          if [ -n "$backup" ] && [ -d "$backup" ]; then mv "$backup" "$target"; fi
+          if [ -n "$backup" ] && [ -f "$backup" ]; then tar --touch --no-same-owner -xzf "$backup" -C "$home"; fi
           echo "恢复 Agent 数据失败" >&2
           exit 1
         fi
@@ -864,10 +866,27 @@ final class AgentToolsService {
     }
 
     private static func restartCommand(agent: AgentKind) -> String {
-        """
+        let waitForGateway: String
+        switch agent {
+        case .hermes:
+            waitForGateway = ""
+        case .openclaw:
+            waitForGateway = """
+            i=0
+            while [ "$i" -lt 60 ]; do
+              if nc -z 127.0.0.1 18789 >/dev/null 2>&1; then
+                break
+              fi
+              i=$((i + 1))
+              sleep 1
+            done
+            """
+        }
+        return """
         svc="$(\(serviceResolverCommand(agent: agent)))"
         [ -n "$svc" ] || { echo "Agent 服务未安装" >&2; exit 1; }
         XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user restart "$svc"
+        \(waitForGateway)
         \(healthStatusCommand(agent: agent))
         """
     }
@@ -1055,7 +1074,10 @@ final class AgentToolsService {
         [ -n "$hermes_cmd" ] || { echo "目标 VM 缺少 Hermes 命令" >&2; exit 1; }
         input=\(shellQuote(inputPath))
         report=\(shellQuote(reportPath))
-        work="$(mktemp -d /tmp/tenbox-openclaw-to-hermes.XXXXXX)"
+        tmp_parent="${HOME:-/home/tenbox}/.tenbox-tmp"
+        mkdir -p "$tmp_parent"
+        chmod 700 "$tmp_parent" 2>/dev/null || true
+        work="$(mktemp -d "$tmp_parent/openclaw-to-hermes.XXXXXX")"
         trap 'rm -rf "$work"' EXIT
         source_dir="$work/source"
         [ -f "$input" ] || { echo "找不到 OpenClaw 迁移包：$input" >&2; exit 1; }
@@ -1085,7 +1107,10 @@ final class AgentToolsService {
         [ -n "$hermes_cmd" ] || { echo "目标 VM 缺少 Hermes 命令" >&2; exit 1; }
         input=\(shellQuote(inputPath))
         report=\(shellQuote(reportPath))
-        work="$(mktemp -d /tmp/tenbox-openclaw-to-hermes.XXXXXX)"
+        tmp_parent="${HOME:-/home/tenbox}/.tenbox-tmp"
+        mkdir -p "$tmp_parent"
+        chmod 700 "$tmp_parent" 2>/dev/null || true
+        work="$(mktemp -d "$tmp_parent/openclaw-to-hermes.XXXXXX")"
         trap 'rm -rf "$work"' EXIT
         source_dir="$work/source"
         [ -f "$input" ] || { echo "找不到 OpenClaw 迁移包：$input" >&2; exit 1; }
@@ -1180,6 +1205,8 @@ final class AgentToolsService {
                 "--exclude", ".openclaw/.cache",
                 "--exclude", ".openclaw/workspace/.cache",
                 "--exclude", ".openclaw/logs",
+                "--exclude", ".openclaw/backup",
+                "--exclude", ".openclaw/openclaw-backup*.tar.gz",
             ]
             return excludes.map(shellQuote).joined(separator: " ")
         }
