@@ -69,6 +69,8 @@ with tar:
             print(f'Archive contains unexpected path: {name}', file=sys.stderr); sys.exit(2)
         if m.issym() or m.islnk():
             print(f'Archive contains unsupported link: {name}', file=sys.stderr); sys.exit(2)
+        if not (m.isfile() or m.isdir()):
+            print(f'Archive contains unsupported entry type: {name}', file=sys.stderr); sys.exit(2)
 PY
 }
 
@@ -93,6 +95,12 @@ with open(manifest, 'w', encoding='utf-8') as f:
 PY
 }
 
+finalize_file() {
+  tmp="$1" output="$2"
+  mv "$tmp" "$output" 2>/dev/null && return 0
+  cp "$tmp" "$output" 2>/dev/null && rm -f "$tmp"
+}
+
 export_profile() {
   agent="$1" output="$2" scope="${3:-backup}"
   home="$(home_dir)" rel="$(agent_rel "$agent")" src="$home/$rel"
@@ -114,7 +122,7 @@ export_profile() {
 EOF
   (cd "$home" && tar -czf "$work/files.tar.gz" $exclude_args "$rel") || { rm -rf "$work" "$tmp"; die "Failed to export $agent profile."; }
   (cd "$work" && tar -czf "$tmp" manifest.json files.tar.gz) || { rm -rf "$work" "$tmp"; die "Failed to package $agent profile."; }
-  mv "$tmp" "$output"
+  finalize_file "$tmp" "$output" || { rm -rf "$work" "$tmp"; die "Failed to finalize $agent profile export."; }
   write_manifest "$output" "${output}.manifest.json" "$agent" "$scope"
   rm -rf "$work"
   echo "Exported $agent profile to $output."
@@ -138,9 +146,18 @@ with open(sys.argv[1], encoding='utf-8') as f:
 PY
 )"
   [ "$pkg_agent" = "$agent" ] || { rm -rf "$work"; die "Import package belongs to $pkg_agent, not $agent."; }
-  validate_archive "$work/files.tar.gz" "$rel"
-  if [ -e "$target" ]; then mv "$target" "$target.before-import-$(date +%Y%m%d-%H%M%S)" || die "Failed to preserve existing profile."; fi
-  (cd "$home" && tar -xzf "$work/files.tar.gz") || { rm -rf "$work"; die "Failed to import $agent profile."; }
+  validate_archive "$work/files.tar.gz" "$rel" || { rm -rf "$work"; die "Invalid profile archive."; }
+  backup=""
+  if [ -e "$target" ]; then
+    backup="$target.before-import-$(date +%Y%m%d-%H%M%S)"
+    mv "$target" "$backup" || { rm -rf "$work"; die "Failed to preserve existing profile."; }
+  fi
+  if ! (cd "$home" && tar -xzf "$work/files.tar.gz"); then
+    rm -rf "$target"
+    if [ -n "$backup" ] && [ -e "$backup" ]; then mv "$backup" "$target" || true; fi
+    rm -rf "$work"
+    die "Failed to import $agent profile."
+  fi
   rm -rf "$work"
   echo "Imported $agent profile from $input."
 }
@@ -155,7 +172,7 @@ export_openclaw_source() {
   exclude_args=""
   for path in $(agent_excludes openclaw); do exclude_args="$exclude_args --exclude=$path"; done
   (cd "$home" && tar -czf "$tmp" $exclude_args ".openclaw") || { rm -f "$tmp"; die "Failed to export OpenClaw source."; }
-  mv "$tmp" "$output"
+  finalize_file "$tmp" "$output" || { rm -f "$tmp"; die "Failed to finalize OpenClaw source export."; }
   echo "Exported OpenClaw source to $output."
 }
 
@@ -248,7 +265,7 @@ PY
 
 migrate_openclaw() {
   input="$1" report="$2" skill_conflict="$3" workspace_target="$4" mode="$5"
-  validate_archive "$input" ".openclaw"
+  validate_archive "$input" ".openclaw" || die "Invalid OpenClaw source archive."
   tmp="${TMPDIR:-/tmp}/tenbox-openclaw-migration.$$"; rm -rf "$tmp"; mkdir -p "$tmp" || die "Failed to create temporary directory."
   (cd "$tmp" && tar -xzf "$input") || { rm -rf "$tmp"; die "Failed to unpack OpenClaw source."; }
   source_dir="$tmp/.openclaw"
