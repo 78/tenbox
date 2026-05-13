@@ -101,6 +101,26 @@ finalize_file() {
   cp "$tmp" "$output" 2>/dev/null && rm -f "$tmp"
 }
 
+create_live_archive() {
+  archive="$1"
+  shift
+  err="${archive}.stderr.$$"
+  "$@" 2>"$err"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$err"
+    return 0
+  fi
+  if [ "$rc" -eq 1 ] && [ -s "$archive" ] && grep -F "file changed as we read it" "$err" >/dev/null 2>&1; then
+    cat "$err" >&2
+    rm -f "$err"
+    return 0
+  fi
+  cat "$err" >&2
+  rm -f "$err"
+  return "$rc"
+}
+
 export_profile() {
   agent="$1" output="$2" scope="${3:-backup}"
   home="$(home_dir)" rel="$(agent_rel "$agent")" src="$home/$rel"
@@ -120,7 +140,7 @@ export_profile() {
   "archive": "files.tar.gz"
 }
 EOF
-  (cd "$home" && tar -czf "$work/files.tar.gz" $exclude_args "$rel") || { rm -rf "$work" "$tmp"; die "Failed to export $agent profile."; }
+  (cd "$home" && create_live_archive "$work/files.tar.gz" tar -czf "$work/files.tar.gz" $exclude_args "$rel") || { rm -rf "$work" "$tmp"; die "Failed to export $agent profile."; }
   (cd "$work" && tar -czf "$tmp" manifest.json files.tar.gz) || { rm -rf "$work" "$tmp"; die "Failed to package $agent profile."; }
   finalize_file "$tmp" "$output" || { rm -rf "$work" "$tmp"; die "Failed to finalize $agent profile export."; }
   write_manifest "$output" "${output}.manifest.json" "$agent" "$scope"
@@ -171,7 +191,7 @@ export_openclaw_source() {
   rm -f "$tmp"
   exclude_args=""
   for path in $(agent_excludes openclaw); do exclude_args="$exclude_args --exclude=$path"; done
-  (cd "$home" && tar -czf "$tmp" $exclude_args ".openclaw") || { rm -f "$tmp"; die "Failed to export OpenClaw source."; }
+  (cd "$home" && create_live_archive "$tmp" tar -czf "$tmp" $exclude_args ".openclaw") || { rm -f "$tmp"; die "Failed to export OpenClaw source."; }
   finalize_file "$tmp" "$output" || { rm -f "$tmp"; die "Failed to finalize OpenClaw source export."; }
   echo "Exported OpenClaw source to $output."
 }

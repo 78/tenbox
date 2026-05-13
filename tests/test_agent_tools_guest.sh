@@ -126,6 +126,28 @@ set -- "$tmp"/fallback-profile.tgz.tmp.*
 [ ! -e "$1" ] || { echo "export finalize fallback left a tmp file" >&2; exit 1; }
 rm -f "$fakebin/mv"
 
+cat > "$fakebin/tar" <<EOF
+#!/bin/sh
+has_hermes=0
+for arg in "\$@"; do
+  [ "\$arg" = ".hermes" ] && has_hermes=1
+done
+if [ "\$1" = "-czf" ] && [ "\$has_hermes" -eq 1 ]; then
+  "$real_tar" "\$@"
+  echo "tar: .hermes: file changed as we read it" >&2
+  exit 1
+fi
+exec "$real_tar" "\$@"
+EOF
+chmod +x "$fakebin/tar"
+churn_home="$tmp/churn-home"
+mkdir -p "$churn_home/.hermes"
+printf '{"churn":true}\n' > "$churn_home/.hermes/settings.json"
+run_tool "$churn_home" export-profile hermes "$tmp/churn-profile.tgz" backup > "$tmp/churn-export.out" 2> "$tmp/churn-export.err"
+[ -f "$tmp/churn-profile.tgz" ] || { echo "live-churn export did not create package" >&2; exit 1; }
+assert_file_contains "$tmp/churn-export.err" "file changed as we read it"
+rm -f "$fakebin/tar"
+
 fresh_home="$tmp/fresh-home"
 mkdir -p "$fresh_home"
 run_tool "$fresh_home" import-profile hermes "$tmp/hermes-profile.tgz" > "$tmp/import.out"
