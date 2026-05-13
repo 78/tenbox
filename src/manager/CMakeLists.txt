@@ -56,6 +56,14 @@ add_custom_command(TARGET tenbox-manager POST_BUILD
         "$<TARGET_FILE_DIR:tenbox-manager>"
 )
 
+add_custom_command(TARGET tenbox-manager POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:tenbox-manager>/AgentTools"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/src/agent_tools/guest/agent_tools.sh"
+        "$<TARGET_FILE_DIR:tenbox-manager>/AgentTools/agent_tools.sh"
+)
+
 if(MSVC)
     # Mitigate Defender heuristic false positives (Wacatac.H!ml):
     # - /GL whole-program optimization produces cleaner code layout

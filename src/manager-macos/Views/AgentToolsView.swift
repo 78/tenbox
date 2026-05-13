@@ -12,7 +12,7 @@ struct AgentToolsSheet: View {
     @State private var runningOperation: AgentToolOperation?
     @State private var operationResult: AgentOperationDisplay?
     @State private var pendingConfirmation: PendingAgentConfirmation?
-    @State private var latestBackupText = "正在读取..."
+    @State private var latestBackupText = AgentText("Loading...", "正在读取...")
     @State private var latestBackupPath: String?
     @State private var backupSchedule = AgentBackupSchedule()
     @State private var backupPackages: [AgentBackupPackage] = []
@@ -125,13 +125,13 @@ struct AgentToolsSheet: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Agent急救箱")
+            Text(AgentText("Agent Toolbox", "Agent急救箱"))
                 .font(.title3)
                 .fontWeight(.semibold)
 
             Spacer()
 
-            Button("完成") { dismiss() }
+            Button(AgentText("Done", "完成")) { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
         .padding()
@@ -148,12 +148,12 @@ struct AgentToolsSheet: View {
                 )
                 StatusPill(
                     title: "执行通道",
-                    value: session.guestAgentConnected ? "已连接" : "未连接",
+                    value: session.guestAgentConnected ? AgentText("Connected", "已连接") : AgentText("Disconnected", "未连接"),
                     systemImage: "checkmark.seal",
                     tone: session.guestAgentConnected ? .ok : .warning
                 )
                 StatusPill(
-                    title: "最近备份",
+                    title: AgentText("Latest backup", "最近备份"),
                     value: latestBackupText,
                     systemImage: "clock.arrow.circlepath",
                     tone: latestBackupPath == nil ? .muted : .ok
@@ -165,7 +165,7 @@ struct AgentToolsSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if !session.guestAgentConnected {
-                Text("执行通道连接后才能执行导入、备份和健康检查。")
+                Text(AgentText("Import, backup, and health checks require the execution channel to be connected.", "执行通道连接后才能执行导入、备份和健康检查。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -177,28 +177,28 @@ struct AgentToolsSheet: View {
 
     private var triagePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("急救")
+            Text(AgentText("First aid", "急救"))
                 .font(.headline)
 
             Button {
                 checkHealth()
             } label: {
-                Label("一键诊断", systemImage: "stethoscope")
+                Label(AgentText("Run diagnosis", "一键诊断"), systemImage: "stethoscope")
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .controlSize(.large)
             .disabled(!canRun)
-            .help("检查 Agent 服务、模型代理、浏览器和磁盘状态")
+            .help(AgentText("Check Agent service, model proxy, browser, and disk status", "检查 Agent 服务、模型代理、浏览器和磁盘状态"))
 
             Button {
                 snapshotBackup()
             } label: {
-                Label("立即备份", systemImage: "clock.arrow.circlepath")
+                Label(AgentText("Back Up Now", "立即备份"), systemImage: "clock.arrow.circlepath")
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .disabled(!canRun)
 
-            Text("建议先点“一键诊断”。只有需要迁移或人工处理时，再导入、重置配置或导出诊断包。")
+            Text(AgentText("Start with diagnosis. Import, reset config, or export diagnostics only when the result points there.", "建议先点“一键诊断”。只有需要迁移或人工处理时，再导入、重置配置或导出诊断包。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -210,7 +210,7 @@ struct AgentToolsSheet: View {
     private var schedulePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("定时备份")
+                Text(AgentText("Scheduled backup", "定时备份"))
                     .font(.headline)
                 Spacer()
                 Toggle("启用", isOn: scheduleEnabledBinding)
@@ -233,7 +233,7 @@ struct AgentToolsSheet: View {
                 .frame(width: 112)
 
                 Stepper(value: scheduleKeepCountBinding, in: 1...99) {
-                    Text("最多保留 \(backupSchedule.keepCount) 条")
+                    Text(AgentText("Keep up to \(backupSchedule.keepCount)", "最多保留 \(backupSchedule.keepCount) 条"))
                 }
 
                 Spacer()
@@ -256,9 +256,9 @@ struct AgentToolsSheet: View {
 
     private var scheduleDescription: String {
         guard backupSchedule.enabled else {
-            return "定时备份未启用。默认时间为 03:00，只有 VM 运行且执行通道已连接时才会执行。"
+            return AgentText("Scheduled backup is disabled. Default time is 03:00; it only runs when the VM is running and the execution channel is connected.", "定时备份未启用。默认时间为 03:00，只有 VM 运行且执行通道已连接时才会执行。")
         }
-        return "每天 \(backupSchedule.timeText) 自动备份；\(nextBackupText)。"
+        return AgentText("Backs up daily at \(backupSchedule.timeText); \(nextBackupText).", "每天 \(backupSchedule.timeText) 自动备份；\(nextBackupText)。")
     }
 
     private var scheduleStatusText: String? {
@@ -267,10 +267,10 @@ struct AgentToolsSheet: View {
             return nil
         }
         if status == "success" {
-            return "上次自动备份：\(at) 成功"
+            return AgentText("Last automatic backup: \(at) succeeded", "上次自动备份：\(at) 成功")
         }
-        let message = backupSchedule.lastAttemptMessage ?? "失败"
-        return "上次自动备份失败：\(message)（\(at)）"
+        let message = backupSchedule.lastAttemptMessage ?? AgentText("Failed", "失败")
+        return AgentText("Last automatic backup failed: \(message) (\(at))", "上次自动备份失败：\(message)（\(at)）")
     }
 
     private var nextBackupText: String {
@@ -292,7 +292,7 @@ struct AgentToolsSheet: View {
     private var backupPickerPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("备份列表")
+                Text(AgentText("Backups", "备份列表"))
                     .font(.headline)
                 Spacer()
                 Button {
@@ -305,7 +305,7 @@ struct AgentToolsSheet: View {
             }
 
             if backupPackages.isEmpty {
-                Text("还没有备份。")
+                Text(AgentText("No backups yet.", "还没有备份。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -328,7 +328,7 @@ struct AgentToolsSheet: View {
                         guard let package = selectedBackupPackage else { return }
                         pendingConfirmation = .restoreBackup(package)
                     } label: {
-                        Label("恢复选中备份", systemImage: "arrow.uturn.backward")
+                        Label(AgentText("Restore Selected Backup", "恢复选中备份"), systemImage: "arrow.uturn.backward")
                     }
                     .disabled(!canRun || selectedBackupPackage == nil)
 
@@ -386,7 +386,7 @@ struct AgentToolsSheet: View {
                     title: "高级操作",
                     operations: [.exportProfile, .importProfile, .restartAgent, .resetConfig, .diagnostics]
                 )
-                Text("这些操作会改动配置、覆盖数据或生成排障包，建议在诊断结果提示后再使用。")
+                Text(AgentText("These actions change config, overwrite data, or generate diagnostics. Use them after diagnosis points to a next step.", "这些操作会改动配置、覆盖数据或生成排障包，建议在诊断结果提示后再使用。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -402,7 +402,7 @@ struct AgentToolsSheet: View {
 
     private var openClawMigrationPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("从 OpenClaw 迁移")
+            Text(AgentText("Migrate from OpenClaw", "从 OpenClaw 迁移"))
                 .font(.headline)
 
             HStack(spacing: 10) {
@@ -418,13 +418,13 @@ struct AgentToolsSheet: View {
                     guard let sourceVm = selectedOpenClawSourceVm else { return }
                     pendingConfirmation = .migrateOpenClaw(sourceVm.id)
                 } label: {
-                    Label("自动迁移", systemImage: "arrow.triangle.2.circlepath")
+                    Label(AgentText("Auto Migrate", "自动迁移"), systemImage: "arrow.triangle.2.circlepath")
                 }
                 .disabled(!canMigrateOpenClaw)
             }
 
             HStack(spacing: 10) {
-                Picker("技能冲突", selection: $migrationSkillConflictStrategy) {
+                Picker(AgentText("Skill conflicts", "技能冲突"), selection: $migrationSkillConflictStrategy) {
                     ForEach(AgentSkillConflictStrategy.allCases) { strategy in
                         Text(strategy.displayName).tag(strategy)
                     }
@@ -433,10 +433,10 @@ struct AgentToolsSheet: View {
 
                 TextField("Workspace 目标", text: $migrationWorkspaceTarget)
                     .textFieldStyle(.roundedBorder)
-                    .help("OpenClaw workspace 指令迁移到 Hermes 的目标目录；留空则交给 hermes 默认处理")
+                    .help(AgentText("Destination for OpenClaw workspace instructions in Hermes. Leave empty to use the Hermes default.", "OpenClaw workspace 指令迁移到 Hermes 的目标目录；留空则交给 hermes 默认处理"))
             }
 
-            Text("会先备份目标 Hermes，导出完整 OpenClaw 用户数据，执行官方 dry-run 并把迁移报告保存到宿主机。两个 VM 都需要运行且 Guest Agent 已连接。")
+            Text(AgentText("This backs up target Hermes, exports full OpenClaw user data, runs the official dry-run, and saves the report on the host. Both VMs must be running with Guest Agent connected.", "会先备份目标 Hermes，导出完整 OpenClaw 用户数据，执行官方 dry-run 并把迁移报告保存到宿主机。两个 VM 都需要运行且 Guest Agent 已连接。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -455,7 +455,7 @@ struct AgentToolsSheet: View {
                     Button {
                         restartAgent()
                     } label: {
-                        Label("重启服务", systemImage: "arrow.clockwise")
+                        Label(AgentText("Restart Service", "重启服务"), systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
                     }
                     .disabled(!canRun)
@@ -473,7 +473,7 @@ struct AgentToolsSheet: View {
                     Button {
                         pendingConfirmation = .resetConfig
                     } label: {
-                        Label("重置模型配置", systemImage: "slider.horizontal.2.square")
+                        Label(AgentText("Reset Model Config", "重置模型配置"), systemImage: "slider.horizontal.2.square")
                             .frame(maxWidth: .infinity)
                     }
                     .disabled(!canRun)
@@ -482,7 +482,7 @@ struct AgentToolsSheet: View {
                 Button {
                     exportDiagnostics()
                 } label: {
-                    Label("导出诊断包", systemImage: "doc.zipper")
+                    Label(AgentText("Export Diagnostics", "导出诊断包"), systemImage: "doc.zipper")
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(!canRun)
@@ -532,7 +532,7 @@ struct AgentToolsSheet: View {
         case .starting: return "启动中"
         case .rebooting: return "重启中"
         case .crashed: return "异常退出"
-        case .stopped: return "已停止"
+        case .stopped: return AgentText("Stopped", "已停止")
         case .none: return "未知"
         }
     }
@@ -589,7 +589,7 @@ struct AgentToolsSheet: View {
     private func exportProfile() {
         guard let vm = vm else { return }
         let panel = NSSavePanel()
-        panel.title = "导出 Agent 数据"
+        panel.title = AgentText("Export Agent Data", "导出 Agent 数据")
         panel.nameFieldStringValue = "\(vm.name)-\(selectedAgent.rawValue)-profile.tar.gz"
         applyGzipTypeLimit(to: panel)
         presentPanel(panel) { response in
@@ -603,7 +603,7 @@ struct AgentToolsSheet: View {
 
     private func importProfile() {
         let panel = NSOpenPanel()
-        panel.title = "导入 Agent 数据"
+        panel.title = AgentText("Import Agent Data", "导入 Agent 数据")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -613,7 +613,7 @@ struct AgentToolsSheet: View {
             guard Self.isAgentPackageURL(url) else {
                 operationResult = AgentOperationDisplay(
                     isSuccess: false,
-                    title: "导入失败",
+                    title: AgentText("Import Failed", "导入失败"),
                     summary: "请选择 .tar.gz 或 .tgz 文件",
                     details: url.path,
                     revealPath: nil,
@@ -664,7 +664,7 @@ struct AgentToolsSheet: View {
         guard workspaceTarget.isEmpty || workspaceTarget.hasPrefix("/") else {
             operationResult = AgentOperationDisplay(
                 isSuccess: false,
-                title: "迁移失败",
+                title: AgentText("Migration Failed", "迁移失败"),
                 summary: "Workspace 目标必须是绝对路径",
                 details: workspaceTarget,
                 revealPath: nil,
@@ -758,7 +758,7 @@ struct AgentToolsSheet: View {
                         latestBackupText = "暂无"
                     }
                 case .failure:
-                    latestBackupText = "读取失败"
+                    latestBackupText = AgentText("Failed to load", "读取失败")
                     latestBackupPath = nil
                 }
             }
@@ -847,7 +847,7 @@ struct AgentToolsSheet: View {
         return AgentOperationDisplay(
             isSuccess: true,
             title: operation.successTitle,
-            summary: compactSummary(summary, fallback: "操作已完成"),
+            summary: compactSummary(summary, fallback: AgentText("Operation completed", "操作已完成")),
             details: details,
             revealPath: detectedPath,
             healthReport: health
@@ -859,7 +859,7 @@ struct AgentToolsSheet: View {
         return AgentOperationDisplay(
             isSuccess: false,
             title: operation.failureTitle,
-            summary: compactSummary(friendlyErrorMessage(raw), fallback: "操作失败"),
+            summary: compactSummary(friendlyErrorMessage(raw), fallback: AgentText("Operation failed", "操作失败")),
             details: raw,
             revealPath: nil,
             healthReport: nil
@@ -867,7 +867,7 @@ struct AgentToolsSheet: View {
     }
 
     private static func extractBackupPath(from output: String) -> String? {
-        let prefix = "最近备份："
+        let prefix = AgentText("Latest backup: ", "最近备份：")
         for line in output.split(whereSeparator: { $0.isNewline }) {
             let text = String(line).trimmingCharacters(in: .whitespaces)
             if text.hasPrefix(prefix) {
@@ -904,26 +904,26 @@ struct AgentToolsSheet: View {
     }
 
     private static func friendlyErrorMessage(_ raw: String) -> String {
-        if raw.isEmpty { return "操作失败" }
+        if raw.isEmpty { return AgentText("Operation failed", "操作失败") }
         let checks: [(String, String)] = [
-            ("VM not found", "找不到 VM"),
-            ("VM runtime is not connected", "VM 运行时未连接"),
-            ("Guest agent is not connected", "Guest Agent 未连接"),
-            ("Command timed out", "操作超时"),
-            ("Failed to send guest agent command", "发送 Guest Agent 命令失败"),
-            ("Agent data is not initialized", "Agent 数据尚未初始化"),
-            ("OpenClaw 数据尚未初始化", "OpenClaw 数据尚未初始化"),
-            ("缺少 Hermes 命令", "目标 VM 缺少 Hermes 命令"),
-            ("缺少 OpenClaw 命令", "VM 缺少 OpenClaw 命令"),
-            ("No backup package found", "没有找到可恢复的备份"),
-            ("package not found", "找不到导入包"),
-            ("manifest.json missing", "导入包缺少 manifest.json"),
-            ("files.tar.gz missing", "导入包缺少 files.tar.gz"),
-            ("Model proxy is unavailable", "模型代理不可用"),
-            ("Browser is unavailable", "浏览器不可用"),
-            ("Disk space is low", "磁盘空间不足"),
-            ("Agent service is not running", "Agent 服务未运行"),
-            ("Agent gateway is unavailable", "Agent 网关不可用")
+            ("VM not found", AgentText("VM was not found", "找不到 VM")),
+            ("VM runtime is not connected", AgentText("VM runtime is not connected", "VM 运行时未连接")),
+            ("Guest agent is not connected", AgentText("Guest Agent is not connected", "Guest Agent 未连接")),
+            ("Command timed out", AgentText("Operation timed out", "操作超时")),
+            ("Failed to send guest agent command", AgentText("Failed to send Guest Agent command", "发送 Guest Agent 命令失败")),
+            ("Agent data is not initialized", AgentText("Agent data is not initialized", "Agent 数据尚未初始化")),
+            ("OpenClaw 数据尚未初始化", AgentText("OpenClaw data is not initialized", "OpenClaw 数据尚未初始化")),
+            ("缺少 Hermes 命令", AgentText("Target VM is missing the Hermes command", "目标 VM 缺少 Hermes 命令")),
+            ("缺少 OpenClaw 命令", AgentText("VM is missing the OpenClaw command", "VM 缺少 OpenClaw 命令")),
+            ("No backup package found", AgentText("No restorable backup was found", "没有找到可恢复的备份")),
+            ("package not found", AgentText("Import package was not found", "找不到导入包")),
+            ("manifest.json missing", AgentText("Import package is missing manifest.json", "导入包缺少 manifest.json")),
+            ("files.tar.gz missing", AgentText("Import package is missing files.tar.gz", "导入包缺少 files.tar.gz")),
+            ("Model proxy is unavailable", AgentText("Model proxy unavailable", "模型代理不可用")),
+            ("Browser is unavailable", AgentText("Browser is unavailable", "浏览器不可用")),
+            ("Disk space is low", AgentText("Disk space is low", "磁盘空间不足")),
+            ("Agent service is not running", AgentText("Agent service is not running", "Agent 服务未运行")),
+            ("Agent gateway is unavailable", AgentText("Agent gateway is unavailable", "Agent 网关不可用"))
         ]
         for (needle, message) in checks where raw.contains(needle) {
             return message
@@ -939,7 +939,7 @@ struct AgentToolsSheet: View {
         guard let first = lines.first else { return fallback }
         let limit = 180
         guard first.count > limit else { return first }
-        return "\(first.prefix(limit)) ... 完整输出请复制详情"
+        return AgentText("\(first.prefix(limit)) ... copy details for full output", "\(first.prefix(limit)) ... 完整输出请复制详情")
     }
 }
 
@@ -958,15 +958,15 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .exportProfile: return "导出迁移包"
-        case .importProfile: return "导入"
-        case .migrateOpenClaw: return "OpenClaw 迁移"
-        case .snapshotBackup: return "立即备份"
-        case .restoreBackup: return "恢复备份"
-        case .healthCheck: return "一键诊断"
-        case .restartAgent: return "重启服务"
-        case .resetConfig: return "重置配置"
-        case .diagnostics: return "导出诊断"
+        case .exportProfile: return AgentText("Export Migration Package", "导出迁移包")
+        case .importProfile: return AgentText("Import", "导入")
+        case .migrateOpenClaw: return AgentText("OpenClaw Migration", "OpenClaw 迁移")
+        case .snapshotBackup: return AgentText("Back Up Now", "立即备份")
+        case .restoreBackup: return AgentText("Restore Backup", "恢复备份")
+        case .healthCheck: return AgentText("Run diagnosis", "一键诊断")
+        case .restartAgent: return AgentText("Restart Service", "重启服务")
+        case .resetConfig: return AgentText("Reset Config", "重置配置")
+        case .diagnostics: return AgentText("Export Diagnostics", "导出诊断")
         }
     }
 
@@ -986,43 +986,43 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
 
     var help: String {
         switch self {
-        case .exportProfile: return "导出当前 Agent 数据"
-        case .importProfile: return "从归档包导入 Agent 数据"
-        case .migrateOpenClaw: return "从运行中的 OpenClaw VM 迁移到当前 Hermes VM"
-        case .snapshotBackup: return "创建一份主机侧备份"
-        case .restoreBackup: return "用选中的备份恢复 Agent 数据"
+        case .exportProfile: return AgentText("Export current Agent data", "导出当前 Agent 数据")
+        case .importProfile: return AgentText("Import Agent data from an archive", "从归档包导入 Agent 数据")
+        case .migrateOpenClaw: return AgentText("Migrate from a running OpenClaw VM to this Hermes VM", "从运行中的 OpenClaw VM 迁移到当前 Hermes VM")
+        case .snapshotBackup: return AgentText("Create a host-side backup", "创建一份主机侧备份")
+        case .restoreBackup: return AgentText("Restore Agent data from the selected backup", "用选中的备份恢复 Agent 数据")
         case .healthCheck: return "检查 Agent 运行状态"
         case .restartAgent: return "重启 Agent 服务"
-        case .resetConfig: return "重置 Agent 模型配置"
-        case .diagnostics: return "导出诊断包"
+        case .resetConfig: return AgentText("Reset Agent model configuration", "重置 Agent 模型配置")
+        case .diagnostics: return AgentText("Export Diagnostics", "导出诊断包")
         }
     }
 
     var successTitle: String {
         switch self {
-        case .exportProfile: return "导出完成"
-        case .importProfile: return "导入完成"
-        case .migrateOpenClaw: return "迁移完成"
-        case .snapshotBackup: return "备份完成"
-        case .restoreBackup: return "恢复完成"
-        case .healthCheck: return "诊断完成"
-        case .restartAgent: return "重启完成"
-        case .resetConfig: return "配置已重置"
-        case .diagnostics: return "诊断包已导出"
+        case .exportProfile: return AgentText("Export Complete", "导出完成")
+        case .importProfile: return AgentText("Import Complete", "导入完成")
+        case .migrateOpenClaw: return AgentText("Migration Complete", "迁移完成")
+        case .snapshotBackup: return AgentText("Backup Complete", "备份完成")
+        case .restoreBackup: return AgentText("Restore Complete", "恢复完成")
+        case .healthCheck: return AgentText("Diagnosis Complete", "诊断完成")
+        case .restartAgent: return AgentText("Restart Complete", "重启完成")
+        case .resetConfig: return AgentText("Config Reset", "配置已重置")
+        case .diagnostics: return AgentText("Diagnostics Exported", "诊断包已导出")
         }
     }
 
     var failureTitle: String {
         switch self {
-        case .exportProfile: return "导出失败"
-        case .importProfile: return "导入失败"
-        case .migrateOpenClaw: return "迁移失败"
-        case .snapshotBackup: return "备份失败"
-        case .restoreBackup: return "恢复失败"
-        case .healthCheck: return "诊断失败"
-        case .restartAgent: return "重启失败"
-        case .resetConfig: return "重置失败"
-        case .diagnostics: return "诊断导出失败"
+        case .exportProfile: return AgentText("Export Failed", "导出失败")
+        case .importProfile: return AgentText("Import Failed", "导入失败")
+        case .migrateOpenClaw: return AgentText("Migration Failed", "迁移失败")
+        case .snapshotBackup: return AgentText("Backup Failed", "备份失败")
+        case .restoreBackup: return AgentText("Restore Failed", "恢复失败")
+        case .healthCheck: return AgentText("Diagnosis Failed", "诊断失败")
+        case .restartAgent: return AgentText("Restart Failed", "重启失败")
+        case .resetConfig: return AgentText("Reset Failed", "重置失败")
+        case .diagnostics: return AgentText("Diagnostics Export Failed", "诊断导出失败")
         }
     }
 
@@ -1035,15 +1035,15 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
 
     func runningText(agent: AgentKind) -> String {
         switch self {
-        case .exportProfile: return "正在导出 \(agent.displayName) 数据..."
-        case .importProfile: return "正在导入 \(agent.displayName) 数据..."
-        case .migrateOpenClaw: return "正在从 OpenClaw VM 迁移到 Hermes..."
-        case .snapshotBackup: return "正在备份 \(agent.displayName) 数据..."
-        case .restoreBackup: return "正在恢复 \(agent.displayName) 备份..."
-        case .healthCheck: return "正在诊断 \(agent.displayName) 状态..."
-        case .restartAgent: return "正在重启 \(agent.displayName) 服务..."
-        case .resetConfig: return "正在重置 \(agent.displayName) 配置..."
-        case .diagnostics: return "正在导出 \(agent.displayName) 诊断包..."
+        case .exportProfile: return AgentText("Exporting \(agent.displayName) data...", "正在导出 \(agent.displayName) 数据...")
+        case .importProfile: return AgentText("Importing \(agent.displayName) data...", "正在导入 \(agent.displayName) 数据...")
+        case .migrateOpenClaw: return AgentText("Migrating from OpenClaw VM to Hermes...", "正在从 OpenClaw VM 迁移到 Hermes...")
+        case .snapshotBackup: return AgentText("Backing up \(agent.displayName) data...", "正在备份 \(agent.displayName) 数据...")
+        case .restoreBackup: return AgentText("Restoring \(agent.displayName) backup...", "正在恢复 \(agent.displayName) 备份...")
+        case .healthCheck: return AgentText("Diagnosing \(agent.displayName) status...", "正在诊断 \(agent.displayName) 状态...")
+        case .restartAgent: return AgentText("Restarting \(agent.displayName) service...", "正在重启 \(agent.displayName) 服务...")
+        case .resetConfig: return AgentText("Resetting \(agent.displayName) config...", "正在重置 \(agent.displayName) 配置...")
+        case .diagnostics: return AgentText("Exporting \(agent.displayName) diagnostics...", "正在导出 \(agent.displayName) 诊断包...")
         }
     }
 
@@ -1053,7 +1053,7 @@ private enum AgentToolOperation: String, CaseIterable, Identifiable {
         case .snapshotBackup, .restoreBackup, .diagnostics:
             return raw.split(whereSeparator: { $0.isNewline }).map(String.init).last
         case .migrateOpenClaw:
-            let prefix = "迁移报告："
+            let prefix = AgentText("Migration report: ", "迁移报告：")
             return raw
                 .split(whereSeparator: { $0.isNewline })
                 .map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -1082,32 +1082,32 @@ private enum PendingAgentConfirmation: Identifiable {
 
     var title: String {
         switch self {
-        case .importProfile: return "确认导入 Agent 数据？"
-        case .migrateOpenClaw: return "确认从 OpenClaw VM 自动迁移？"
-        case .restoreBackup: return "确认恢复这个备份？"
-        case .resetConfig: return "确认重置配置？"
+        case .importProfile: return AgentText("Import Agent data?", "确认导入 Agent 数据？")
+        case .migrateOpenClaw: return AgentText("Auto-migrate from OpenClaw VM?", "确认从 OpenClaw VM 自动迁移？")
+        case .restoreBackup: return AgentText("Restore this backup?", "确认恢复这个备份？")
+        case .resetConfig: return AgentText("Reset configuration?", "确认重置配置？")
         }
     }
 
     var message: String {
         switch self {
         case .importProfile(let url):
-            return "导入会替换当前 Agent 数据。文件：\(url.lastPathComponent)"
+            return AgentText("Import will replace current Agent data. File: \(url.lastPathComponent)", "导入会替换当前 Agent 数据。文件：\(url.lastPathComponent)")
         case .migrateOpenClaw:
-            return "迁移会先备份目标 Hermes 数据，执行 dry-run 预检，再导入来源 OpenClaw 的用户数据、密钥、记忆、技能和兼容配置。"
+            return AgentText("Migration backs up target Hermes data, runs a dry-run preflight, then imports source OpenClaw user data, secrets, memory, skills, and compatible config.", "迁移会先备份目标 Hermes 数据，执行 dry-run 预检，再导入来源 OpenClaw 的用户数据、密钥、记忆、技能和兼容配置。")
         case .restoreBackup(let package):
-            return "恢复会用选中的备份覆盖当前 Agent 数据。文件：\(package.filename)"
+            return AgentText("Restore will overwrite current Agent data with the selected backup. File: \(package.filename)", "恢复会用选中的备份覆盖当前 Agent 数据。文件：\(package.filename)")
         case .resetConfig:
-            return "重置会覆盖当前 Agent 模型配置。"
+            return AgentText("Reset will overwrite current Agent model configuration.", "重置会覆盖当前 Agent 模型配置。")
         }
     }
 
     var confirmTitle: String {
         switch self {
-        case .importProfile: return "导入"
-        case .migrateOpenClaw: return "迁移"
-        case .restoreBackup: return "恢复"
-        case .resetConfig: return "重置"
+        case .importProfile: return AgentText("Import", "导入")
+        case .migrateOpenClaw: return AgentText("Migrate", "迁移")
+        case .restoreBackup: return AgentText("Restore", "恢复")
+        case .resetConfig: return AgentText("Reset", "重置")
         }
     }
 }
@@ -1180,14 +1180,14 @@ private struct MigrationProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("迁移进度")
+            Text(AgentText("Migration Progress", "迁移进度"))
                 .font(.headline)
 
             if items.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("准备迁移...")
+                    Text(AgentText("Preparing migration...", "准备迁移..."))
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -1260,7 +1260,7 @@ private struct AgentOperationResultView: View {
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                     } label: {
-                        Label("在 Finder 中显示", systemImage: "folder")
+                        Label(AgentText("Show in Finder", "在 Finder 中显示"), systemImage: "folder")
                     }
                     .buttonStyle(.link)
                 }
@@ -1270,7 +1270,7 @@ private struct AgentOperationResultView: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(result.details, forType: .string)
                     } label: {
-                        Label("复制详情", systemImage: "doc.on.doc")
+                        Label(AgentText("Copy Details", "复制详情"), systemImage: "doc.on.doc")
                     }
                     .buttonStyle(.link)
                 }
@@ -1291,7 +1291,7 @@ private struct AgentOperationResultView: View {
                         .frame(maxHeight: 140)
                     }
                 } label: {
-                    Text(result.details.count > Self.maxRenderedDetailCharacters ? "详情（已截断显示，可复制完整内容）" : "详情")
+                    Text(result.details.count > Self.maxRenderedDetailCharacters ? AgentText("Details (truncated; copy for full content)", "详情（已截断显示，可复制完整内容）") : AgentText("Details", "详情"))
                         .font(.caption)
                 }
             }
@@ -1308,7 +1308,7 @@ private struct AgentOperationResultView: View {
         return """
         \(String(details.prefix(headCount)))
 
-        ... 详情过长，界面只显示前后片段；完整内容可复制，迁移完整日志请查看报告文件 ...
+        \(AgentText("... details are long, so the view shows the beginning and end; copy for full content, and check the migration report for full logs ...", "... 详情过长，界面只显示前后片段；完整内容可复制，迁移完整日志请查看报告文件 ..."))
 
         \(String(details.suffix(tailCount)))
         """
@@ -1389,7 +1389,7 @@ private struct HealthReport {
             checks: [
                 HealthCheckItem(key: "agent_service", title: "Agent 服务", value: checks["agent_service"] as? String ?? "unknown"),
                 HealthCheckItem(key: "gateway_port", title: "网关端口", value: checks["gateway_port"] as? String ?? "unknown"),
-                HealthCheckItem(key: "llm_proxy", title: "模型代理", value: checks["llm_proxy"] as? String ?? "unknown"),
+                HealthCheckItem(key: "llm_proxy", title: AgentText("Model proxy", "模型代理"), value: checks["llm_proxy"] as? String ?? "unknown"),
                 HealthCheckItem(key: "browser", title: "浏览器", value: checks["browser"] as? String ?? "unknown"),
                 HealthCheckItem(key: "disk", title: "磁盘空间", value: checks["disk"] as? String ?? "unknown")
             ]
@@ -1402,9 +1402,9 @@ private struct HealthReport {
         case "Disk space is low": return "磁盘空间不足"
         case "Agent service is not running": return "Agent 服务未运行"
         case "Agent gateway is unavailable": return "Agent 网关不可用"
-        case "Model proxy is unavailable": return "模型代理不可用"
+        case "Model proxy is unavailable": return AgentText("Model proxy unavailable", "模型代理不可用")
         case "Browser is unavailable": return "浏览器不可用"
-        case "Model proxy is available": return "模型代理可用"
+        case "Model proxy is available": return AgentText("Model proxy available", "模型代理可用")
         default: return message.isEmpty ? "状态未知" : message
         }
     }

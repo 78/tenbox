@@ -502,25 +502,25 @@ class AppState: ObservableObject {
     func migrateOpenClawToHermes(sourceVmId: String, targetVmId: String,
                                  options: AgentMigrationOptions = AgentMigrationOptions(),
                                  progress: @escaping (AgentMigrationProgress) -> Void = { _ in },
-                                 completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
         guard sourceVmId != targetVmId else {
-            completion(.failure(ConsoleCommandError("来源 VM 和目标 VM 不能相同")))
+            completion(.failure(ConsoleCommandError(AgentText("Source VM and target VM cannot be the same.", "来源 VM 和目标 VM 不能相同"))))
             return
         }
         guard let sourceVm = vms.first(where: { $0.id == sourceVmId }) else {
-            completion(.failure(ConsoleCommandError("找不到 OpenClaw 来源 VM")))
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM was not found.", "找不到 OpenClaw 来源 VM"))))
             return
         }
         guard let targetVm = vms.first(where: { $0.id == targetVmId }) else {
-            completion(.failure(ConsoleCommandError("找不到 Hermes 目标 VM")))
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM was not found.", "找不到 Hermes 目标 VM"))))
             return
         }
         guard sourceVm.state == .running else {
-            completion(.failure(ConsoleCommandError("OpenClaw 来源 VM 未运行")))
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM is not running.", "OpenClaw 来源 VM 未运行"))))
             return
         }
         guard targetVm.state == .running else {
-            completion(.failure(ConsoleCommandError("Hermes 目标 VM 未运行")))
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM is not running.", "Hermes 目标 VM 未运行"))))
             return
         }
 
@@ -528,20 +528,20 @@ class AppState: ObservableObject {
         let targetSession = getOrCreateSession(for: targetVmId)
         if !sourceSession.connected || !sourceSession.ipcClient.isConnected {
             sourceSession.connectIfNeeded()
-            completion(.failure(ConsoleCommandError("OpenClaw 来源 VM 执行通道未连接，请稍后重试")))
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM execution channel is not connected. Try again shortly.", "OpenClaw 来源 VM 执行通道未连接，请稍后重试"))))
             return
         }
         guard sourceSession.guestAgentConnected else {
-            completion(.failure(ConsoleCommandError("OpenClaw 来源 VM Guest Agent 未连接")))
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM Guest Agent is not connected.", "OpenClaw 来源 VM Guest Agent 未连接"))))
             return
         }
         if !targetSession.connected || !targetSession.ipcClient.isConnected {
             targetSession.connectIfNeeded()
-            completion(.failure(ConsoleCommandError("Hermes 目标 VM 执行通道未连接，请稍后重试")))
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM execution channel is not connected. Try again shortly.", "Hermes 目标 VM 执行通道未连接，请稍后重试"))))
             return
         }
         guard targetSession.guestAgentConnected else {
-            completion(.failure(ConsoleCommandError("Hermes 目标 VM Guest Agent 未连接")))
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM Guest Agent is not connected.", "Hermes 目标 VM Guest Agent 未连接"))))
             return
         }
 
@@ -759,18 +759,18 @@ class AppState: ObservableObject {
             }
             guard let vm = vms.first(where: { $0.id == parts[0] }) else { continue }
             guard vm.state == .running else {
-                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "VM 未运行", at: now)
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: AgentText("VM is not running", "VM 未运行"), at: now)
                 continue
             }
 
             let session = getOrCreateSession(for: vm.id)
             if !session.connected || !session.ipcClient.isConnected {
                 session.connectIfNeeded()
-                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now)
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: AgentText("Execution channel is not connected", "执行通道未连接"), at: now)
                 continue
             }
             guard session.guestAgentConnected else {
-                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: "执行通道未连接", at: now)
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: AgentText("Execution channel is not connected", "执行通道未连接"), at: now)
                 continue
             }
 
@@ -781,7 +781,7 @@ class AppState: ObservableObject {
                     self.scheduledBackupsRunning.remove(key)
                     switch result {
                     case .success:
-                        self.updateAgentBackupAttempt(key: key, base: schedule, status: "success", message: "成功", at: now, lastRunDate: today)
+                        self.updateAgentBackupAttempt(key: key, base: schedule, status: "success", message: AgentText("Succeeded", "成功"), at: now, lastRunDate: today)
                         NSLog("[AgentBackup] Scheduled backup completed: %@ %@", vm.id, agent.rawValue)
                     case .failure(let error):
                         self.updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: error.localizedDescription, at: now, lastRunDate: today)
@@ -1056,7 +1056,7 @@ private struct VmCommandMenuContent: View {
         }
         .disabled(vm == nil)
 
-        Button("Agent急救箱...") {
+        Button(AgentText("Agent Toolbox...", "Agent急救箱...")) {
             appState.showAgentToolsSheet = true
         }
         .disabled(vm == nil || !isRunning)

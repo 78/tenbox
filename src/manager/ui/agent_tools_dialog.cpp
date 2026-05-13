@@ -63,6 +63,10 @@ struct PostedProgress {
     std::string detail;
 };
 
+std::string Text(const char* en, const char* zh) {
+    return i18n::GetCurrentLanguage() == i18n::Lang::kChineseSimplified ? zh : en;
+}
+
 struct DialogData {
     ManagerService& manager;
     agent_tools::AgentToolsService tools;
@@ -152,7 +156,7 @@ void SaveSchedule(HWND dlg, DialogData* data) {
     data->manager.app_settings().agent_backup_schedules[ScheduleKey(data->vm_id, SelectedAgent(dlg))] = schedule;
     data->manager.SaveAppSettings();
     data->tools.RotateBackups(data->vm_id, SelectedAgent(dlg), schedule.keep_count);
-    AppendOutput(dlg, "定时备份设置已保存");
+    AppendOutput(dlg, Text("Scheduled backup settings saved", "定时备份设置已保存"));
 }
 
 void RefreshSources(HWND dlg, DialogData* data) {
@@ -172,7 +176,7 @@ void StartOp(HWND dlg, DialogData* data, const std::string& label,
              std::function<void(agent_tools::ToolCallback)> run) {
     if (data->busy) return;
     SetBusy(dlg, data, true);
-    AppendOutput(dlg, "开始：" + label);
+    AppendOutput(dlg, Text("Start: ", "开始：") + label);
     run([dlg](agent_tools::ToolResult result) {
         PostMessageW(dlg, WM_AGENT_RESULT, 0, reinterpret_cast<LPARAM>(new PostedResult{std::move(result)}));
     });
@@ -194,9 +198,9 @@ void InitDialog(HWND dlg, DialogData* data) {
     SendMessageW(agent, CB_SETCURSEL, 0, 0);
 
     HWND strategy = GetDlgItem(dlg, IDC_STRATEGY);
-    SendMessageW(strategy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"技能保留 Hermes"));
-    SendMessageW(strategy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"技能覆盖 Hermes"));
-    SendMessageW(strategy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"技能重命名导入"));
+    SendMessageW(strategy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(Text("Keep Hermes skills", "技能保留 Hermes")).c_str()));
+    SendMessageW(strategy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(Text("Overwrite Hermes skills", "技能覆盖 Hermes")).c_str()));
+    SendMessageW(strategy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(i18n::to_wide(Text("Rename imported skills", "技能重命名导入")).c_str()));
     SendMessageW(strategy, CB_SETCURSEL, 0, 0);
     SetDlgItemTextW(dlg, IDC_WORKSPACE, L"/home/tenbox/.hermes/workspace/openclaw-migrated");
     SendDlgItemMessageW(dlg, IDC_OUTPUT, EM_SETLIMITTEXT, 1024 * 1024, 0);
@@ -222,7 +226,7 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_AGENT_RESULT: {
         std::unique_ptr<PostedResult> r(reinterpret_cast<PostedResult*>(lp));
         SetBusy(dlg, data, false);
-        AppendOutput(dlg, std::string(r->result.ok ? "完成：" : "失败：") + r->result.message);
+        AppendOutput(dlg, std::string(r->result.ok ? Text("Done: ", "完成：") : Text("Failed: ", "失败：")) + r->result.message);
         if (!r->result.output.empty()) AppendOutput(dlg, r->result.output);
         RefreshSources(dlg, data);
         return TRUE;
@@ -232,7 +236,7 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         const int id = LOWORD(wp);
         if (id == IDCANCEL) {
             if (data && data->busy) {
-                AppendOutput(dlg, "操作执行中，请等待完成后关闭。");
+                AppendOutput(dlg, Text("Operation is running. Please wait for it to finish before closing.", "操作执行中，请等待完成后关闭。"));
                 return TRUE;
             }
             EndDialog(dlg, 0);
@@ -246,52 +250,52 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         const int keep = ScheduleKeep(dlg);
         switch (id) {
         case IDC_HEALTH:
-            StartOp(dlg, data, "一键诊断", [=](auto cb) { data->tools.HealthStatus(data->vm_id, agent, cb); });
+            StartOp(dlg, data, Text("Run diagnosis", "一键诊断"), [=](auto cb) { data->tools.HealthStatus(data->vm_id, agent, cb); });
             return TRUE;
         case IDC_BACKUP:
-            StartOp(dlg, data, "立即备份", [=](auto cb) { data->tools.SnapshotBackup(data->vm_id, agent, keep, cb); });
+            StartOp(dlg, data, Text("Back Up Now", "立即备份"), [=](auto cb) { data->tools.SnapshotBackup(data->vm_id, agent, keep, cb); });
             return TRUE;
         case IDC_RESTORE: {
             auto backups = data->tools.ListBackups(data->vm_id, agent);
             if (backups.empty()) {
-                AppendOutput(dlg, "没有找到可恢复的备份");
+                AppendOutput(dlg, Text("No restorable backup was found", "没有找到可恢复的备份"));
                 return TRUE;
             }
-            if (MessageBoxW(dlg, L"恢复会覆盖当前 Agent 数据，确认恢复最新备份？", L"确认恢复", MB_OKCANCEL | MB_ICONWARNING) == IDOK) {
-                StartOp(dlg, data, "恢复最新备份", [=](auto cb) { data->tools.RestoreBackup(data->vm_id, agent, backups.front().path, cb); });
+            if (MessageBoxW(dlg, i18n::to_wide(Text("Restore will overwrite current Agent data. Restore latest backup?", "恢复会覆盖当前 Agent 数据，确认恢复最新备份？")).c_str(), i18n::to_wide(Text("Confirm restore", "确认恢复")).c_str(), MB_OKCANCEL | MB_ICONWARNING) == IDOK) {
+                StartOp(dlg, data, Text("Restore Latest Backup", "恢复最新备份"), [=](auto cb) { data->tools.RestoreBackup(data->vm_id, agent, backups.front().path, cb); });
             }
             return TRUE;
         }
         case IDC_EXPORT: {
             std::string path = SaveFileDialog(dlg, std::string(agent_tools::AgentRawValue(agent)) + "-profile.tar.gz");
-            if (!path.empty()) StartOp(dlg, data, "导出迁移包", [=](auto cb) { data->tools.ExportProfile(data->vm_id, agent, path, cb); });
+            if (!path.empty()) StartOp(dlg, data, Text("Export Migration Package", "导出迁移包"), [=](auto cb) { data->tools.ExportProfile(data->vm_id, agent, path, cb); });
             return TRUE;
         }
         case IDC_IMPORT: {
             std::string path = OpenProfileDialog(dlg);
-            if (!path.empty() && MessageBoxW(dlg, L"导入会替换当前 Agent 数据，确认继续？", L"确认导入", MB_OKCANCEL | MB_ICONWARNING) == IDOK) {
-                StartOp(dlg, data, "导入迁移包", [=](auto cb) { data->tools.ImportProfile(data->vm_id, agent, path, cb); });
+            if (!path.empty() && MessageBoxW(dlg, i18n::to_wide(Text("Import will replace current Agent data. Continue?", "导入会替换当前 Agent 数据，确认继续？")).c_str(), i18n::to_wide(Text("Confirm import", "确认导入")).c_str(), MB_OKCANCEL | MB_ICONWARNING) == IDOK) {
+                StartOp(dlg, data, Text("Import Migration Package", "导入迁移包"), [=](auto cb) { data->tools.ImportProfile(data->vm_id, agent, path, cb); });
             }
             return TRUE;
         }
         case IDC_RESTART:
-            StartOp(dlg, data, "重启服务", [=](auto cb) { data->tools.RestartAgent(data->vm_id, agent, keep, cb); });
+            StartOp(dlg, data, Text("Restart", "重启服务"), [=](auto cb) { data->tools.RestartAgent(data->vm_id, agent, keep, cb); });
             return TRUE;
         case IDC_RESET:
-            if (MessageBoxW(dlg, L"重置会覆盖当前 Agent 模型配置，确认继续？", L"确认重置", MB_OKCANCEL | MB_ICONWARNING) == IDOK) {
-                StartOp(dlg, data, "重置配置", [=](auto cb) { data->tools.ResetAgentConfig(data->vm_id, agent, keep, cb); });
+            if (MessageBoxW(dlg, i18n::to_wide(Text("Reset will overwrite current Agent model configuration. Continue?", "重置会覆盖当前 Agent 模型配置，确认继续？")).c_str(), i18n::to_wide(Text("Confirm reset", "确认重置")).c_str(), MB_OKCANCEL | MB_ICONWARNING) == IDOK) {
+                StartOp(dlg, data, Text("Reset Config", "重置配置"), [=](auto cb) { data->tools.ResetAgentConfig(data->vm_id, agent, keep, cb); });
             }
             return TRUE;
         case IDC_DIAG:
-            StartOp(dlg, data, "导出诊断包", [=](auto cb) { data->tools.ExportDiagnostics(data->vm_id, agent, cb); });
+            StartOp(dlg, data, Text("Export Diagnostics", "导出诊断包"), [=](auto cb) { data->tools.ExportDiagnostics(data->vm_id, agent, cb); });
             return TRUE;
         case IDC_MIGRATE: {
             int sel = static_cast<int>(SendDlgItemMessageW(dlg, IDC_SOURCE_VM, CB_GETCURSEL, 0, 0));
             if (sel < 0 || sel >= static_cast<int>(data->source_vms.size())) {
-                AppendOutput(dlg, "请先选择运行中的 OpenClaw 来源 VM");
+                AppendOutput(dlg, Text("Select a running OpenClaw source VM first", "请先选择运行中的 OpenClaw 来源 VM"));
                 return TRUE;
             }
-            if (MessageBoxW(dlg, L"迁移会先备份目标 Hermes，再执行 dry-run 和正式迁移。确认继续？", L"确认迁移", MB_OKCANCEL | MB_ICONWARNING) != IDOK)
+            if (MessageBoxW(dlg, i18n::to_wide(Text("Migration will back up target Hermes, then run dry-run and apply. Continue?", "迁移会先备份目标 Hermes，再执行 dry-run 和正式迁移。确认继续？")).c_str(), i18n::to_wide(Text("Confirm migration", "确认迁移")).c_str(), MB_OKCANCEL | MB_ICONWARNING) != IDOK)
                 return TRUE;
             wchar_t workspace[512]{};
             GetDlgItemTextW(dlg, IDC_WORKSPACE, workspace, 512);
@@ -302,7 +306,7 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                                      st == 2 ? SkillConflictStrategy::kRename :
                                                SkillConflictStrategy::kSkip;
             std::string source_id = data->source_vms[sel].id;
-            StartOp(dlg, data, "OpenClaw 到 Hermes 迁移", [=](auto cb) {
+            StartOp(dlg, data, Text("OpenClaw to Hermes Migration", "OpenClaw 到 Hermes 迁移"), [=](auto cb) {
                 data->tools.MigrateOpenClawToHermes(source_id, data->vm_id, options, keep,
                     [dlg](const std::string& step, const std::string& message, const std::string& detail) {
                         PostMessageW(dlg, WM_AGENT_PROGRESS, 0, reinterpret_cast<LPARAM>(new PostedProgress{step, message, detail}));
@@ -328,34 +332,34 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
 
 void ShowAgentToolsDialog(HWND parent, ManagerService& mgr, const std::string& vm_id) {
     DlgBuilder b;
-    b.Begin("Agent 急救箱", 0, 0, 610, 430, WS_CAPTION | WS_SYSMENU);
+    b.Begin(Text("Agent Toolbox", "Agent 急救箱").c_str(), 0, 0, 610, 430, WS_CAPTION | WS_SYSMENU);
     b.AddStatic(-1, "Agent:", 12, 12, 45, 12);
     b.AddComboBox(IDC_AGENT_KIND, 60, 10, 110, 80);
-    b.AddButton(IDC_HEALTH, "一键诊断", 185, 9, 72, 16);
-    b.AddButton(IDC_BACKUP, "立即备份", 262, 9, 72, 16);
-    b.AddButton(IDC_RESTORE, "恢复最新", 339, 9, 72, 16);
-    b.AddButton(IDC_OPEN_BACKUPS, "打开备份", 416, 9, 72, 16);
+    b.AddButton(IDC_HEALTH, Text("Run diagnosis", "一键诊断").c_str(), 185, 9, 72, 16);
+    b.AddButton(IDC_BACKUP, Text("Back Up Now", "立即备份").c_str(), 262, 9, 72, 16);
+    b.AddButton(IDC_RESTORE, Text("Restore Latest", "恢复最新").c_str(), 339, 9, 72, 16);
+    b.AddButton(IDC_OPEN_BACKUPS, Text("Open Backups", "打开备份").c_str(), 416, 9, 72, 16);
 
-    b.AddButton(IDC_EXPORT, "导出包", 12, 38, 66, 16);
-    b.AddButton(IDC_IMPORT, "导入包", 84, 38, 66, 16);
-    b.AddButton(IDC_RESTART, "重启服务", 156, 38, 72, 16);
-    b.AddButton(IDC_RESET, "重置配置", 234, 38, 72, 16);
-    b.AddButton(IDC_DIAG, "导出诊断", 312, 38, 72, 16);
+    b.AddButton(IDC_EXPORT, Text("Export", "导出包").c_str(), 12, 38, 66, 16);
+    b.AddButton(IDC_IMPORT, Text("Import", "导入包").c_str(), 84, 38, 66, 16);
+    b.AddButton(IDC_RESTART, Text("Restart", "重启服务").c_str(), 156, 38, 72, 16);
+    b.AddButton(IDC_RESET, Text("Reset Config", "重置配置").c_str(), 234, 38, 72, 16);
+    b.AddButton(IDC_DIAG, Text("Diagnostics", "导出诊断").c_str(), 312, 38, 72, 16);
 
-    b.AddCheckBox(IDC_SCHEDULE_ENABLED, "定时备份", 400, 39, 70, 14);
+    b.AddCheckBox(IDC_SCHEDULE_ENABLED, Text("Scheduled", "定时备份").c_str(), 400, 39, 70, 14);
     b.AddEdit(IDC_SCHEDULE_TIME, 472, 38, 45, 15);
-    b.AddStatic(-1, "保留", 522, 40, 24, 12);
+    b.AddStatic(-1, Text("Keep", "保留").c_str(), 522, 40, 24, 12);
     b.AddEdit(IDC_SCHEDULE_KEEP, 548, 38, 24, 15);
-    b.AddButton(IDC_SCHEDULE_SAVE, "保存", 576, 38, 28, 16);
+    b.AddButton(IDC_SCHEDULE_SAVE, Text("Save", "保存").c_str(), 576, 38, 28, 16);
 
-    b.AddStatic(-1, "OpenClaw 迁移到当前 Hermes:", 12, 72, 150, 12);
+    b.AddStatic(-1, Text("Migrate OpenClaw to this Hermes:", "OpenClaw 迁移到当前 Hermes:").c_str(), 12, 72, 150, 12);
     b.AddComboBox(IDC_SOURCE_VM, 165, 69, 120, 100);
     b.AddComboBox(IDC_STRATEGY, 292, 69, 120, 100);
     b.AddEdit(IDC_WORKSPACE, 418, 69, 115, 15);
-    b.AddButton(IDC_MIGRATE, "自动迁移", 540, 68, 58, 17);
+    b.AddButton(IDC_MIGRATE, Text("Migrate", "自动迁移").c_str(), 540, 68, 58, 17);
 
     b.AddEdit(IDC_OUTPUT, 12, 98, 586, 300, ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL);
-    b.AddButton(IDCANCEL, "关闭", 540, 405, 58, 17);
+    b.AddButton(IDCANCEL, Text("Close", "关闭").c_str(), 540, 405, 58, 17);
 
     DialogData data(mgr, vm_id);
     DialogBoxIndirectParamW(GetModuleHandleW(nullptr), b.Build(), parent, Proc, reinterpret_cast<LPARAM>(&data));

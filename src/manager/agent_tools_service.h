@@ -112,7 +112,7 @@ private:
                           const std::string& success_message,
                           ToolCallback cb);
     void RunRepairCommand(const std::string& vm_id, AgentKind agent,
-                          const std::string& repair_command,
+                          const std::vector<std::string>& repair_args,
                           const std::string& success_message,
                           int keep_count,
                           ToolCallback cb);
@@ -123,33 +123,15 @@ private:
     std::string NewBackupPackagePath(const std::string& vm_id, AgentKind agent) const;
     std::string NewMigrationReportPath(const std::string& vm_id) const;
 
+    bool PrepareAgentToolScript(const ShareLease& lease, std::string* error) const;
+
     static std::string ShellQuote(const std::string& value);
     static std::string PathFilename(const std::string& path);
     static std::string Dirname(const std::string& path);
     static std::string Timestamp();
-    static std::string AgentDataRelativePath(AgentKind agent);
-    static std::string AgentExcludeArgs(AgentKind agent, const std::string& scope);
     static std::string WithSharedFolderReady(const std::string& tag, const std::string& body);
-    static std::string ProfileExportCommand(AgentKind agent, const std::string& output_path,
-                                            const std::string& scope);
-    static std::string ProfileImportCommand(AgentKind agent, const std::string& input_path);
-    static std::string HealthStatusCommand(AgentKind agent);
-    static std::string RestartCommand(AgentKind agent);
-    static std::string ResetConfigCommand(AgentKind agent);
-    static std::string DiagnosticsCommand(AgentKind agent, const std::string& output_dir);
-    static std::string OpenClawMigrationSourceExportCommand(const std::string& output_path);
-    static std::string OpenClawMigrationFlags(const MigrationOptions& options, bool include_yes);
-    static std::string OpenClawToHermesDryRunCommand(const std::string& input_path,
-                                                     const std::string& report_path,
-                                                     const MigrationOptions& options);
-    static std::string OpenClawToHermesMigrationCommand(const std::string& input_path,
-                                                       const std::string& report_path,
-                                                       const MigrationOptions& options);
-    static std::string ServiceResolverCommand(AgentKind agent);
-    static std::string HermesCommandResolver();
-    static std::string OpenClawCommandResolver();
-    static std::string HermesTenBoxModelConfigCommand();
-    static std::string HermesOpenClawChannelConfigCommand();
+    static std::string ScriptInvocation(const std::string& tag, const std::vector<std::string>& args);
+    static std::string ScriptCommand(const std::string& tag, const std::vector<std::string>& args);
 
     ManagerService& manager_;
     std::string data_dir_;

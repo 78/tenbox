@@ -337,7 +337,7 @@ static HMENU BuildMenuBar(bool show_toolbar) {
     AppendMenuW(vm_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(vm_menu, MF_STRING, IDM_SHARED_FOLDERS, i18n::tr_w(S::kToolbarSharedFolders).c_str());
     AppendMenuW(vm_menu, MF_STRING, IDM_PORT_FORWARDS, i18n::tr_w(S::kMenuPortForwards).c_str());
-    AppendMenuW(vm_menu, MF_STRING, IDM_AGENT_TOOLS, L"Agent 急救箱...");
+    AppendMenuW(vm_menu, MF_STRING, IDM_AGENT_TOOLS, i18n::to_wide(i18n::GetCurrentLanguage() == i18n::Lang::kChineseSimplified ? "Agent 急救箱..." : "Agent Toolbox...").c_str());
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(vm_menu), i18n::tr_w(S::kMenuVm).c_str());
 
     HMENU view_menu = CreatePopupMenu();
