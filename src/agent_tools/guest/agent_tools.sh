@@ -255,18 +255,18 @@ migrate_openclaw() {
   [ -d "$source_dir" ] || { rm -rf "$tmp"; die "Migration package is missing .openclaw."; }
   { echo "# OpenClaw to Hermes migration"; echo; echo "- Mode: $mode"; echo "- Generated at: $(date -Iseconds 2>/dev/null || date)"; echo; } > "$report"
   hermes_cmd="$(agent_cmd hermes)"
-  if [ -n "$hermes_cmd" ]; then
-    if [ "$mode" = "dry-run" ]; then yes_arg="--dry-run"; else yes_arg="--yes"; fi
-    if [ -n "$workspace_target" ]; then
-      "$hermes_cmd" --overwrite claw migrate --source "$source_dir" --skill-conflict "$skill_conflict" --workspace-target "$workspace_target" --migrate-secrets "$yes_arg" >> "$report" 2>&1 || { [ "$mode" = "dry-run" ] || die "Hermes migration failed. See $report."; }
-    else
-      "$hermes_cmd" --overwrite claw migrate --source "$source_dir" --skill-conflict "$skill_conflict" --migrate-secrets "$yes_arg" >> "$report" 2>&1 || { [ "$mode" = "dry-run" ] || die "Hermes migration failed. See $report."; }
-    fi
-  elif [ "$mode" != "dry-run" ]; then
-    home="$(home_dir)"; [ -e "$home/.hermes" ] && mv "$home/.hermes" "$home/.hermes.before-openclaw-migration-$(date +%Y%m%d-%H%M%S)"
-    cp -a "$source_dir" "$home/.hermes" || die "Failed to copy OpenClaw profile into Hermes profile."
+  [ -n "$hermes_cmd" ] || die "Target VM is missing the Hermes command."
+  if [ "$mode" = "dry-run" ]; then
+    mode_arg="--dry-run"
+    fail_message="Hermes migration dry run failed. See $report."
   else
-    echo "Hermes CLI was not found; only archive validation was completed." >> "$report"
+    mode_arg="--yes"
+    fail_message="Hermes migration failed. See $report."
+  fi
+  if [ -n "$workspace_target" ]; then
+    "$hermes_cmd" --overwrite claw migrate --source "$source_dir" --skill-conflict "$skill_conflict" --workspace-target "$workspace_target" --migrate-secrets "$mode_arg" >> "$report" 2>&1 || die "$fail_message"
+  else
+    "$hermes_cmd" --overwrite claw migrate --source "$source_dir" --skill-conflict "$skill_conflict" --migrate-secrets "$mode_arg" >> "$report" 2>&1 || die "$fail_message"
   fi
   if [ "$mode" != "dry-run" ]; then configure_channels "$tmp"; restore_tenbox_model_config; echo "Migration completed." >> "$report"; fi
   echo "Migration report was written to $report."
