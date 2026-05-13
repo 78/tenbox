@@ -480,13 +480,14 @@ EOF
 
 do_install_devtools() {
     sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
-if dpkg -s python3 &>/dev/null; then
+if dpkg -s python3 &>/dev/null && dpkg -s ripgrep &>/dev/null; then
     echo "  Dev tools already installed"
     exit 0
 fi
 echo "Installing development tools..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    python3 python3-pip python3-venv
+    python3 python3-pip python3-venv \
+    ripgrep
 EOF
 }
 

@@ -496,14 +496,15 @@ EOF
 
 do_install_devtools() {
     sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
-if dpkg -s python3 &>/dev/null && dpkg -s g++ &>/dev/null && dpkg -s cmake &>/dev/null; then
+if dpkg -s python3 &>/dev/null && dpkg -s g++ &>/dev/null && dpkg -s cmake &>/dev/null && dpkg -s ripgrep &>/dev/null; then
     echo "  Dev tools already installed"
     exit 0
 fi
 echo "Installing development tools..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3 python3-pip python3-venv \
-    g++ make cmake git
+    g++ make cmake git \
+    ripgrep
 EOF
 }
 
@@ -657,7 +658,7 @@ openclaw config set tools.exec.security full
 openclaw config set gateway '{"mode":"local","bind":"lan","auth":{"mode":"token","token":"tenbox"},"controlUi":{"allowInsecureAuth":true,"dangerouslyDisableDeviceAuth":true,"allowedOrigins":["*"]},"port":18789,"tailscale":{"mode":"off","resetOnExit":false}}'
 
 # TenBox LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
-openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":65536,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}'
+openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","timeoutSeconds":300,"models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":32768,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}'
 openclaw config set models.mode merge
 openclaw config set agents.defaults '{"model":{"primary":"tenbox/default"},"compaction":{"mode":"safeguard"},"workspace":"'"$HOME"'/.openclaw/workspace","models":{"tenbox/default":{}}}'
 SCRIPT

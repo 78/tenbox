@@ -671,7 +671,7 @@ EOF
 
 do_install_python_deps() {
     sudo chroot "$MOUNT_DIR" /bin/bash -e << 'EOF'
-if dpkg -s python3-dev &>/dev/null && dpkg -s libffi-dev &>/dev/null; then
+if dpkg -s python3-dev &>/dev/null && dpkg -s libffi-dev &>/dev/null && dpkg -s ripgrep &>/dev/null; then
     echo "  Python deps already installed"
     exit 0
 fi
@@ -818,6 +818,8 @@ if [ ! -f "\$HERMES_DIR/.env" ]; then
 # TenBox LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
 OPENAI_BASE_URL=http://10.0.2.3/v1
 OPENAI_API_KEY=tenbox
+HERMES_API_TIMEOUT=300
+HERMES_STREAM_READ_TIMEOUT=300
 
 # Browser
 AGENT_BROWSER_HEADED=true
@@ -831,6 +833,10 @@ model:
   default: "default"
   provider: "custom"
   base_url: "http://10.0.2.3/v1"
+
+providers:
+  custom:
+    request_timeout_seconds: 300
 
 terminal:
   backend: local
