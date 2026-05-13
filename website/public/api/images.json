@@ -9,7 +9,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-05-09",
+      "updated_at": "2026-05-13",
       "files": [
         {
           "name": "vmlinuz",
@@ -27,7 +27,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.5.7-x86_64.qcow2",
           "sha256": "",
-          "size": 1731198976
+          "size": 1728041472
         }
       ]
     },
@@ -164,7 +164,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-05-09",
+      "updated_at": "2026-05-13",
       "files": [
         {
           "name": "vmlinuz",
@@ -182,7 +182,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-2026.5.7-arm64.qcow2",
           "sha256": "",
-          "size": 1688862720
+          "size": 1693777920
         }
       ]
     },
