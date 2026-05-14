@@ -40,6 +40,16 @@ assert_file_contains() {
   }
 }
 
+assert_file_not_contains() {
+  file="$1"
+  needle="$2"
+  if grep -F -- "$needle" "$file" >/dev/null 2>&1; then
+    echo "Did not expect '$needle' in $file" >&2
+    cat "$file" >&2 || true
+    exit 1
+  fi
+}
+
 make_package() {
   agent="$1"
   profile_dir="$2"
@@ -132,9 +142,16 @@ has_hermes=0
 for arg in "\$@"; do
   [ "\$arg" = ".hermes" ] && has_hermes=1
 done
-if [ "\$1" = "-czf" ] && [ "\$has_hermes" -eq 1 ]; then
+if [ "\$1" = "-czf" ] && [ "\$has_hermes" -eq 1 ] && [ "\${LIVE_TAR_MODE:-}" = "churn" ]; then
+  "$real_tar" "\$@"
+  echo "tar: .hermes/kanban.db-wal: File removed before we read it" >&2
+  echo "tar: .hermes: file changed as we read it" >&2
+  exit 1
+fi
+if [ "\$1" = "-czf" ] && [ "\$has_hermes" -eq 1 ] && [ "\${LIVE_TAR_MODE:-}" = "mixed-error" ]; then
   "$real_tar" "\$@"
   echo "tar: .hermes: file changed as we read it" >&2
+  echo "tar: .hermes/missing: Cannot stat: No such file or directory" >&2
   exit 1
 fi
 exec "$real_tar" "\$@"
@@ -143,9 +160,16 @@ chmod +x "$fakebin/tar"
 churn_home="$tmp/churn-home"
 mkdir -p "$churn_home/.hermes"
 printf '{"churn":true}\n' > "$churn_home/.hermes/settings.json"
-run_tool "$churn_home" export-profile hermes "$tmp/churn-profile.tgz" backup > "$tmp/churn-export.out" 2> "$tmp/churn-export.err"
+LIVE_TAR_MODE=churn run_tool "$churn_home" export-profile hermes "$tmp/churn-profile.tgz" backup > "$tmp/churn-export.out" 2> "$tmp/churn-export.err"
 [ -f "$tmp/churn-profile.tgz" ] || { echo "live-churn export did not create package" >&2; exit 1; }
+assert_file_contains "$tmp/churn-export.err" "File removed before we read it"
 assert_file_contains "$tmp/churn-export.err" "file changed as we read it"
+if LIVE_TAR_MODE=mixed-error run_tool "$churn_home" export-profile hermes "$tmp/mixed-error-profile.tgz" backup > "$tmp/mixed-error-export.out" 2>&1; then
+  echo "mixed tar error unexpectedly succeeded" >&2
+  exit 1
+fi
+assert_file_contains "$tmp/mixed-error-export.out" "Cannot stat"
+assert_file_contains "$tmp/mixed-error-export.out" "Failed to export hermes profile"
 rm -f "$fakebin/tar"
 
 fresh_home="$tmp/fresh-home"
@@ -203,8 +227,12 @@ assert_file_contains "$rollback_home/.hermes/settings.json" "old"
 rm -f "$fakebin/tar"
 
 openclaw_home="$tmp/openclaw-home"
-mkdir -p "$openclaw_home/.openclaw/feishu"
+mkdir -p "$openclaw_home/.openclaw/feishu" "$openclaw_home/.openclaw/openclaw-weixin/node_modules/gtoken/node_modules/.bin" "$openclaw_home/.openclaw/browser/openclaw/user-data" "$openclaw_home/.openclaw/skills" "$tmp/linked-skill"
 printf 'token\n' > "$openclaw_home/.openclaw/feishu/config"
+printf 'skill\n' > "$tmp/linked-skill/SKILL.md"
+ln -s ../uuid "$openclaw_home/.openclaw/openclaw-weixin/node_modules/gtoken/node_modules/.bin/uuid"
+ln -s /tmp/chrome-lock "$openclaw_home/.openclaw/browser/openclaw/user-data/SingletonLock"
+ln -s "$tmp/linked-skill" "$openclaw_home/.openclaw/skills/lark-minutes"
 cat > "$openclaw_home/.openclaw/settings.json" <<'EOF'
 {
   "mcpServers": {
@@ -218,6 +246,31 @@ cat > "$openclaw_home/.openclaw/settings.json" <<'EOF'
 }
 EOF
 run_tool "$openclaw_home" export-openclaw-source "$tmp/openclaw-source.tgz" > "$tmp/export-openclaw.out"
+"$real_tar" -tzf "$tmp/openclaw-source.tgz" | grep -F "node_modules" >/dev/null 2>&1 && {
+  echo "OpenClaw source export included node_modules" >&2
+  exit 1
+}
+"$real_tar" -tzf "$tmp/openclaw-source.tgz" | grep -F "SingletonLock" >/dev/null 2>&1 && {
+  echo "OpenClaw source export included browser runtime locks" >&2
+  exit 1
+}
+"$real_tar" -tzf "$tmp/openclaw-source.tgz" | grep -F ".openclaw/skills/lark-minutes/SKILL.md" >/dev/null 2>&1 || {
+  echo "OpenClaw source export did not dereference skill links" >&2
+  exit 1
+}
+cat > "$fakebin/tar" <<EOF
+#!/bin/sh
+case "\$1" in
+  -*x*)
+    case "\$1" in
+      *m*) ;;
+      *) echo "migration extraction did not disable mtime restore" >&2; exit 9 ;;
+    esac
+    ;;
+esac
+exec "$real_tar" "\$@"
+EOF
+chmod +x "$fakebin/tar"
 if run_tool "$openclaw_home" migrate-openclaw-dry-run "$tmp/openclaw-source.tgz" "$tmp/migration-report.md" merge skip > "$tmp/migrate.out" 2>&1; then
   echo "migration dry run unexpectedly succeeded without hermes" >&2
   exit 1
@@ -228,24 +281,41 @@ export HERMES_LOG="$tmp/hermes.log"
 cat > "$fakebin/hermes" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$HERMES_LOG"
+[ "${1:-}" = "--overwrite" ] && { echo "global overwrite rejected" >&2; exit 64; }
+if [ "${HERMES_REFUSE_APPLY:-}" = "1" ]; then
+  case " $* " in
+    *" --yes "*) echo "Refusing to apply"; exit 0 ;;
+  esac
+fi
 case "$*" in
-  *" claw migrate "*) echo "fake migration completed"; exit 0 ;;
+  *"claw migrate "*) echo "fake migration completed"; exit 0 ;;
   config\ set*) exit 0 ;;
 esac
 exit 0
 EOF
 chmod +x "$fakebin/hermes"
 
-run_tool "$openclaw_home" migrate-openclaw-dry-run "$tmp/openclaw-source.tgz" "$tmp/migration-report-ok.md" merge skip > "$tmp/migrate-ok.out"
+TMPDIR=/dev/null run_tool "$openclaw_home" migrate-openclaw-dry-run "$tmp/openclaw-source.tgz" "$tmp/migration-report-ok.md" merge skip > "$tmp/migrate-ok.out"
 assert_file_contains "$tmp/migration-report-ok.md" "fake migration completed"
+assert_file_contains "$HERMES_LOG" "claw migrate"
+assert_file_contains "$HERMES_LOG" "claw migrate --overwrite"
 assert_file_contains "$HERMES_LOG" "--dry-run"
 assert_file_contains "$HERMES_LOG" "--skill-conflict merge"
 assert_file_contains "$HERMES_LOG" "--workspace-target skip"
 
-run_tool "$openclaw_home" migrate-openclaw-apply "$tmp/openclaw-source.tgz" "$tmp/migration-apply.md" overwrite preserve > "$tmp/migrate-apply.out"
+if HERMES_REFUSE_APPLY=1 TMPDIR=/dev/null run_tool "$openclaw_home" migrate-openclaw-apply "$tmp/openclaw-source.tgz" "$tmp/migration-refuse.md" overwrite preserve > "$tmp/migrate-refuse.out" 2>&1; then
+  echo "migration apply unexpectedly succeeded after refusal report" >&2
+  exit 1
+fi
+unset HERMES_REFUSE_APPLY
+assert_file_contains "$tmp/migration-refuse.md" "Refusing to apply"
+assert_file_contains "$tmp/migrate-refuse.out" "Hermes migration failed"
+
+TMPDIR=/dev/null run_tool "$openclaw_home" migrate-openclaw-apply "$tmp/openclaw-source.tgz" "$tmp/migration-apply.md" overwrite preserve > "$tmp/migrate-apply.out"
 assert_file_contains "$tmp/migration-apply.md" "Migration completed."
 assert_file_contains "$HERMES_LOG" "--yes"
 assert_file_contains "$HERMES_LOG" "--skill-conflict overwrite"
 assert_file_contains "$HERMES_LOG" "--workspace-target preserve"
 [ -f "$openclaw_home/.hermes/feishu/config" ] || { echo "apply did not copy channel config" >&2; exit 1; }
 assert_file_contains "$openclaw_home/.hermes/settings.json" "mcpServers"
+rm -f "$fakebin/tar"

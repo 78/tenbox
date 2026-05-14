@@ -41,8 +41,8 @@ agent_service() {
 
 agent_excludes() {
   case "$1" in
-    hermes) echo ".hermes/logs .hermes/tmp .hermes/cache .hermes/sessions .hermes/node_modules" ;;
-    openclaw) echo ".openclaw/logs .openclaw/tmp .openclaw/cache .openclaw/sessions .openclaw/node_modules .openclaw/backup" ;;
+    hermes) echo ".hermes/logs .hermes/tmp .hermes/cache .hermes/sessions .hermes/node_modules .hermes/node_modules/* */node_modules */node_modules/*" ;;
+    openclaw) echo ".openclaw/logs .openclaw/tmp .openclaw/cache .openclaw/sessions .openclaw/node_modules .openclaw/node_modules/* */node_modules */node_modules/* .openclaw/browser/*/user-data/Singleton* .openclaw/backup" ;;
     *) die "Unsupported agent: $1" ;;
   esac
 }
@@ -111,7 +111,12 @@ create_live_archive() {
     rm -f "$err"
     return 0
   fi
-  if [ "$rc" -eq 1 ] && [ -s "$archive" ] && grep -F "file changed as we read it" "$err" >/dev/null 2>&1; then
+  if [ "$rc" -eq 1 ] && [ -s "$archive" ] && awk '
+    /file changed as we read it/ || /File removed before we read it/ { seen=1; next }
+    /^[[:space:]]*$/ { next }
+    { bad=1 }
+    END { exit (seen && !bad) ? 0 : 1 }
+  ' "$err"; then
     cat "$err" >&2
     rm -f "$err"
     return 0
@@ -119,6 +124,95 @@ create_live_archive() {
   cat "$err" >&2
   rm -f "$err"
   return "$rc"
+}
+
+create_openclaw_source_archive() {
+  archive="$1" home="$2"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to export OpenClaw source."
+  python3 - "$archive" "$home" <<'PY'
+import os, stat, sys, tarfile
+
+archive, home = sys.argv[1:3]
+root_name = '.openclaw'
+root = os.path.join(home, root_name)
+if not os.path.isdir(root):
+    print(f'OpenClaw profile was not found at {root}.', file=sys.stderr)
+    sys.exit(1)
+
+def arcname(path):
+    return os.path.relpath(path, home).replace(os.sep, '/')
+
+def excluded(name):
+    parts = name.split('/')
+    if len(parts) >= 2 and parts[0] == root_name and parts[1] in {'logs', 'tmp', 'cache', 'sessions', 'backup'}:
+        return True
+    if 'node_modules' in parts:
+        return True
+    if len(parts) >= 5 and parts[0] == root_name and parts[1] == 'browser' and 'user-data' in parts and os.path.basename(name).startswith('Singleton'):
+        return True
+    return False
+
+def add_file(tar, source, name):
+    try:
+        info = tar.gettarinfo(source, arcname=name)
+        if not info.isfile():
+            return
+        with open(source, 'rb') as f:
+            tar.addfile(info, f)
+    except FileNotFoundError:
+        print(f'tar: {name}: File removed before we read it', file=sys.stderr)
+    except OSError as exc:
+        print(f'tar: {name}: {exc}', file=sys.stderr)
+
+def add_path(tar, source, name, seen):
+    if excluded(name):
+        return
+    try:
+        st = os.lstat(source)
+    except FileNotFoundError:
+        print(f'tar: {name}: File removed before we read it', file=sys.stderr)
+        return
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            real = os.path.realpath(source)
+            target_st = os.stat(real)
+        except FileNotFoundError:
+            print(f'tar: {name}: File removed before we read it', file=sys.stderr)
+            return
+        key = (target_st.st_dev, target_st.st_ino)
+        if key in seen:
+            return
+        if stat.S_ISDIR(target_st.st_mode):
+            add_dir(tar, real, name, seen | {key})
+        elif stat.S_ISREG(target_st.st_mode):
+            add_file(tar, real, name)
+        return
+    if stat.S_ISDIR(st.st_mode):
+        add_dir(tar, source, name, seen)
+    elif stat.S_ISREG(st.st_mode):
+        add_file(tar, source, name)
+
+def add_dir(tar, source, name, seen):
+    if excluded(name):
+        return
+    try:
+        info = tar.gettarinfo(source, arcname=name)
+        info.type = tarfile.DIRTYPE
+        tar.addfile(info)
+        entries = sorted(os.listdir(source))
+    except FileNotFoundError:
+        print(f'tar: {name}: File removed before we read it', file=sys.stderr)
+        return
+    except OSError as exc:
+        print(f'tar: {name}: {exc}', file=sys.stderr)
+        return
+    for entry in entries:
+        child = os.path.join(source, entry)
+        add_path(tar, child, f'{name}/{entry}', seen)
+
+with tarfile.open(archive, 'w:gz') as tar:
+    add_path(tar, root, root_name, set())
+PY
 }
 
 export_profile() {
@@ -189,9 +283,8 @@ export_openclaw_source() {
   [ -d "$src" ] || die "OpenClaw profile was not found at $src."
   tmp="${output}.tmp.$$"
   rm -f "$tmp"
-  exclude_args=""
-  for path in $(agent_excludes openclaw); do exclude_args="$exclude_args --exclude=$path"; done
-  (cd "$home" && create_live_archive "$tmp" tar -czf "$tmp" $exclude_args ".openclaw") || { rm -f "$tmp"; die "Failed to export OpenClaw source."; }
+  create_openclaw_source_archive "$tmp" "$home" || { rm -f "$tmp"; die "Failed to export OpenClaw source."; }
+  validate_archive "$tmp" ".openclaw" || { rm -f "$tmp"; die "Invalid OpenClaw source archive."; }
   finalize_file "$tmp" "$output" || { rm -f "$tmp"; die "Failed to finalize OpenClaw source export."; }
   echo "Exported OpenClaw source to $output."
 }
@@ -286,8 +379,8 @@ PY
 migrate_openclaw() {
   input="$1" report="$2" skill_conflict="$3" workspace_target="$4" mode="$5"
   validate_archive "$input" ".openclaw" || die "Invalid OpenClaw source archive."
-  tmp="${TMPDIR:-/tmp}/tenbox-openclaw-migration.$$"; rm -rf "$tmp"; mkdir -p "$tmp" || die "Failed to create temporary directory."
-  (cd "$tmp" && tar -xzf "$input") || { rm -rf "$tmp"; die "Failed to unpack OpenClaw source."; }
+  tmp="$(dirname "$input")/.tenbox-openclaw-migration.$$"; rm -rf "$tmp"; mkdir -p "$tmp" || die "Failed to create temporary directory."
+  (cd "$tmp" && tar -xmzf "$input") || { rm -rf "$tmp"; die "Failed to unpack OpenClaw source."; }
   source_dir="$tmp/.openclaw"
   [ -d "$source_dir" ] || { rm -rf "$tmp"; die "Migration package is missing .openclaw."; }
   { echo "# OpenClaw to Hermes migration"; echo; echo "- Mode: $mode"; echo "- Generated at: $(date -Iseconds 2>/dev/null || date)"; echo; } > "$report"
@@ -301,9 +394,13 @@ migrate_openclaw() {
     fail_message="Hermes migration failed. See $report."
   fi
   if [ -n "$workspace_target" ]; then
-    "$hermes_cmd" --overwrite claw migrate --source "$source_dir" --skill-conflict "$skill_conflict" --workspace-target "$workspace_target" --migrate-secrets "$mode_arg" >> "$report" 2>&1 || die "$fail_message"
+    "$hermes_cmd" claw migrate --overwrite --source "$source_dir" --skill-conflict "$skill_conflict" --workspace-target "$workspace_target" --migrate-secrets "$mode_arg" >> "$report" 2>&1 || die "$fail_message"
   else
-    "$hermes_cmd" --overwrite claw migrate --source "$source_dir" --skill-conflict "$skill_conflict" --migrate-secrets "$mode_arg" >> "$report" 2>&1 || die "$fail_message"
+    "$hermes_cmd" claw migrate --overwrite --source "$source_dir" --skill-conflict "$skill_conflict" --migrate-secrets "$mode_arg" >> "$report" 2>&1 || die "$fail_message"
+  fi
+  if grep -F "Refusing to apply" "$report" >/dev/null 2>&1; then
+    rm -rf "$tmp"
+    die "$fail_message"
   fi
   if [ "$mode" != "dry-run" ]; then configure_channels "$tmp"; restore_tenbox_model_config; echo "Migration completed." >> "$report"; fi
   echo "Migration report was written to $report."
