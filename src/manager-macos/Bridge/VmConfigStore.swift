@@ -23,6 +23,10 @@ class VmConfigStore {
 
     private let decoder = JSONDecoder()
 
+    private static func isAgentToolSharedFolderTag(_ tag: String) -> Bool {
+        tag.hasPrefix("tenbox-agent-ops-") || tag.hasPrefix("tenbox-agent-backups-")
+    }
+
     // MARK: - Paths
 
     func vmDirectory(for vmId: String) -> URL {
@@ -47,7 +51,22 @@ class VmConfigStore {
         config.kernelPath = resolve(config.kernelPath)
         config.initrdPath = resolve(config.initrdPath)
         config.diskPath = resolve(config.diskPath)
+        config.sharedFolders.removeAll { Self.isAgentToolSharedFolderTag($0.tag) }
         return config
+    }
+
+    func purgeAgentToolSharedFolders() {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: Self.vmsDirectory.path) else { return }
+        for item in items {
+            let url = configURL(for: item)
+            guard let data = try? Data(contentsOf: url),
+                  var config = try? decoder.decode(VmConfig.self, from: data) else { continue }
+            let oldCount = config.sharedFolders.count
+            config.sharedFolders.removeAll { Self.isAgentToolSharedFolderTag($0.tag) }
+            guard config.sharedFolders.count != oldCount else { continue }
+            _ = writeConfig(vmId: item, config: config)
+        }
     }
 
     @discardableResult
