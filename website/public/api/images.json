@@ -2,14 +2,14 @@
   "images": [
     {
       "id": "openclaw",
-      "version": "2026.5.7",
-      "name": "OpenClaw 2026.5.7",
+      "version": "2026.5.12",
+      "name": "OpenClaw 2026.5.12",
       "description": "一个基于 Debian 13 的环境，预装了 OpenClaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-05-09",
+      "updated_at": "2026-05-16",
       "files": [
         {
           "name": "vmlinuz",
@@ -25,22 +25,22 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.5.7-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw/rootfs-openclaw-2026.5.12-x86_64.qcow2",
           "sha256": "",
-          "size": 1731198976
+          "size": 1725759488
         }
       ]
     },
     {
       "id": "qwenpaw",
-      "version": "1.1.6",
-      "name": "QwenPaw 1.1.6",
+      "version": "1.1.7",
+      "name": "QwenPaw 1.1.7",
       "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 QwenPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-05-11",
+      "updated_at": "2026-05-16",
       "files": [
         {
           "name": "vmlinuz",
@@ -56,9 +56,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw/rootfs-qwenpaw-1.1.6-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw/rootfs-qwenpaw-1.1.7-x86_64.qcow2",
           "sha256": "",
-          "size": 1706491904
+          "size": 1812791296
         }
       ]
     },
@@ -71,7 +71,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-03-26",
+      "updated_at": "2026-05-13",
       "files": [
         {
           "name": "vmlinuz",
@@ -89,7 +89,7 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium/rootfs-chromium-x86_64.qcow2",
           "sha256": "",
-          "size": 1196883968
+          "size": 1330053120
         }
       ]
     },
@@ -102,7 +102,7 @@
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-03-26",
+      "updated_at": "2026-05-13",
       "files": [
         {
           "name": "vmlinuz",
@@ -120,20 +120,20 @@
           "name": "rootfs.qcow2",
           "url": "https://files.xiaozhi.me/tenbox/images/chromium-arm64/rootfs-chromium-arm64.qcow2",
           "sha256": "",
-          "size": 1208942592
+          "size": 1320300032
         }
       ]
     },
     {
       "id": "qwenpaw-arm64",
-      "version": "1.1.6",
-      "name": "QwenPaw 1.1.6 (ARM64)",
+      "version": "1.1.7",
+      "name": "QwenPaw 1.1.7 (ARM64)",
       "description": "一个基于 Debian 13 xfce4 的桌面环境，预装了 QwenPaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-05-11",
+      "updated_at": "2026-05-16",
       "files": [
         {
           "name": "vmlinuz",
@@ -149,22 +149,22 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw-arm64/rootfs-qwenpaw-1.1.6-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/qwenpaw-arm64/rootfs-qwenpaw-1.1.7-arm64.qcow2",
           "sha256": "",
-          "size": 1640235008
+          "size": 1763704832
         }
       ]
     },
     {
       "id": "openclaw-arm64",
-      "version": "2026.5.7",
-      "name": "OpenClaw 2026.5.7 (ARM64)",
+      "version": "2026.5.12",
+      "name": "OpenClaw 2026.5.12 (ARM64)",
       "description": "一个基于 Debian 13 的环境，预装了 OpenClaw 和 Chromium 浏览器。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-05-09",
+      "updated_at": "2026-05-16",
       "files": [
         {
           "name": "vmlinuz",
@@ -180,22 +180,22 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-2026.5.7-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/openclaw-arm64/rootfs-openclaw-2026.5.12-arm64.qcow2",
           "sha256": "",
-          "size": 1688862720
+          "size": 1689032704
         }
       ]
     },
     {
       "id": "hermes",
-      "version": "0.13.0",
-      "name": "Hermes 0.13.0",
+      "version": "0.14.0",
+      "name": "Hermes 0.14.0",
       "description": "一个基于 Debian 13 的环境，预装了 Hermes Agent。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "x86_64",
-      "updated_at": "2026-05-09",
+      "updated_at": "2026-05-16",
       "files": [
         {
           "name": "vmlinuz",
@@ -211,22 +211,22 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/hermes/rootfs-hermes-0.13.0-x86_64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/hermes/rootfs-hermes-0.14.0-x86_64.qcow2",
           "sha256": "",
-          "size": 2145320960
+          "size": 1955266560
         }
       ]
     },
     {
       "id": "hermes-arm64",
-      "version": "0.13.0",
-      "name": "Hermes 0.13.0 (ARM64)",
+      "version": "0.14.0",
+      "name": "Hermes 0.14.0 (ARM64)",
       "description": "一个基于 Debian 13 的环境，预装了 Hermes Agent。",
       "min_app_version": "0.1.0",
       "os": "linux",
       "arch": "microvm",
       "platform": "arm64",
-      "updated_at": "2026-05-09",
+      "updated_at": "2026-05-16",
       "files": [
         {
           "name": "vmlinuz",
@@ -242,9 +242,9 @@
         },
         {
           "name": "rootfs.qcow2",
-          "url": "https://files.xiaozhi.me/tenbox/images/hermes-arm64/rootfs-hermes-0.13.0-arm64.qcow2",
+          "url": "https://files.xiaozhi.me/tenbox/images/hermes-arm64/rootfs-hermes-0.14.0-arm64.qcow2",
           "sha256": "",
-          "size": 2059599872
+          "size": 1925120000
         }
       ]
     }
