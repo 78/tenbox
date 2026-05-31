@@ -16,12 +16,12 @@
       "min_os": "Windows 10"
     },
     "macos": {
-      "latest_version": "0.8.1",
+      "latest_version": "0.8.2",
       "release_notes": "- 修复libuv复用fd导致连接卡住的bug\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
       "release_date": "2026-06-01",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.8.1.dmg",
-      "sha256": "1adf27421ec252d3fd3c3b1238a2c489dac2d3794daaf0e1c4c210e6a7e81b7c",
-      "size": 4672925,
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.8.2.dmg",
+      "sha256": "4252380fe061d2af2b90690357603b02091b8b995f61ab4cf56a2e27812b9f3c",
+      "size": 4673264,
       "min_os": "macOS 12"
     }
   }

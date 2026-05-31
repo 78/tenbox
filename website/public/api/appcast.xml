@@ -26,7 +26,7 @@
       />
     </item>
     <item>
-      <title>Version 0.8.1</title>
+      <title>Version 0.8.2</title>
       <description><![CDATA[
         <ul>
           <li>- 修复libuv复用fd导致连接卡住的bug</li>
@@ -36,12 +36,12 @@
       <pubDate>Mon, 01 Jun 2026 00:00:00 -0000</pubDate>
       <sparkle:minimumSystemVersion>12</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.8.1.zip"
+        url="https://files.xiaozhi.me/tenbox/releases/TenBox-0.8.2.zip"
         sparkle:os="macos"
-        sparkle:version="0.8.1"
-        sparkle:shortVersionString="0.8.1"
-        sparkle:edSignature="3rfvSIVSC4ArURwNyNawC2grMjA/nXz0eaj6jNijhZfkiP/Q1zNNWgF6tmK8jmIJecolxPTC9ZGnem4URmaFCA=="
-        length="4730092"
+        sparkle:version="0.8.2"
+        sparkle:shortVersionString="0.8.2"
+        sparkle:edSignature="qVuk888JHJrwK5XtAryQhkiEILJk6aj744bFGdySaW6hvZpQIFpa3lB8ysozJuTnsUacMp/d8bGh8sjVzNXmAg=="
+        length="4730271"
         type="application/octet-stream"
       />
     </item>
