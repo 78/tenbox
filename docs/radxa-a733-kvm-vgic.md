@@ -69,6 +69,22 @@ by a proper kernel/DTS package update when available. The procedure below has
 been validated on `6.6.98-2-aw2511`; upgrade A7S hosts to that kernel first
 rather than patching the older `6.6.98-1-aw2511` DTB in place.
 
+For Radxa Cubie A7A / A7S / A7Z hosts, the packaged helper script can apply
+the same DTB patch automatically:
+
+```sh
+curl -fsSL https://tenbox.ai/fix-radxa-a733-vgic.sh | bash
+sudo reboot
+```
+
+The script backs up the target DTB next to the original file using a
+`.bak-tenbox-vgic-<timestamp>` suffix before writing the patched DTB. It can be
+run in check-only mode with:
+
+```sh
+curl -fsSL https://tenbox.ai/fix-radxa-a733-vgic.sh | bash -s -- --check
+```
+
 Example for `6.6.98-2-aw2511` on Cubie A7S:
 
 ```sh
