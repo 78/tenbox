@@ -26,6 +26,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 struct VmRuntimeHandle {
@@ -88,6 +89,7 @@ struct VmRecord {
     VmPowerState state = VmPowerState::kStopped;
     std::optional<VmMutablePatch> pending_patch;
     VmRuntimeHandle runtime;
+    std::vector<SharedFolder> runtime_shared_folders;
     int last_exit_code = 0;
     bool reboot_pending = false;
     bool guest_agent_connected = false;
@@ -196,6 +198,26 @@ public:
     void SetGuestAgentStateCallback(GuestAgentStateCallback cb);
     bool IsGuestAgentConnected(const std::string& vm_id) const;
 
+    struct GuestExecResult {
+        bool ok = false;
+        int exit_code = -1;
+        std::string stdout_text;
+        std::string stderr_text;
+        std::string error;
+
+        std::string CombinedOutput() const {
+            if (!stdout_text.empty() && !stderr_text.empty())
+                return stdout_text + "\n" + stderr_text;
+            return stdout_text + stderr_text;
+        }
+    };
+    using GuestExecCallback = std::function<void(GuestExecResult result)>;
+    bool RunGuestAgentCommand(const std::string& vm_id,
+                              const std::string& command,
+                              uint32_t timeout_ms,
+                              GuestExecCallback callback,
+                              const std::string& user = "tenbox");
+
     // Host-forward error callback: when host ports fail to bind
     // failed_mappings format: "host_port:guest_port" for each failed binding
     using HostForwardErrorCallback = std::function<void(const std::string& vm_id,
@@ -219,6 +241,8 @@ public:
     bool AddSharedFolder(const std::string& vm_id, const SharedFolder& folder, std::string* error);
     bool RemoveSharedFolder(const std::string& vm_id, const std::string& tag, std::string* error);
     std::vector<SharedFolder> GetSharedFolders(const std::string& vm_id) const;
+    bool AddRuntimeSharedFolder(const std::string& vm_id, const SharedFolder& folder, std::string* error);
+    bool RemoveRuntimeSharedFolder(const std::string& vm_id, const std::string& tag, std::string* error);
 
     // Host-forward management (host listens, traffic forwarded to guest).
     bool AddHostForward(const std::string& vm_id, const HostForward& forward, std::string* error);
@@ -263,6 +287,8 @@ private:
     void HandleProcessExit(const std::string& vm_id);
     void CleanupRuntimeHandles(VmRecord& vm);
     void HandleIncomingMessage(const std::string& vm_id, const ipc::Message& msg);
+    void SendSharedFoldersUpdateLocked(const std::string& vm_id, VmRecord& vm);
+    void FailPendingGuestExecForVm(const std::string& vm_id, const std::string& error);
 
     void InitJobObject();
 
@@ -289,6 +315,13 @@ private:
 
     // Guest forwards injected into every VM (e.g. LLM proxy guestfwd)
     std::vector<GuestForward> global_guest_forwards_;
+    struct PendingGuestExec {
+        std::string vm_id;
+        GuestExecCallback callback;
+    };
+    std::mutex guest_exec_mutex_;
+    std::unordered_map<uint64_t, PendingGuestExec> pending_guest_exec_;
+    std::atomic<uint64_t> next_guest_exec_request_id_{1};
 
     void AppendGuestFwdFields(ipc::Message& msg,
                               const std::vector<GuestForward>& vm_guest_forwards = {}) const;

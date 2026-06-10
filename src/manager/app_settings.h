@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace settings {
@@ -39,6 +40,17 @@ struct LlmProxySettings {
     bool enable_logging = false;
 };
 
+struct AgentBackupSchedule {
+    bool enabled = false;
+    int hour = 3;
+    int minute = 0;
+    int keep_count = 7;
+    std::string last_run_date;
+    std::string last_attempt_at;
+    std::string last_attempt_status;
+    std::string last_attempt_message;
+};
+
 struct AppSettings {
     WindowGeometry window;
     std::vector<std::string> vm_paths;
@@ -49,6 +61,7 @@ struct AppSettings {
     std::vector<image_source::ImageSource> sources; // empty = use DefaultSources()
     std::string last_selected_source; // name of last selected source
     LlmProxySettings llm_proxy;
+    std::unordered_map<std::string, AgentBackupSchedule> agent_backup_schedules;
 };
 
 // Resolve effective directories (returns custom if set, otherwise default).

@@ -15,3 +15,11 @@ target_include_directories(test_qcow2 PRIVATE
 )
 
 target_link_libraries(test_qcow2 PRIVATE zlibstatic libzstd_static)
+
+find_program(SH_EXECUTABLE sh REQUIRED)
+add_test(
+    NAME test_agent_tools_guest
+    COMMAND ${SH_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_agent_tools_guest.sh
+        ${CMAKE_SOURCE_DIR}/src/agent_tools/guest/agent_tools.sh
+)

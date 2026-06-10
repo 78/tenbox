@@ -2,6 +2,7 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/main.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/manager_service.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/app_settings.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/agent_tools_service.cpp
     ${CMAKE_SOURCE_DIR}/src/common/image_source.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/http_download.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/app.manifest
@@ -13,6 +14,7 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/ui/shared_folders_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/port_forward_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/llm_proxy_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/ui/agent_tools_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/settings_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_display_panel.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/info_tab.cpp
@@ -43,6 +45,7 @@ target_link_libraries(tenbox-manager
         ole32
         winhttp
         bcrypt
+        crypt32
         ws2_32
 )
 
@@ -51,6 +54,14 @@ add_custom_command(TARGET tenbox-manager POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_PROPERTY:winsparkle_lib,IMPORTED_LOCATION>"
         "$<TARGET_FILE_DIR:tenbox-manager>"
+)
+
+add_custom_command(TARGET tenbox-manager POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:tenbox-manager>/AgentTools"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/src/agent_tools/guest/agent_tools.sh"
+        "$<TARGET_FILE_DIR:tenbox-manager>/AgentTools/agent_tools.sh"
 )
 
 if(MSVC)
