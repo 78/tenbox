@@ -3,14 +3,14 @@
   "min_supported_version": "0.1.0",
   "release_notes": "- 修复 LLM Proxy 在工具调用时超时问题\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
   "release_date": "2026-05-14",
-  "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.8.1.msi",
+  "download_url": "https://files.xiaozhi.me/tenbox/releases/AgentSphere_0.8.1.msi",
   "sha256": "d91152964cad1708b11230623c49539edd3227e61ab4224b3f53bb03015009dc",
   "platforms": {
     "windows": {
       "latest_version": "0.8.1",
       "release_notes": "- 修复 LLM Proxy 在工具调用时超时问题\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
       "release_date": "2026-05-14",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox_0.8.1.msi",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/AgentSphere_0.8.1.msi",
       "sha256": "d91152964cad1708b11230623c49539edd3227e61ab4224b3f53bb03015009dc",
       "size": 3280896,
       "min_os": "Windows 10"
@@ -19,7 +19,7 @@
       "latest_version": "0.8.3",
       "release_notes": "- 修复libuv复用fd导致连接卡住的bug\n- 重要‼ 0.5.7 之前版本，请在升级前确保已备份虚拟机内的重要数据",
       "release_date": "2026-06-01",
-      "download_url": "https://files.xiaozhi.me/tenbox/releases/TenBox-0.8.3.dmg",
+      "download_url": "https://files.xiaozhi.me/tenbox/releases/AgentSphere-0.8.3.dmg",
       "sha256": "4252380fe061d2af2b90690357603b02091b8b995f61ab4cf56a2e27812b9f3c",
       "size": 4673264,
       "min_os": "macOS 12"

@@ -79,9 +79,9 @@ void ConfigureCommonH264Context(AVCodecContext* codec, const VideoEncoderConfig&
     // Single-threaded encoding minimizes per-frame latency for remote desktop.
     // Multi-thread parallelism adds a frame pipeline delay with no throughput
     // benefit at the low resolutions / framerates used here.
-    // Override with TENBOX_ENCODER_THREADS=0 to let FFmpeg choose automatically.
+    // Override with AGENTSPHERE_ENCODER_THREADS=0 to let FFmpeg choose automatically.
     int thread_count = 1;
-    if (const char* v = std::getenv("TENBOX_ENCODER_THREADS"); v && v[0] != '\0') {
+    if (const char* v = std::getenv("AGENTSPHERE_ENCODER_THREADS"); v && v[0] != '\0') {
         const auto result = std::from_chars(v, v + std::strlen(v), thread_count);
         if (result.ec != std::errc{}) thread_count = 1;
     }

@@ -1,7 +1,7 @@
-# TenBox Website
+# AgentSphere Website
 
 Source of [tenbox.ai](https://tenbox.ai) — the marketing site and release manifest host
-for TenBox. Built with Vue 3 + Vite and deployed as static files.
+for AgentSphere. Built with Vue 3 + Vite and deployed as static files.
 
 ## Stack
 
@@ -34,7 +34,7 @@ website/
 
 The same `version.json` served at [`https://tenbox.ai/api/version.json`](https://tenbox.ai/api/version.json)
 is read at build time by `vite.config.js` to inject the current version and per-platform
-download URLs into the page, and at runtime by the TenBox manager for update checks.
+download URLs into the page, and at runtime by the AgentSphere manager for update checks.
 Keep its schema (`latest_version`, `platforms.windows`, `platforms.macos`, `sha256`, ...)
 in sync with the manager's expectations — see `scripts/image_manager.py` and the
 `http_download` / update-check paths under `src/manager`.

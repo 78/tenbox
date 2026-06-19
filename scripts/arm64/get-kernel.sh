@@ -1,5 +1,5 @@
 #!/bin/bash
-# Extract a Debian arm64 kernel Image for TenBox macOS (AArch64).
+# Extract a Debian arm64 kernel Image for AgentSphere macOS (AArch64).
 # Only requires curl, xz-utils, and dpkg-deb — no apt/root needed.
 #
 # The AArch64 Linux kernel uses a flat "Image" binary (not compressed vmlinuz).
@@ -8,13 +8,13 @@
 # Usage:
 #   ./get-kernel.sh [output_dir] [suite]
 #     output_dir  - where to place Image (default: ../build/share)
-#     suite       - Debian suite: trixie(6.12.x), bookworm(6.1.x), etc.
-#                   Default: trixie
+#     suite       - Debian suite: bookworm(6.1.x), trixie(6.12.x), etc.
+#                   Default: bookworm
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../../build/share}" && cd "${1:-$SCRIPT_DIR/../../build/share}" && pwd)"
-SUITE="${2:-trixie}"
+SUITE="${2:-bookworm}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 

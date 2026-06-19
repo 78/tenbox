@@ -13,7 +13,7 @@ static Lang g_current_lang = Lang::kEnglish;
 
 // English strings; each key explicitly bound to its string (no order dependency)
 static const std::unordered_map<S, const char*> kStringsEn = {
-    {S::kAppTitle, "OpenClaw / QwenPaw Deployment Assistant - TenBox"},
+    {S::kAppTitle, "OpenClaw / QwenPaw Deployment Assistant - AgentSphere"},
     {S::kMenuManager, "Manager"},
     {S::kMenuVm, "VM"},
     {S::kMenuNewVm, "New VM\tCtrl+N"},
@@ -102,11 +102,11 @@ static const std::unordered_map<S, const char*> kStringsEn = {
     {S::kMenuHelpDoc, "Help Documentation"},
     {S::kMenuCheckUpdate, "Check for Updates"},
     {S::kMenuAbout, "About..."},
-    {S::kAboutTitle, "About " TENBOX_PRODUCT_NAME},
-    {S::kAboutText, TENBOX_PRODUCT_NAME " Manager\nVersion " TENBOX_VERSION_STR "\n\nA lightweight virtual machine manager for Windows.\n\n" TENBOX_COPYRIGHT},
+    {S::kAboutTitle, "About " AGENTSPHERE_PRODUCT_NAME},
+    {S::kAboutText, AGENTSPHERE_PRODUCT_NAME " Manager\nVersion " AGENTSPHERE_VERSION_STR "\n\nA lightweight virtual machine manager for Windows.\n\n" AGENTSPHERE_COPYRIGHT},
     {S::kHvCheckTitle, "Virtualization Not Enabled"},
-    {S::kHvCheckMessage, "Windows Hypervisor Platform is not enabled.\n\nTenBox requires this feature to run virtual machines.\nWould you like to enable it now?"},
-    {S::kHvUnsupportedOsMessage, "Windows Hypervisor Platform requires Windows 10 version 1803 or later.\n\nYour Windows version is too old and cannot be used with TenBox.\nPlease upgrade Windows, or run TenBox on a supported system."},
+    {S::kHvCheckMessage, "Windows Hypervisor Platform is not enabled.\n\nAgentSphere requires this feature to run virtual machines.\nWould you like to enable it now?"},
+    {S::kHvUnsupportedOsMessage, "Windows Hypervisor Platform requires Windows 10 version 1803 or later.\n\nYour Windows version is too old and cannot be used with AgentSphere.\nPlease upgrade Windows, or run AgentSphere on a supported system."},
     {S::kHvBtnAutoEnable, "Enable Automatically"},
     {S::kHvBtnManualOpen, "Open Windows Features"},
     {S::kHvBtnIgnore, "Continue Anyway"},
@@ -266,7 +266,7 @@ static const std::unordered_map<S, const char*> kStringsEn = {
     {S::kLlmLoggingHint, "Log directory: "},
 
     // System tray
-    {S::kTrayShow, "Show TenBox"},
+    {S::kTrayShow, "Show AgentSphere"},
     {S::kTrayHide, "Hide to Tray"},
     {S::kSettingsCloseToTray, "Close button minimizes to system tray"},
 
@@ -285,7 +285,7 @@ static const std::unordered_map<S, const char*> kStringsEn = {
 
 // Simplified Chinese strings; each key explicitly bound (no order dependency)
 static const std::unordered_map<S, const char*> kStringsZhCN = {
-    {S::kAppTitle, "本地龙虾助手 - TenBox"},
+    {S::kAppTitle, "本地龙虾助手 - AgentSphere"},
     {S::kMenuManager, "管理"},
     {S::kMenuVm, "虚拟机"},
     {S::kMenuNewVm, "新建虚拟机\tCtrl+N"},
@@ -374,11 +374,11 @@ static const std::unordered_map<S, const char*> kStringsZhCN = {
     {S::kMenuHelpDoc, "帮助文档"},
     {S::kMenuCheckUpdate, "检查更新"},
     {S::kMenuAbout, "关于..."},
-    {S::kAboutTitle, "关于 " TENBOX_PRODUCT_NAME},
-    {S::kAboutText, TENBOX_PRODUCT_NAME " 管理器\n版本 " TENBOX_VERSION_STR "\n\n一款轻量级的 Windows 虚拟机管理器。\n\n" TENBOX_COPYRIGHT},
+    {S::kAboutTitle, "关于 " AGENTSPHERE_PRODUCT_NAME},
+    {S::kAboutText, AGENTSPHERE_PRODUCT_NAME " 管理器\n版本 " AGENTSPHERE_VERSION_STR "\n\n一款轻量级的 Windows 虚拟机管理器。\n\n" AGENTSPHERE_COPYRIGHT},
     {S::kHvCheckTitle, "未启用虚拟化"},
-    {S::kHvCheckMessage, "Windows 虚拟机监控程序平台尚未启用。\n\nTenBox 需要此功能才能运行虚拟机。\n是否立即启用？"},
-    {S::kHvUnsupportedOsMessage, "Windows 虚拟机监控程序平台需要 Windows 10 1803 或更高版本。\n\n当前系统版本过低，TenBox 无法在此系统上运行。\n请升级 Windows，或在受支持的系统上运行 TenBox。"},
+    {S::kHvCheckMessage, "Windows 虚拟机监控程序平台尚未启用。\n\nAgentSphere 需要此功能才能运行虚拟机。\n是否立即启用？"},
+    {S::kHvUnsupportedOsMessage, "Windows 虚拟机监控程序平台需要 Windows 10 1803 或更高版本。\n\n当前系统版本过低，AgentSphere 无法在此系统上运行。\n请升级 Windows，或在受支持的系统上运行 AgentSphere。"},
     {S::kHvBtnAutoEnable, "自动启用"},
     {S::kHvBtnManualOpen, "打开 Windows 功能"},
     {S::kHvBtnIgnore, "暂时跳过"},
@@ -536,7 +536,7 @@ static const std::unordered_map<S, const char*> kStringsZhCN = {
     {S::kLlmLoggingHint, "日志目录: "},
 
     // System tray
-    {S::kTrayShow, "显示 TenBox"},
+    {S::kTrayShow, "显示 AgentSphere"},
     {S::kTrayHide, "隐藏到托盘"},
     {S::kSettingsCloseToTray, "点击关闭按钮时最小化到系统托盘"},
 

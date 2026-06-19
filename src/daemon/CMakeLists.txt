@@ -1,4 +1,4 @@
-set(TENBOX_DAEMON_SOURCES
+set(AGENTSPHERE_DAEMON_SOURCES
     ${CMAKE_SOURCE_DIR}/src/daemon/main.cpp
     ${CMAKE_SOURCE_DIR}/src/daemon/cloud_protocol.cpp
     ${CMAKE_SOURCE_DIR}/src/daemon/cloud_tunnel.cpp
@@ -18,20 +18,20 @@ set(TENBOX_DAEMON_SOURCES
     ${CMAKE_SOURCE_DIR}/src/common/image_source.cpp
 )
 
-add_executable(tenboxd ${TENBOX_DAEMON_SOURCES})
+add_executable(agentsphered ${AGENTSPHERE_DAEMON_SOURCES})
 
-option(TENBOX_FETCH_LIBDATACHANNEL "Fetch libdatachannel when no system package is available" ON)
-option(TENBOX_ENABLE_LIBYUV "Enable libyuv pixel conversion fast path" ON)
+option(AGENTSPHERE_FETCH_LIBDATACHANNEL "Fetch libdatachannel when no system package is available" ON)
+option(AGENTSPHERE_ENABLE_LIBYUV "Enable libyuv pixel conversion fast path" ON)
 # Release builds set this to pick up the static ffmpeg/x264/opus/libyuv/
 # openssl/libcurl baked into packaging/build-base/Dockerfile.bullseye under
 # /opt/tenbox-deps. Defaults to OFF so developer builds keep using the
 # system shared libs.
-option(TENBOX_STATIC_FFMPEG "Link ffmpeg/x264/opus/libyuv/openssl/libcurl statically from /opt/tenbox-deps" OFF)
-if(TENBOX_STATIC_FFMPEG)
+option(AGENTSPHERE_STATIC_FFMPEG "Link ffmpeg/x264/opus/libyuv/openssl/libcurl statically from /opt/tenbox-deps" OFF)
+if(AGENTSPHERE_STATIC_FFMPEG)
     # pkg-config queries against the static prefix must come first so
     # PkgConfig::FFMPEG / PkgConfig::OPUS resolve to the .a archives,
     # not to whatever the host happens to have installed for dev work.
-    set(_tenbox_static_prefix "$ENV{TENBOX_DEPS_PREFIX}")
+    set(_tenbox_static_prefix "$ENV{AGENTSPHERE_DEPS_PREFIX}")
     if(NOT _tenbox_static_prefix)
         set(_tenbox_static_prefix "/opt/tenbox-deps")
     endif()
@@ -52,13 +52,13 @@ if(TENBOX_STATIC_FFMPEG)
     set(OPENSSL_ROOT_DIR "${_tenbox_static_prefix}")
 endif()
 
-target_include_directories(tenboxd
+target_include_directories(agentsphered
     PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_BINARY_DIR}
 )
 
-target_link_libraries(tenboxd
+target_link_libraries(agentsphered
     PRIVATE
         tenbox_ipc
         nlohmann_json::nlohmann_json
@@ -67,8 +67,8 @@ target_link_libraries(tenboxd
 
 find_package(LibDataChannel QUIET)
 if(NOT TARGET LibDataChannel::LibDataChannel)
-    if(NOT TENBOX_FETCH_LIBDATACHANNEL)
-        message(FATAL_ERROR "LibDataChannel is required. Enable TENBOX_FETCH_LIBDATACHANNEL or install libdatachannel.")
+    if(NOT AGENTSPHERE_FETCH_LIBDATACHANNEL)
+        message(FATAL_ERROR "LibDataChannel is required. Enable AGENTSPHERE_FETCH_LIBDATACHANNEL or install libdatachannel.")
     endif()
 
     set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
@@ -89,30 +89,30 @@ if(NOT TARGET LibDataChannel::LibDataChannel)
 endif()
 
 if(TARGET LibDataChannel::LibDataChannel)
-    target_link_libraries(tenboxd PRIVATE LibDataChannel::LibDataChannel)
+    target_link_libraries(agentsphered PRIVATE LibDataChannel::LibDataChannel)
 else()
-    target_link_libraries(tenboxd PRIVATE datachannel)
+    target_link_libraries(agentsphered PRIVATE datachannel)
 endif()
 
 find_package(PkgConfig REQUIRED)
-if(TENBOX_STATIC_FFMPEG)
+if(AGENTSPHERE_STATIC_FFMPEG)
     # IMPORTED_TARGET respects the _STATIC suffix for static link lines.
     pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavutil libswresample)
-    target_link_libraries(tenboxd PRIVATE PkgConfig::FFMPEG)
+    target_link_libraries(agentsphered PRIVATE PkgConfig::FFMPEG)
     pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
-    target_link_libraries(tenboxd PRIVATE PkgConfig::OPUS)
+    target_link_libraries(agentsphered PRIVATE PkgConfig::OPUS)
 else()
     pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavutil)
-    target_link_libraries(tenboxd PRIVATE PkgConfig::FFMPEG)
+    target_link_libraries(agentsphered PRIVATE PkgConfig::FFMPEG)
     pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
-    target_link_libraries(tenboxd PRIVATE PkgConfig::OPUS)
+    target_link_libraries(agentsphered PRIVATE PkgConfig::OPUS)
 endif()
 
 # OpenSSL is required for the cloud tunnel TLS upgrade (wss://). Phase 3
 # defaults to wss://my.tenbox.ai/api/device-tunnel; ws:// is kept for local
 # dev and falls through the same code path with TLS disabled.
 find_package(OpenSSL REQUIRED)
-target_link_libraries(tenboxd PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(agentsphered PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 
 # libcurl is used by the in-process LLM API reverse proxy (llm_proxy.cpp)
 # to forward OpenAI-compatible requests from guest VMs to the upstream
@@ -126,21 +126,21 @@ target_link_libraries(tenboxd PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 # because we built libcurl --without-* everything else). For dev
 # builds we keep the existing CMake CURL find_package so a system
 # libcurl4-openssl-dev still works without /opt/tenbox-deps present.
-if(TENBOX_STATIC_FFMPEG)
+if(AGENTSPHERE_STATIC_FFMPEG)
     pkg_check_modules(STATIC_CURL REQUIRED IMPORTED_TARGET libcurl)
-    target_link_libraries(tenboxd PRIVATE PkgConfig::STATIC_CURL)
+    target_link_libraries(agentsphered PRIVATE PkgConfig::STATIC_CURL)
 else()
     find_package(CURL REQUIRED)
-    target_link_libraries(tenboxd PRIVATE CURL::libcurl)
+    target_link_libraries(agentsphered PRIVATE CURL::libcurl)
 endif()
 
-if(TENBOX_ENABLE_LIBYUV)
-    if(TENBOX_STATIC_FFMPEG)
+if(AGENTSPHERE_ENABLE_LIBYUV)
+    if(AGENTSPHERE_STATIC_FFMPEG)
         # Match the prefix the build-base image installs into. cmake's
         # find_library prefers shared over static when both libyuv.so
         # and libyuv.a sit in the same dir (libyuv's cmake install
         # produces both even with BUILD_SHARED_LIBS=OFF); without
-        # pinning to .a, tenboxd ends up DT_NEEDED on libyuv.so which
+        # pinning to .a, agentsphered ends up DT_NEEDED on libyuv.so which
         # is absent on the target host and the daemon refuses to start.
         find_path(LIBYUV_INCLUDE_DIR NAMES libyuv.h
             HINTS ${_tenbox_static_prefix}/include
@@ -148,17 +148,17 @@ if(TENBOX_ENABLE_LIBYUV)
         set(LIBYUV_LIBRARY "${_tenbox_static_prefix}/lib/libyuv.a"
             CACHE FILEPATH "Path to static libyuv.a" FORCE)
         if(NOT EXISTS "${LIBYUV_LIBRARY}")
-            message(FATAL_ERROR "TENBOX_STATIC_FFMPEG=ON but ${LIBYUV_LIBRARY} not present")
+            message(FATAL_ERROR "AGENTSPHERE_STATIC_FFMPEG=ON but ${LIBYUV_LIBRARY} not present")
         endif()
     else()
         find_path(LIBYUV_INCLUDE_DIR NAMES libyuv.h)
         find_library(LIBYUV_LIBRARY NAMES yuv libyuv)
     endif()
     if(LIBYUV_INCLUDE_DIR AND LIBYUV_LIBRARY)
-        target_compile_definitions(tenboxd PRIVATE TENBOX_ENABLE_LIBYUV=1)
-        target_include_directories(tenboxd PRIVATE ${LIBYUV_INCLUDE_DIR})
-        target_link_libraries(tenboxd PRIVATE ${LIBYUV_LIBRARY})
+        target_compile_definitions(agentsphered PRIVATE AGENTSPHERE_ENABLE_LIBYUV=1)
+        target_include_directories(agentsphered PRIVATE ${LIBYUV_INCLUDE_DIR})
+        target_link_libraries(agentsphered PRIVATE ${LIBYUV_LIBRARY})
     else()
-        message(FATAL_ERROR "libyuv is required for the BGRA->YUV slice conversion path; install libyuv-dev or disable TENBOX_ENABLE_LIBYUV explicitly.")
+        message(FATAL_ERROR "libyuv is required for the BGRA->YUV slice conversion path; install libyuv-dev or disable AGENTSPHERE_ENABLE_LIBYUV explicitly.")
     endif()
 endif()

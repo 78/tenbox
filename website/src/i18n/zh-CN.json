@@ -4,7 +4,7 @@
     "github": "GitHub"
   },
   "hero": {
-    "title": "TenBox",
+    "title": "AgentSphere",
     "taglines": [
       "你的本地龙虾养殖场",
       "一键创建你的赛博打工虾",
@@ -83,14 +83,14 @@
       "desc": "Debian 11+ / Ubuntu 20.04+ / Raspberry Pi OS 11+，amd64 / arm64（已在 Raspberry Pi 5 上验证），需要 glibc 2.31+ 与 /dev/kvm。",
       "command": "curl -fsSL https://tenbox.ai/install.sh | sudo sh",
       "footnote": "安装完成后会输出配对 URL，在",
-      "footnote_link": "TenBox Cloud Console",
+      "footnote_link": "AgentSphere Cloud Console",
       "footnote_after": "中绑定主机即可远程管理。",
       "copy": "复制",
       "copied": "已复制"
     }
   },
   "footer": {
-    "copyright": "© 2026 TenClass. 基于 GPL v3 协议开源。",
+    "copyright": "© 2026 PanguStudio. 基于 GPL v3 协议开源。",
     "github": "GitHub 仓库"
   }
 }

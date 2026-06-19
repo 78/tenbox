@@ -12,7 +12,7 @@ namespace {
 
 void PrintUsage(const char* prog) {
     std::cerr
-        << "TenBox CLI v" TENBOX_VERSION "\n\n"
+        << "AgentSphere CLI v" AGENTSPHERE_VERSION "\n\n"
         << "Usage:\n"
         << "  " << prog << " doctor\n"
         << "  " << prog << " system info\n"
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
     const std::string top = argv[1];
 
     if (top == "--version" || top == "version") {
-        std::cout << TENBOX_VERSION << "\n";
+        std::cout << AGENTSPHERE_VERSION << "\n";
         return 0;
     }
     if (top == "--help" || top == "help") {

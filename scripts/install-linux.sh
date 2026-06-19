@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# TenBox one-line installer for Debian-derived systems.
+# AgentSphere one-line installer for Debian-derived systems.
 #
 #   curl -fsSL https://tenbox.ai/install.sh | sudo sh
 #
@@ -7,8 +7,8 @@
 #  1. Validate platform (Debian-derivative + amd64/arm64 + glibc >= 2.35
 #     + KVM available).
 #  2. Install runtime apt dependencies that the deb does not bundle.
-#  3. Register the TenBox apt repo and apt-get install tenbox.
-#  4. Drop /etc/tenbox/tenboxd.env with the cloud tunnel URL.
+#  3. Register the AgentSphere apt repo and apt-get install tenbox.
+#  4. Drop /etc/tenbox/agentsphered.env with the cloud tunnel URL.
 #  5. Enable + start the systemd unit (the deb installs it but does not
 #     enable it; the env file is only known to be valid here).
 #  6. If the host is already paired, report that immediately; otherwise tail
@@ -17,25 +17,25 @@
 # The previous tarball-based install path is gone: tenbox now ships as
 # a single deb (tenbox_<ver>_{amd64,arm64}.deb) and `host.update` from
 # the cloud console relies on apt being the source of truth. To pin to
-# a specific version, set TENBOX_RELEASE_TAG and the script will
+# a specific version, set AGENTSPHERE_RELEASE_TAG and the script will
 # `apt-get install tenbox=<version>` at the matching point release.
 #
 # Environment overrides (all optional):
-#   TENBOX_CLOUD_URL               Cloud tunnel URL (default: wss://my.tenbox.ai/api/device-tunnel)
-#   TENBOX_DATA_DIR                Daemon data dir (default: /var/lib/tenbox)
-#   TENBOX_APT_REPO_URL            apt repo base URL (default: https://my.tenbox.ai/repo)
-#   TENBOX_APT_SUITE               apt suite name (default: stable)
-#   TENBOX_RELEASE_TAG             pin to vX.Y.Z (default: latest available)
-#   TENBOX_WEBRTC_WORKER_THREADS   libdatachannel thread pool size (default: 4; 0 = hardware_concurrency)
-#   TENBOX_ENCODER_THREADS         FFmpeg encoder threads per session (default: 1; 0 = auto)
+#   AGENTSPHERE_CLOUD_URL               Cloud tunnel URL (default: wss://my.tenbox.ai/api/device-tunnel)
+#   AGENTSPHERE_DATA_DIR                Daemon data dir (default: /var/lib/tenbox)
+#   AGENTSPHERE_APT_REPO_URL            apt repo base URL (default: https://my.tenbox.ai/repo)
+#   AGENTSPHERE_APT_SUITE               apt suite name (default: stable)
+#   AGENTSPHERE_RELEASE_TAG             pin to vX.Y.Z (default: latest available)
+#   AGENTSPHERE_WEBRTC_WORKER_THREADS   libdatachannel thread pool size (default: 4; 0 = hardware_concurrency)
+#   AGENTSPHERE_ENCODER_THREADS         FFmpeg encoder threads per session (default: 1; 0 = auto)
 
 set -eu
 
-data_dir="${TENBOX_DATA_DIR:-/var/lib/tenbox}"
-cloud_url="${TENBOX_CLOUD_URL:-wss://my.tenbox.ai/api/device-tunnel}"
-repo_url="${TENBOX_APT_REPO_URL:-https://my.tenbox.ai/repo}"
-suite="${TENBOX_APT_SUITE:-stable}"
-release_tag="${TENBOX_RELEASE_TAG:-latest}"
+data_dir="${AGENTSPHERE_DATA_DIR:-/var/lib/tenbox}"
+cloud_url="${AGENTSPHERE_CLOUD_URL:-wss://my.tenbox.ai/api/device-tunnel}"
+repo_url="${AGENTSPHERE_APT_REPO_URL:-https://my.tenbox.ai/repo}"
+suite="${AGENTSPHERE_APT_SUITE:-stable}"
+release_tag="${AGENTSPHERE_RELEASE_TAG:-latest}"
 
 die() {
     echo "tenbox install: $*" >&2
@@ -136,12 +136,12 @@ apt_install_deps() {
 }
 
 register_apt_repo() {
-    step "Registering TenBox apt repository ($repo_url $suite)..."
+    step "Registering AgentSphere apt repository ($repo_url $suite)..."
     install -d -m 0755 /etc/apt/sources.list.d
     install -d -m 0755 /etc/apt/keyrings
 
     # The expected sha256 of the public archive keyring. Bumped when
-    # the TenBox release key is rotated; clients with a stale value
+    # the AgentSphere release key is rotated; clients with a stale value
     # will refuse to register the repo until they re-run a fresh
     # install-linux.sh. Compare against the file checked in at
     # scripts/keys/tenbox-archive-keyring.gpg in the public repo.
@@ -149,7 +149,7 @@ register_apt_repo() {
     keyring_path="/etc/apt/keyrings/tenbox-archive-keyring.gpg"
     expected_sha256="22b124e3370f54335c8588a4a0a672f22916970714be0c41c540e995be7a7e2d"
 
-    step "Fetching TenBox archive keyring..."
+    step "Fetching AgentSphere archive keyring..."
     tmp_keyring="$(mktemp)"
     if ! curl -fsSL "$keyring_url" -o "$tmp_keyring"; then
         rm -f "$tmp_keyring"
@@ -194,7 +194,7 @@ print_apt_failure_log() {
 apt_install_tenbox() {
     export DEBIAN_FRONTEND=noninteractive
 
-    # tenboxd is a self-contained KVM-based VMM (it talks to /dev/kvm
+    # agentsphered is a self-contained KVM-based VMM (it talks to /dev/kvm
     # directly and ships its own virtio + qcow2 + lwIP NAT), so we do
     # NOT pull in qemu-system-* here. --no-install-recommends keeps
     # the install set minimal (only libc6 / libssl3{,t64} /
@@ -218,29 +218,29 @@ apt_install_tenbox() {
 }
 
 write_env_file() {
-    step "Writing /etc/tenbox/tenboxd.env..."
+    step "Writing /etc/tenbox/agentsphered.env..."
     install -d -m 0755 /etc/tenbox
-    cat > /etc/tenbox/tenboxd.env <<EOF
+    cat > /etc/tenbox/agentsphered.env <<EOF
 # Managed by scripts/install-linux.sh; safe to edit manually.
 # Re-run the installer (or re-create this file) to restore defaults.
-TENBOX_CLOUD_URL=$cloud_url
-TENBOX_DATA_DIR=$data_dir
+AGENTSPHERE_CLOUD_URL=$cloud_url
+AGENTSPHERE_DATA_DIR=$data_dir
 
 # libdatachannel RTC worker thread pool size (default: 4).
 # Set to 0 to use hardware_concurrency().
-TENBOX_WEBRTC_WORKER_THREADS=4
+AGENTSPHERE_WEBRTC_WORKER_THREADS=4
 
 # FFmpeg encoder thread count per WebRTC session (default: 1).
 # Single-threaded minimises per-frame latency for remote desktop.
 # Set to 0 to let FFmpeg choose automatically.
-TENBOX_ENCODER_THREADS=1
+AGENTSPHERE_ENCODER_THREADS=1
 EOF
-    chmod 0644 /etc/tenbox/tenboxd.env
+    chmod 0644 /etc/tenbox/agentsphered.env
     install -d -m 0755 "$data_dir"
 }
 
 grant_group_access() {
-    # The deb's postinst created the `tenbox` system group; tenboxd
+    # The deb's postinst created the `tenbox` system group; agentsphered
     # chgrp's its socket to it. Add the human who ran sudo (SUDO_USER)
     # so they can `tenbox vm ls` without sudo from their next shell.
     # Skipped when SUDO_USER is unset (e.g. when running as bare root
@@ -267,7 +267,7 @@ grant_group_access() {
 }
 
 enable_systemd() {
-    # The deb installs the unit at /lib/systemd/system/tenboxd.service
+    # The deb installs the unit at /lib/systemd/system/agentsphered.service
     # but deliberately does not enable it, because the env file above
     # is what makes the unit actually safe to launch with the right
     # cloud URL / data dir.
@@ -277,30 +277,30 @@ enable_systemd() {
     # daemon may already be active from a previous run; in that case
     # `--now` becomes a no-op and the freshly written env file is
     # ignored. Force a restart so the new env always wins.
-    step "Enabling and starting tenboxd.service..."
+    step "Enabling and starting agentsphered.service..."
     systemctl daemon-reload
-    systemctl enable tenboxd >/dev/null
-    systemctl restart tenboxd
+    systemctl enable agentsphered >/dev/null
+    systemctl restart agentsphered
 }
 
 await_pair_url() {
     echo
     if [ -s "$data_dir/device.token" ]; then
-        echo "this host is already paired; tenboxd is running."
+        echo "this host is already paired; agentsphered is running."
         echo "open https://my.tenbox.ai/ to manage it."
         return
     fi
 
-    echo "tenboxd is starting. Waiting for the pairing URL (up to 60s)..."
+    echo "agentsphered is starting. Waiting for the pairing URL (up to 60s)..."
     pair_url=""
     seen_token=0
     for _ in $(seq 1 60); do
-        if journalctl -u tenboxd --no-pager --since "-2 min" 2>/dev/null \
+        if journalctl -u agentsphered --no-pager --since "-2 min" 2>/dev/null \
             | grep -q "cloud pairing complete"; then
             seen_token=1
             break
         fi
-        line="$(journalctl -u tenboxd --no-pager --since "-2 min" 2>/dev/null \
+        line="$(journalctl -u agentsphered --no-pager --since "-2 min" 2>/dev/null \
             | grep -oE 'https?://[^ ]+/pair\?code=[0-9]{8}' | tail -n 1)"
         if [ -n "$line" ]; then
             pair_url="$line"
@@ -310,7 +310,7 @@ await_pair_url() {
     done
 
     if [ "$seen_token" -eq 1 ]; then
-        echo "this host is already paired; tenboxd is running."
+        echo "this host is already paired; agentsphered is running."
         echo "open https://my.tenbox.ai/ to manage it."
         return
     fi
@@ -323,11 +323,11 @@ await_pair_url() {
     else
         echo
         echo "could not find a pairing URL in journalctl. inspect:"
-        echo "   sudo journalctl -u tenboxd -n 50"
+        echo "   sudo journalctl -u agentsphered -n 50"
     fi
 }
 
-echo "TenBox installer starting (this can take 30-60s on a fresh host)..."
+echo "AgentSphere installer starting (this can take 30-60s on a fresh host)..."
 require_root
 check_platform
 check_kvm

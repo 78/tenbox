@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unified Docker-based build wrapper for TenBox rootfs/initramfs/kernel images.
+# Unified Docker-based build wrapper for AgentSphere rootfs/initramfs/kernel images.
 #
 # Usage:
 #   ./scripts/docker/build.sh <arch> <target> [extra-args...]
@@ -99,7 +99,7 @@ if [ ! -f "$PROJECT_ROOT/$SCRIPT_PATH" ]; then
     exit 1
 fi
 
-echo "=== TenBox Docker Build ==="
+echo "=== AgentSphere Docker Build ==="
 echo "  Arch:   $ARCH"
 echo "  Target: $TARGET"
 echo "  Script: $SCRIPT_PATH"
@@ -131,13 +131,13 @@ exec docker run --rm --privileged \
     "${DEV_ARGS[@]}" \
     -v "$PROJECT_ROOT:/workspace" \
     -e ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}" \
-    -e USER_NAME="${USER_NAME:-tenbox}" \
+    -e USER_NAME="${USER_NAME:-admin}" \
     -e USER_PASSWORD="${USER_PASSWORD:-tenbox}" \
     -e HERMES_VERSION="${HERMES_VERSION:-}" \
-    -e TENBOX_DEBIAN_SUITE="${TENBOX_DEBIAN_SUITE:-}" \
-    -e TENBOX_DEBIAN_MIRROR="${TENBOX_DEBIAN_MIRROR:-}" \
-    -e TENBOX_DEBIAN_SECURITY_MIRROR="${TENBOX_DEBIAN_SECURITY_MIRROR:-}" \
-    -e TENBOX_DEBOOTSTRAP_RETRIES="${TENBOX_DEBOOTSTRAP_RETRIES:-}" \
-    -e TENBOX_WORK_DIR="$WORK_DIR" \
+    -e AGENTSPHERE_DEBIAN_SUITE="${AGENTSPHERE_DEBIAN_SUITE:-}" \
+    -e AGENTSPHERE_DEBIAN_MIRROR="${AGENTSPHERE_DEBIAN_MIRROR:-}" \
+    -e AGENTSPHERE_DEBIAN_SECURITY_MIRROR="${AGENTSPHERE_DEBIAN_SECURITY_MIRROR:-}" \
+    -e AGENTSPHERE_DEBOOTSTRAP_RETRIES="${AGENTSPHERE_DEBOOTSTRAP_RETRIES:-}" \
+    -e AGENTSPHERE_WORK_DIR="$WORK_DIR" \
     "$IMAGE_NAME" \
     -c "/workspace/$SCRIPT_PATH $*"

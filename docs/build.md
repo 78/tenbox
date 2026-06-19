@@ -30,11 +30,11 @@
   - `libcurl4-openssl-dev`
   - `libyuv-dev`
   - `libdatachannel-dev` — or let CMake fetch it automatically with
-    `-DTENBOX_FETCH_LIBDATACHANNEL=ON` (default)
+    `-DAGENTSPHERE_FETCH_LIBDATACHANNEL=ON` (default)
 - Docker (recommended for building guest images)
 
 Note: there is no native Linux GUI manager. On Linux the build produces
-`tenboxd`, `tenbox`, and `agentsphere-vm-runtime`.
+`agentsphered`, `tenbox`, and `agentsphere-vm-runtime`.
 
 ## Build
 
@@ -77,7 +77,7 @@ Artifacts in `build/`:
 
 | Executable | Description |
 | --- | --- |
-| `tenboxd` | Host daemon — VM lifecycle, cloud tunnel, remote desktop |
+| `agentsphered` | Host daemon — VM lifecycle, cloud tunnel, remote desktop |
 | `tenbox` | CLI client |
 | `agentsphere-vm-runtime` | KVM-backed VM runtime — one process per running VM |
 
@@ -89,8 +89,8 @@ which bakes in static FFmpeg/libx264/libopus/libyuv/libcurl/OpenSSL under
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DTENBOX_STATIC_FFMPEG=ON \
-    -DTENBOX_STATIC_RUNTIME=ON
+    -DAGENTSPHERE_STATIC_FFMPEG=ON \
+    -DAGENTSPHERE_STATIC_RUNTIME=ON
 cmake --build build
 ```
 
@@ -139,11 +139,11 @@ build/tenbox-manager.exe
 open "build/Agent Sphere_$(cat VERSION).app"
 ```
 
-### Linux (via tenboxd daemon)
+### Linux (via agentsphered daemon)
 
 ```bash
 # Start the daemon (dev mode — no sudo, uses $XDG_RUNTIME_DIR socket)
-./build/tenboxd --data-dir /tmp/tenbox-dev
+./build/agentsphered --data-dir /tmp/tenbox-dev
 
 # In another terminal: check KVM support and create/start a VM
 tenbox doctor

@@ -495,7 +495,7 @@ bool LlmProxyService::ForwardToUpstream(uintptr_t client_sock,
         return false;
     }
 
-    HINTERNET session = WinHttpOpen(L"TenBox-LLM-Proxy/1.0",
+    HINTERNET session = WinHttpOpen(L"AgentSphere-LLM-Proxy/1.0",
                                      WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                      WINHTTP_NO_PROXY_NAME,
                                      WINHTTP_NO_PROXY_BYPASS, 0);
@@ -816,7 +816,7 @@ static std::string ExtractSseContent(const std::string& sse_raw) {
 std::string LlmProxyService::GetLogDir() const {
     wchar_t path[MAX_PATH]{};
     if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, path))) {
-        return (fs::path(path) / "TenBox" / "llm_logs").string();
+        return (fs::path(path) / "AgentSphere" / "llm_logs").string();
     }
     return {};
 }

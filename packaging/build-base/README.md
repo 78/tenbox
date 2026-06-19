@@ -5,7 +5,7 @@ This image bakes the static C dependencies tenbox links against
 pipeline can produce binaries that run on any Debian-derived system
 with `glibc >= 2.31` — Debian 11+, Ubuntu 20.04+, Raspberry Pi OS 11+,
 Armbian Bullseye+, and the corresponding arm64 variants. Combined with
-the `TENBOX_STATIC_RUNTIME=ON` link flags (`-static-libstdc++` /
+the `AGENTSPHERE_STATIC_RUNTIME=ON` link flags (`-static-libstdc++` /
 `-static-libgcc`) the resulting deb has only `libc6 (>= 2.31)` +
 `ca-certificates` as runtime deps.
 
@@ -18,7 +18,7 @@ docker build -f packaging/build-base/Dockerfile.bullseye \
     packaging/build-base
 docker run --rm -v "$PWD:/src" -w /src tenbox-build:bullseye-${ARCH} \
     bash -lc 'cmake -B build -DCMAKE_BUILD_TYPE=Release \
-              -DTENBOX_STATIC_FFMPEG=ON -DTENBOX_STATIC_RUNTIME=ON \
+              -DAGENTSPHERE_STATIC_FFMPEG=ON -DAGENTSPHERE_STATIC_RUNTIME=ON \
               && cmake --build build --parallel'
 ```
 
@@ -27,7 +27,7 @@ bullseye's stock GCC 10. tenbox is on `-std=c++20` but doesn't use the
 C++20 features GCC 10 lacks (`<ranges>`, header `<concepts>`,
 `<format>`, `<source_location>`, coroutines), so stock GCC 10 is
 sufficient. The prebuilt static libs land under `/opt/tenbox-deps`;
-tenbox CMake picks them up automatically when `-DTENBOX_STATIC_FFMPEG=ON`
+tenbox CMake picks them up automatically when `-DAGENTSPHERE_STATIC_FFMPEG=ON`
 is set (`PKG_CONFIG_PATH` is exported in the image env, and
 `OPENSSL_ROOT_DIR` is steered at the same prefix).
 

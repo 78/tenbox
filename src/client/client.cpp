@@ -221,15 +221,15 @@ void PrintDetached(RawTerminal& raw) {
 
 std::string DefaultSocketPath() {
     // 1. Explicit override always wins.
-    if (const char* explicit_path = std::getenv("TENBOX_SOCK")) {
+    if (const char* explicit_path = std::getenv("AGENTSPHERE_SOCK")) {
         if (*explicit_path) return explicit_path;
     }
 
-    // 2. System-wide tenboxd installed via the .deb listens at
+    // 2. System-wide agentsphered installed via the .deb listens at
     //    /run/tenbox/tenbox.sock and chmod's it 0660 + chgrp'd to
     //    `tenbox`. We prefer that path whenever the system daemon is
     //    plausibly present, so users in the tenbox group don't have
-    //    to set TENBOX_SOCK by hand.
+    //    to set AGENTSPHERE_SOCK by hand.
     //
     //    The decision is "does /run/tenbox/ exist?" — not "can I read
     //    the socket?" — for two reasons:
@@ -248,8 +248,8 @@ std::string DefaultSocketPath() {
         }
     }
 
-    // 3. Per-user dev daemon (just `./tenboxd` in a terminal) lands
-    //    here because tenboxd's own DefaultSocketPath() honors
+    // 3. Per-user dev daemon (just `./agentsphered` in a terminal) lands
+    //    here because agentsphered's own DefaultSocketPath() honors
     //    XDG_RUNTIME_DIR.
     if (const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR")) {
         if (*runtime_dir) return std::string(runtime_dir) + "/tenbox.sock";

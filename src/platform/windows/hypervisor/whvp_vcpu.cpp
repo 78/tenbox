@@ -369,7 +369,7 @@ std::unique_ptr<WhvpVCpu> WhvpVCpu::Create(WhvpVm& vm, uint32_t vp_index,
     }
 
     // Soft-APIC fallback: when the partition isn't running its own LAPIC
-    // emulation (pre-1809 hosts or TENBOX_SOFT_APIC=1 override), WHPX leaves
+    // emulation (pre-1809 hosts or AGENTSPHERE_SOFT_APIC=1 override), WHPX leaves
     // the guest-visible IA32_APIC_BASE MSR at 0. Linux then doesn't know
     // where to find its LAPIC and triple-faults during early SMP setup.
     // Prime the MSR to the standard xAPIC base with APIC-enabled + BSP flag,
@@ -862,7 +862,7 @@ VCpuExitAction WhvpVCpu::RunOnce() {
         // Halt exit with IF=0 is a strong signal the guest has triple-
         // faulted into a permanent halt (no external IRQ will resume it).
         //
-        // On the software-APIC path (pre-1809 / TENBOX_SOFT_APIC) IF=0 is
+        // On the software-APIC path (pre-1809 / AGENTSPHERE_SOFT_APIC) IF=0 is
         // perfectly legal: Linux's AP trampoline runs in real mode with
         // IF=0 for a long stretch, and we rely on the generic WaitForInter-
         // rupt condition variable + CancelRun to break out of HLT once an

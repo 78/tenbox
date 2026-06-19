@@ -13,21 +13,21 @@
 
 namespace {
 
-// Production cloud tunnel; overridable via --cloud-url or TENBOX_CLOUD_URL.
-// For local dev set TENBOX_CLOUD_URL=ws://127.0.0.1:18080/api/device-tunnel
-// before launching tenboxd, or pass --cloud-url with the same value.
+// Production cloud tunnel; overridable via --cloud-url or AGENTSPHERE_CLOUD_URL.
+// For local dev set AGENTSPHERE_CLOUD_URL=ws://127.0.0.1:18080/api/device-tunnel
+// before launching agentsphered, or pass --cloud-url with the same value.
 constexpr const char* kDefaultCloudUrl = "wss://my.tenbox.ai/api/device-tunnel";
 
 void PrintUsage(const char* prog) {
     std::cerr
-        << "TenBox daemon v" TENBOX_VERSION "\n\n"
+        << "AgentSphere daemon v" AGENTSPHERE_VERSION "\n\n"
         << "Usage: " << prog << " [options]\n\n"
         << "Options:\n"
         << "  --data-dir <path>      Override data directory for development/testing\n"
         << "  --socket <path>        Override Unix socket path for development/testing\n"
         << "  --runtime <path>       Override path to the agentsphere-vm-runtime binary\n"
         << "  --cloud-url <url>      Cloud tunnel WS/WSS URL (default: " << kDefaultCloudUrl << ")\n"
-        << "                         Also reads TENBOX_CLOUD_URL when --cloud-url is omitted.\n"
+        << "                         Also reads AGENTSPHERE_CLOUD_URL when --cloud-url is omitted.\n"
         << "                         Pass an empty value to disable cloud connectivity.\n"
         << "  --doctor              Run KVM support check and exit\n"
         << "  --version             Show version\n"
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     config.socket_path = tenbox::daemon::DefaultSocketPath();
     config.runtime_path = (std::filesystem::absolute(argv[0]).parent_path() /
                            "agentsphere-vm-runtime").string();
-    if (const char* env = std::getenv("TENBOX_CLOUD_URL")) {
+    if (const char* env = std::getenv("AGENTSPHERE_CLOUD_URL")) {
         config.cloud_url = env;
     } else {
         config.cloud_url = kDefaultCloudUrl;
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
         } else if (arg == "--doctor") {
             doctor_only = true;
         } else if (arg == "--version") {
-            std::cout << TENBOX_VERSION << "\n";
+            std::cout << AGENTSPHERE_VERSION << "\n";
             return 0;
         } else if (arg == "--help") {
             PrintUsage(argv[0]);
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "tenboxd listening on " << config.socket_path << "\n";
+    std::cout << "agentsphered listening on " << config.socket_path << "\n";
     if (!config.cloud_url.empty()) {
         std::cout << "cloud tunnel configured for " << config.cloud_url
                   << (cloud_url_explicit ? " (--cloud-url)" : " (default)") << "\n";

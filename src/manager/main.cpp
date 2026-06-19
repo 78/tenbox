@@ -34,7 +34,7 @@ static void InitLogFile() {
         return;
     
     std::filesystem::path log_dir = path;
-    log_dir /= L"TenBox";
+    log_dir /= L"AgentSphere";
     std::error_code ec;
     std::filesystem::create_directories(log_dir, ec);
     
@@ -49,7 +49,7 @@ static void InitLogFile() {
         localtime_s(&local_tm, &now);
         char time_buf[64];
         strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &local_tm);
-        fprintf(g_log_file, "\n=== TenBox Manager started at %s ===\n", time_buf);
+        fprintf(g_log_file, "\n=== AgentSphere Manager started at %s ===\n", time_buf);
 
         // Redirect stderr to log file (best-effort; may be no-op on GUI apps).
         _dup2(_fileno(g_log_file), _fileno(stderr));
@@ -81,14 +81,14 @@ static std::string ResolveDefaultRuntimeExePath() {
 
 static void PrintUsage(const char* prog, const char* default_runtime) {
     fprintf(stderr,
-        "TenBox manager v" TENBOX_VERSION "\n"
+        "AgentSphere manager v" AGENTSPHERE_VERSION "\n"
         "Usage: %s [--runtime-exe <path>]\n"
         "  --runtime-exe is optional. Default: %s\n",
         prog, default_runtime);
 }
 
-static constexpr const wchar_t* kMutexName = L"TenBoxManager_SingleInstance";
-static constexpr const wchar_t* kWndClass = L"TenBoxManagerWin32";
+static constexpr const wchar_t* kMutexName = L"AgentSphereManager_SingleInstance";
+static constexpr const wchar_t* kWndClass = L"AgentSphereManagerWin32";
 
 static bool ActivateExistingInstance() {
     HWND hwnd = FindWindowW(kWndClass, nullptr);

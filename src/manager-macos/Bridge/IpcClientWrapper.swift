@@ -1,5 +1,5 @@
 import Foundation
-import TenBoxBridge
+import AgentSphereBridge
 
 class IpcClientWrapper: ObservableObject {
     private let client = TBIpcClient()

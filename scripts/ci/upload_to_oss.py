@@ -5,7 +5,7 @@ Usage (called by CI):
 
 Environment variables (from GitHub Secrets):
     OSS_REGION, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET,
-    OSS_BUCKET_NAME, OSS_PUBLIC_URL, OSS_TENBOX_IMAGES_DIR
+    OSS_BUCKET_NAME, OSS_PUBLIC_URL, OSS_AGENTSPHERE_IMAGES_DIR
 """
 
 import os
@@ -66,7 +66,7 @@ def main():
         connect_timeout=CONNECT_TIMEOUT,
     )
 
-    images_dir = os.environ.get("OSS_TENBOX_IMAGES_DIR", "tenbox/images").strip("/")
+    images_dir = os.environ.get("OSS_AGENTSPHERE_IMAGES_DIR", "tenbox/images").strip("/")
     oss_dir = get_oss_dir(target, arch)
     filename = Path(qcow2_path).name
     oss_key = f"{images_dir}/{oss_dir}/{filename}"

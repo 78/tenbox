@@ -22,7 +22,7 @@ class VmSession: ObservableObject {
     var displayScale: Int = 1
     var onRuntimeRunning: (() -> Void)?
 
-    private let bridge = TenBoxBridgeWrapper()
+    private let bridge = AgentSphereBridgeWrapper()
     private weak var clipboardHandler: ClipboardHandler?
     private var connecting = false
     private static let maxConsoleSize = 64 * 1024

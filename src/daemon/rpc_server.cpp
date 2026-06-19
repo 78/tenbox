@@ -102,11 +102,11 @@ void RpcServer::ApplySocketPermissions() {
     // system-wide install (typically /run/tenbox/tenbox.sock), the
     // socket file is group-readable/writable by members of the
     // `tenbox` system group only — matching the libvirt / docker
-    // model. The group is communicated via TENBOX_SOCKET_GROUP, set
-    // by tenboxd.service. When the env var is unset (developer dev
+    // model. The group is communicated via AGENTSPHERE_SOCKET_GROUP, set
+    // by agentsphered.service. When the env var is unset (developer dev
     // run, XDG_RUNTIME_DIR socket) we leave permissions alone so the
     // user's umask wins.
-    const char* group_name = std::getenv("TENBOX_SOCKET_GROUP");
+    const char* group_name = std::getenv("AGENTSPHERE_SOCKET_GROUP");
     if (group_name == nullptr || *group_name == '\0') return;
 
     struct group* gr = ::getgrnam(group_name);
@@ -123,7 +123,7 @@ void RpcServer::ApplySocketPermissions() {
     if (::chown(config_.socket_path.c_str(), static_cast<uid_t>(-1), gr->gr_gid) != 0) {
         // Same rationale as above — log-and-continue rather than fail.
         // (The kernel only blocks chown if we're not root, which on
-        // tenboxd we always are today.)
+        // agentsphered we always are today.)
         return;
     }
     ::chmod(config_.socket_path.c_str(), 0660);

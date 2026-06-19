@@ -1,6 +1,6 @@
 #pragma once
 
-// LLM API reverse proxy that runs inside tenboxd. Listens on 127.0.0.1
+// LLM API reverse proxy that runs inside agentsphered. Listens on 127.0.0.1
 // (reachable from guests as 10.0.2.2 through QEMU's slirp NAT), receives
 // OpenAI-compatible HTTP requests, looks up the requested model alias in
 // the host-level LlmProxySettings, rewrites the request body to use the

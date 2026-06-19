@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a Debian arm64 rootfs with OpenClaw as qcow2 for TenBox macOS.
+# Build a Debian arm64 rootfs with OpenClaw as qcow2 for AgentSphere macOS.
 # This is the AArch64 equivalent of x86_64/make-rootfs-openclaw.sh.
 #
 # Requires: debootstrap, qemu-utils.
@@ -20,12 +20,12 @@
 set -e
 
 ROOTFS_SIZE="100G"
-SUITE="trixie"
+SUITE="bookworm"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ARCH="arm64"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-tenbox}"
+USER_NAME="${USER_NAME:-admin}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,dhcpcd-base,\
@@ -52,7 +52,7 @@ CACHE_TAR="$(realpath -m "$CACHE_DIR/debootstrap-${SUITE}-arm64.tar")"
 CACHE_NODESOURCE="$SCRIPTS_CACHE_DIR/nodesource_setup_22.x.sh"
 CACHE_OPENCLAW="$SCRIPTS_CACHE_DIR/openclaw_install.sh"
 
-WORK_DIR="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-openclaw-arm64}"
+WORK_DIR="${AGENTSPHERE_WORK_DIR:-/tmp/tenbox-rootfs-openclaw-arm64}"
 
 # Parse arguments
 FORCE_REBUILD=false
@@ -65,7 +65,7 @@ show_help() {
     cat << 'HELP'
 Usage: ./make-rootfs-openclaw.sh [OPTIONS] [output.qcow2]
 
-Build a Debian arm64 rootfs image with OpenClaw for TenBox macOS.
+Build a Debian arm64 rootfs image with OpenClaw for AgentSphere macOS.
 
 Options:
   --help          Show this help message
@@ -565,8 +565,8 @@ openclaw config set tools.profile full
 openclaw config set tools.exec.security full
 openclaw config set gateway '{"mode":"local","bind":"lan","auth":{"mode":"token","token":"tenbox"},"controlUi":{"allowInsecureAuth":true,"dangerouslyDisableDeviceAuth":true,"allowedOrigins":["*"]},"port":18789,"tailscale":{"mode":"off","resetOnExit":false}}'
 
-# TenBox LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
-openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","timeoutSeconds":300,"models":[{"id":"default","name":"Default (TenBox Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":32768,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}'
+# AgentSphere LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
+openclaw config set models.providers.tenbox '{"baseUrl":"http://10.0.2.3/v1","apiKey":"tenbox","api":"openai-completions","timeoutSeconds":300,"models":[{"id":"default","name":"Default (AgentSphere Proxy)","reasoning":false,"input":["text","image"],"contextWindow":200000,"maxTokens":32768,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}]}'
 openclaw config set models.mode merge
 openclaw config set agents.defaults '{"model":{"primary":"tenbox/default"},"compaction":{"mode":"safeguard"},"workspace":"'"$HOME"'/.openclaw/workspace","models":{"tenbox/default":{}}}'
 SCRIPT

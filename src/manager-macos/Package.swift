@@ -14,20 +14,20 @@ let package = Package(
         .executableTarget(
             name: "AgentSphereManager",
             dependencies: [
-                "TenBoxBridge",
+                "AgentSphereBridge",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: ".",
             exclude: [
                 "Bridge/include", "Bridge/Sources",
-                "Bridge/TenBox-Bridging-Header.h",
+                "Bridge/AgentSphere-Bridging-Header.h",
                 "Resources/Shaders.metal",
                 "Resources/AgentSphere.entitlements",
                 "Resources/Info.plist",
                 "Package.swift",
             ],
             sources: [
-                "TenBoxApp.swift",
+                "AgentSphereApp.swift",
                 "Views/ContentView.swift",
                 "Views/VmListView.swift",
                 "Views/VmDetailView.swift",
@@ -41,7 +41,7 @@ let package = Package(
                 "Input/KeyboardCaptureManager.swift",
                 "Clipboard/ClipboardHandler.swift",
                 "Bridge/Models.swift",
-                "Bridge/TenBoxBridgeWrapper.swift",
+                "Bridge/AgentSphereBridgeWrapper.swift",
                 "Bridge/IpcClientWrapper.swift",
                 "Bridge/VmConfigStore.swift",
                 "Bridge/SettingsStore.swift",
@@ -58,15 +58,15 @@ let package = Package(
             ]
         ),
         .target(
-            name: "TenBoxBridge",
+            name: "AgentSphereBridge",
             path: "Bridge",
             exclude: [
                 "IpcClientWrapper.swift", "Models.swift",
-                "TenBoxBridgeWrapper.swift", "VmConfigStore.swift",
-                "VmProcessManager.swift", "TenBox-Bridging-Header.h",
+                "AgentSphereBridgeWrapper.swift", "VmConfigStore.swift",
+                "VmProcessManager.swift", "AgentSphere-Bridging-Header.h",
             ],
             sources: [
-                "Sources/TenBoxBridge.mm", "Sources/TenBoxIPC.mm",
+                "Sources/AgentSphereBridge.mm", "Sources/AgentSphereIPC.mm",
                 "Sources/ipc/unix_socket.cpp", "Sources/ipc/protocol_v1.cpp",
                 "Sources/ipc/shared_framebuffer_posix.cpp",
             ],

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pack the prebuilt tenbox / tenboxd / agentsphere-vm-runtime binaries into a
+# Pack the prebuilt tenbox / agentsphered / agentsphere-vm-runtime binaries into a
 # .deb. Expects the binaries to already exist under <build_dir>/ (i.e.
 # `cmake --build` has run and stripped them); does NOT build anything
 # itself, because the release workflow runs the cmake step inside the
@@ -18,15 +18,15 @@ case "$ARCH" in
     *) echo "build-deb: unsupported arch '$ARCH' (expected amd64 or arm64)" >&2; exit 2 ;;
 esac
 
-if [ ! -x "$BUILD_DIR/tenbox" ] || [ ! -x "$BUILD_DIR/tenboxd" ] || [ ! -x "$BUILD_DIR/agentsphere-vm-runtime" ]; then
+if [ ! -x "$BUILD_DIR/tenbox" ] || [ ! -x "$BUILD_DIR/agentsphered" ] || [ ! -x "$BUILD_DIR/agentsphere-vm-runtime" ]; then
     echo "build-deb: required binaries missing under $BUILD_DIR" >&2
-    echo "expected: tenbox, tenboxd, agentsphere-vm-runtime" >&2
+    echo "expected: tenbox, agentsphered, agentsphere-vm-runtime" >&2
     exit 2
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PACKAGING_DIR="$REPO_ROOT/packaging/debian"
-SYSTEMD_UNIT="$REPO_ROOT/packaging/systemd/tenboxd.service"
+SYSTEMD_UNIT="$REPO_ROOT/packaging/systemd/agentsphered.service"
 
 if [ ! -f "$SYSTEMD_UNIT" ]; then
     echo "build-deb: missing systemd unit at $SYSTEMD_UNIT" >&2
@@ -44,13 +44,13 @@ mkdir -p "$DEB_ROOT/lib/systemd/system"
 
 # Drop binaries (already stripped by the workflow's strip step).
 install -m 0755 "$BUILD_DIR/tenbox"            "$DEB_ROOT/usr/local/bin/tenbox"
-install -m 0755 "$BUILD_DIR/tenboxd"           "$DEB_ROOT/usr/local/bin/tenboxd"
+install -m 0755 "$BUILD_DIR/agentsphered"           "$DEB_ROOT/usr/local/bin/agentsphered"
 install -m 0755 "$BUILD_DIR/agentsphere-vm-runtime" "$DEB_ROOT/usr/local/bin/agentsphere-vm-runtime"
 
 # systemd unit. Same content the install script previously dropped under
 # /etc/systemd/system; moving it into the deb means upgrades pick up unit
 # changes for free.
-install -m 0644 "$SYSTEMD_UNIT" "$DEB_ROOT/lib/systemd/system/tenboxd.service"
+install -m 0644 "$SYSTEMD_UNIT" "$DEB_ROOT/lib/systemd/system/agentsphered.service"
 
 # Render control file from template.
 sed \
@@ -67,10 +67,10 @@ install -m 0755 "$PACKAGING_DIR/postrm"   "$DEB_ROOT/DEBIAN/postrm"
 # where a developer accidentally adds a new shared dep without updating
 # control.in.
 #
-# After the bullseye base + TENBOX_STATIC_RUNTIME switch the only DT_NEEDED
+# After the bullseye base + AGENTSPHERE_STATIC_RUNTIME switch the only DT_NEEDED
 # entries that should remain are the libc/threads/loader trio. If you see
 # libssl, libcrypto, libstdc++, or libgcc_s reappear here it means
-# TENBOX_STATIC_FFMPEG / TENBOX_STATIC_RUNTIME did not take effect, the
+# AGENTSPHERE_STATIC_FFMPEG / AGENTSPHERE_STATIC_RUNTIME did not take effect, the
 # OPENSSL_ROOT_DIR hint missed, or libdatachannel pulled in the system
 # /usr/lib OpenSSL behind our backs — in which case the bullseye
 # compatibility promise (single deb works on libssl1.1 hosts) breaks.
@@ -78,7 +78,7 @@ if command -v ldd >/dev/null 2>&1; then
     # awk strips directory components so /lib64/ld-linux-x86-64.so.2
     # collapses to ld-linux-x86-64.so.2 and matches the whitelist.
     UNEXPECTED=$(
-        ldd "$BUILD_DIR/tenboxd" 2>/dev/null \
+        ldd "$BUILD_DIR/agentsphered" 2>/dev/null \
             | awk '{print $1}' \
             | awk -F/ '{print $NF}' \
             | grep -E '\.so' \
@@ -86,7 +86,7 @@ if command -v ldd >/dev/null 2>&1; then
             || true
     )
     if [ -n "$UNEXPECTED" ]; then
-        echo "build-deb: WARNING tenboxd has unexpected dynamic deps:" >&2
+        echo "build-deb: WARNING agentsphered has unexpected dynamic deps:" >&2
         echo "$UNEXPECTED" >&2
         echo "build-deb: update packaging/debian/control.in if these are intentional," >&2
         echo "           or fix the static-link config so they go away." >&2

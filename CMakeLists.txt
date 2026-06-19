@@ -4,9 +4,9 @@ cmake_policy(SET CMP0169 OLD)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
-file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" TENBOX_VERSION_STRING LIMIT_COUNT 1)
-string(STRIP "${TENBOX_VERSION_STRING}" TENBOX_VERSION_STRING)
-project(TenBox VERSION ${TENBOX_VERSION_STRING} LANGUAGES C CXX)
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" AGENTSPHERE_VERSION_STRING LIMIT_COUNT 1)
+string(STRIP "${AGENTSPHERE_VERSION_STRING}" AGENTSPHERE_VERSION_STRING)
+project(AgentSphere VERSION ${AGENTSPHERE_VERSION_STRING} LANGUAGES C CXX)
 
 # When cross-compiling (e.g. building x86_64 on an arm64 host), CMake auto-detects
 # the host processor, not the target. Override it from CMAKE_OSX_ARCHITECTURES so
@@ -22,15 +22,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
 # Release builds on Linux statically link the C++ runtime so the
-# resulting tenbox / tenboxd / agentsphere-vm-runtime binaries don't
+# resulting tenbox / agentsphered / agentsphere-vm-runtime binaries don't
 # DT_NEEDED libstdc++.so.6 / libgcc_s.so.1. Combined with the static
 # OpenSSL/ffmpeg/etc. that packaging/build-base/Dockerfile.bullseye
 # bakes in, this lets a single deb run on every Debian-derived
 # distribution from bullseye (glibc 2.31) up through trixie/noble,
 # without juggling libssl3 / libssl3t64 / libstdc++ ABI versions.
 # Off by default so developer builds keep using the system shared libs.
-option(TENBOX_STATIC_RUNTIME "Static-link libstdc++ and libgcc into all executables" OFF)
-if(TENBOX_STATIC_RUNTIME AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT MSVC)
+option(AGENTSPHERE_STATIC_RUNTIME "Static-link libstdc++ and libgcc into all executables" OFF)
+if(AGENTSPHERE_STATIC_RUNTIME AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT MSVC)
     add_link_options(-static-libstdc++ -static-libgcc)
 endif()
 

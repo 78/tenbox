@@ -1,5 +1,5 @@
 import Foundation
-import TenBoxBridge
+import AgentSphereBridge
 
 class VmProcessManager {
 
@@ -105,7 +105,7 @@ class VmProcessManager {
                 capturedConfigStore.updateState(vmId: capturedVmId, state: "rebooting")
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(
-                        name: Notification.Name("TenBoxVmStateChanged"),
+                        name: Notification.Name("AgentSphereVmStateChanged"),
                         object: capturedVmId)
                 }
                 DispatchQueue.main.async {
@@ -118,7 +118,7 @@ class VmProcessManager {
             capturedConfigStore.updateState(vmId: capturedVmId, state: newState)
             DispatchQueue.main.async {
                 NotificationCenter.default.post(
-                    name: Notification.Name("TenBoxVmStateChanged"),
+                    name: Notification.Name("AgentSphereVmStateChanged"),
                     object: capturedVmId)
             }
         }

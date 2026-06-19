@@ -27,7 +27,7 @@ public:
     void OnThreadInit() override;
     // On the hard-APIC path WHPX's built-in xAPIC emulation puts APs into
     // wait-for-SIPI at partition start and handles INIT/SIPI IPIs itself.
-    // On the soft-APIC path (pre-1809 WHPX or TENBOX_SOFT_APIC=1) the
+    // On the soft-APIC path (pre-1809 WHPX or AGENTSPHERE_SOFT_APIC=1) the
     // partition has no LAPIC, so APs would otherwise start executing the
     // reset vector immediately. Gate AP worker threads on the generic
     // init+SIPI CV and set CS:IP = (vector<<12):0 in OnStartup.

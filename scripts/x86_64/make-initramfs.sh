@@ -1,17 +1,17 @@
 #!/bin/bash
-# Build a minimal BusyBox initramfs for TenBox testing.
+# Build a minimal BusyBox initramfs for AgentSphere testing.
 # Includes virtio kernel modules for block device support.
 # Only requires: curl, gzip, dpkg-deb, cpio. Run in WSL2 or Linux.
 #
 # Usage:
 #   ./make-initramfs.sh [output_dir] [suite]
 #     output_dir - where to place initramfs-x86_64.cpio.gz (default: ../build/share)
-#     suite      - Debian suite: trixie(6.12.x), bookworm(6.1.x), etc. Default: trixie
+#     suite      - Debian suite: bookworm(6.1.x), trixie(6.12.x), etc. Default: bookworm
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../../build/share}" && cd "${1:-$SCRIPT_DIR/../../build/share}" && pwd)"
-SUITE="${2:-trixie}"
+SUITE="${2:-bookworm}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 
@@ -214,7 +214,7 @@ done
 
 echo ""
 echo "====================================="
-echo " TenBox VM booted successfully!"
+echo " AgentSphere VM booted successfully!"
 echo "====================================="
 echo "Kernel: $(uname -r)"
 echo "Memory: $(cat /proc/meminfo | head -1)"

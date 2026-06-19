@@ -182,7 +182,7 @@ bool FromJson(const nlohmann::json& value, VmSpec& spec, std::string* error) {
 }
 
 std::string DefaultDataDir() {
-    if (const char* explicit_dir = std::getenv("TENBOX_DATA_DIR")) {
+    if (const char* explicit_dir = std::getenv("AGENTSPHERE_DATA_DIR")) {
         if (*explicit_dir) return explicit_dir;
     }
     if (::geteuid() == 0) return "/var/lib/tenbox";
@@ -196,7 +196,7 @@ std::string DefaultDataDir() {
 }
 
 std::string DefaultSocketPath() {
-    if (const char* explicit_path = std::getenv("TENBOX_SOCK")) {
+    if (const char* explicit_path = std::getenv("AGENTSPHERE_SOCK")) {
         if (*explicit_path) return explicit_path;
     }
     if (const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR")) {

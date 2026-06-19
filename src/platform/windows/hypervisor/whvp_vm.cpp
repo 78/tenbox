@@ -42,11 +42,11 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
         return nullptr;
     }
 
-    // Debug override: TENBOX_SOFT_APIC=1 pretends we are running on a
+    // Debug override: AGENTSPHERE_SOFT_APIC=1 pretends we are running on a
     // pre-1809 build (no partition LAPIC + no WHvRequestInterrupt) so the
     // software fallback can be regression-tested on modern hosts.
     char env_buf[8]{};
-    DWORD env_len = GetEnvironmentVariableA("TENBOX_SOFT_APIC", env_buf,
+    DWORD env_len = GetEnvironmentVariableA("AGENTSPHERE_SOFT_APIC", env_buf,
                                             sizeof(env_buf));
     const bool force_soft = (env_len > 0 && env_len < sizeof(env_buf) &&
                              (env_buf[0] == '1' || env_buf[0] == 'y' ||
@@ -70,7 +70,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
             LOG_WARN("Set APIC emulation failed: 0x%08lX (pre-1809 WHPX?)", hr);
         }
     } else {
-        LOG_WARN("TENBOX_SOFT_APIC=1: skipping in-partition LAPIC emulation");
+        LOG_WARN("AGENTSPHERE_SOFT_APIC=1: skipping in-partition LAPIC emulation");
     }
 
     const bool has_request_irq = !force_soft && dyn::HasRequestInterrupt();
@@ -176,7 +176,7 @@ std::unique_ptr<WhvpVm> WhvpVm::Create(uint32_t cpu_count) {
     //      modern hosts; but WHPX 1803 does NOT implement them, and leaving
     //      them advertised makes Linux 6.12 issue MSRs / instructions that
     //      #UD or #GP, killing the kernel. Only mask these when we're on
-    //      the software-APIC fallback path (pre-1809 WHPX or TENBOX_SOFT_APIC
+    //      the software-APIC fallback path (pre-1809 WHPX or AGENTSPHERE_SOFT_APIC
     //      override). They include:
     //        - XSAVE/OSXSAVE/AVX/F16C/FMA/AESNI/PCLMULQDQ — 1803 leaves
     //          CR4.OSXSAVE=0 and returns zeros in CPUID 0xD, so user-space

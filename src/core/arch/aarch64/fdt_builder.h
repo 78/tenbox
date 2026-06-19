@@ -7,7 +7,7 @@
 
 // Minimal Flattened Device Tree (FDT) builder that generates a DTB blob
 // without depending on external libfdt.  Sufficient for the simple virt
-// machine description needed by TenBox.
+// machine description needed by AgentSphere.
 class FdtBuilder {
 public:
     FdtBuilder();

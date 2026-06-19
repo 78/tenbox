@@ -6,7 +6,7 @@ final class LlmProxyService {
     private let mappingsLock = NSLock()
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
-    private let queue = DispatchQueue(label: "com.tenbox.llm-proxy", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.agentsphere.llm-proxy", qos: .userInitiated)
     private(set) var listeningPort: UInt16 = 0
 
     // MARK: - Logging state
@@ -420,7 +420,7 @@ final class LlmProxyService {
         mappingsLock.unlock()
 
         let modelsList = currentMappings.map { m -> [String: Any] in
-            ["id": m.alias, "object": "model", "owned_by": "tenbox-proxy"]
+            ["id": m.alias, "object": "model", "owned_by": "agentsphere-proxy"]
         }
         let response: [String: Any] = ["object": "list", "data": modelsList]
         guard let data = try? JSONSerialization.data(withJSONObject: response) else { return }

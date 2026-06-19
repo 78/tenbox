@@ -1,7 +1,7 @@
 # Linux update path
 
-`tenboxd` ships as a single Debian package (`tenbox_<ver>_{amd64,arm64}.deb`)
-served from the TenBox apt repository at `https://my.tenbox.ai/repo`. Updates
+`agentsphered` ships as a single Debian package (`tenbox_<ver>_{amd64,arm64}.deb`)
+served from the AgentSphere apt repository at `https://my.tenbox.ai/repo`. Updates
 can be triggered by the cloud control plane or applied manually by a sysadmin.
 
 ## Compatibility matrix
@@ -39,7 +39,7 @@ message. When the daemon receives this message:
    expected binary path).
 3. **Runs** `apt-get update && apt-get install -y --only-upgrade tenbox` on a
    worker thread, streaming the transcript to `/var/lib/tenbox/logs/update.log`.
-4. **Replies** before `dpkg postinst` calls `deb-systemd-invoke restart tenboxd`,
+4. **Replies** before `dpkg postinst` calls `deb-systemd-invoke restart agentsphered`,
    so the cloud receives a structured result rather than a bare connection close.
 
 Daemon error codes returned in the `host.update` reply:
@@ -79,13 +79,13 @@ is intentionally no `force` flag.
 
 ## Socket permissions and the `tenbox` group
 
-`tenboxd` listens on `/run/tenbox/tenbox.sock`. The deb's `postinst` creates a
+`agentsphered` listens on `/run/tenbox/tenbox.sock`. The deb's `postinst` creates a
 system group `tenbox` and a system user `tenbox` (the user is reserved for a
 future drop-priv step; today the daemon still runs as root for `/dev/kvm` and
 `apt-get`). At startup the daemon:
 
 1. Lets systemd create `/run/tenbox/` mode `0755` (owned `root:root`).
-2. After `Listen()` succeeds, reads `TENBOX_SOCKET_GROUP` from the environment
+2. After `Listen()` succeeds, reads `AGENTSPHERE_SOCKET_GROUP` from the environment
    (set to `tenbox` by the unit file), and `chown :tenbox` + `chmod 0660` on
    the socket file itself.
 
@@ -97,40 +97,40 @@ to the group automatically; new shells (or `newgrp tenbox`) pick up the
 membership.
 
 CLI default-socket lookup is in `client.cpp:DefaultSocketPath()` and goes:
-`$TENBOX_SOCK` → `/run/tenbox/tenbox.sock` (if `/run/tenbox` exists) →
+`$AGENTSPHERE_SOCK` → `/run/tenbox/tenbox.sock` (if `/run/tenbox` exists) →
 `$XDG_RUNTIME_DIR/tenbox.sock` (per-user dev daemon) → `/tmp/tenbox-<uid>.sock`
 (last-resort fallback).
 
 ## postinst / prerm behaviour
 
-The package's `postinst` reloads systemd and bounces `tenboxd` only if the unit
+The package's `postinst` reloads systemd and bounces `agentsphered` only if the unit
 was already enabled — fresh installs are still gated on `scripts/install-linux.sh`
-writing `/etc/tenbox/tenboxd.env` and calling `systemctl enable + restart tenboxd`
+writing `/etc/tenbox/agentsphered.env` and calling `systemctl enable + restart agentsphered`
 (note: not `enable --now`, because on a re-install `--now` would no-op when the
 daemon is already active and the freshly written env file would never be loaded).
-Symmetrically, `prerm` runs `systemctl disable tenboxd` so a subsequent
+Symmetrically, `prerm` runs `systemctl disable agentsphered` so a subsequent
 `apt install tenbox` doesn't see a stale enabled state and start the daemon
 before the env file lands.
 
 ## Static link & GPL note
 
-`tenboxd` is built inside `packaging/build-base/Dockerfile.bullseye` against
+`agentsphered` is built inside `packaging/build-base/Dockerfile.bullseye` against
 glibc 2.31, with FFmpeg, libx264, libopus, libyuv, libcurl, and OpenSSL all
 linked statically. The build also passes `-static-libstdc++ -static-libgcc`
-(via `TENBOX_STATIC_RUNTIME=ON`) so the C++ runtime is baked into each
+(via `AGENTSPHERE_STATIC_RUNTIME=ON`) so the C++ runtime is baked into each
 executable. As a result:
 
 - `apt show tenbox | grep -E '^(Depends|Suggests)'` lists:
   - **Depends:** `libc6 (>= 2.31), ca-certificates`
   - **Suggests:** `qemu-utils` (only needed when building custom rootfs
     templates with `scripts/*/make-rootfs-*.sh`)
-- `tenboxd` is self-contained: it opens `/dev/kvm` directly and ships its own
+- `agentsphered` is self-contained: it opens `/dev/kvm` directly and ships its own
   virtio devices, qcow2 backend, and lwIP-based user-mode NAT. There is **no**
   runtime dependency on `qemu-system-*` or any of the Ceph/Gluster/NFS tail.
 - Both `scripts/install-linux.sh` and `host_updater.cpp` pass
   `--no-install-recommends` so a future Recommends entry can never silently
   bloat the install set.
-- `tenboxd` does not pick up host-side `ffmpeg`/`libavcodec` upgrades —
+- `agentsphered` does not pick up host-side `ffmpeg`/`libavcodec` upgrades —
   behaviour is pinned to whatever was baked into the deb on release day.
 - libx264 is GPL-licensed; tenbox is GPLv3 (see top-level `LICENSE`), so
   static linkage is fine.
@@ -143,4 +143,4 @@ executable. As a result:
 | `update_disabled` | Daemon binary path or `/etc/apt/sources.list.d/tenbox.list` missing |
 | `apt_failed` | `cat /var/lib/tenbox/logs/update.log` on the host |
 | `version_unchanged` after apt success | apt repo may not be synced yet; wait ~10 min or ask your cloud operator to sync manually |
-| Daemon never reconnects after restart | `journalctl -u tenboxd -n 200` on the host |
+| Daemon never reconnects after restart | `journalctl -u agentsphered -n 200` on the host |

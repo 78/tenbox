@@ -58,7 +58,7 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
           OSS_BUCKET_NAME: ${{ secrets.OSS_BUCKET_NAME }}
           OSS_PUBLIC_URL: https://files.xiaozhi.me
-          OSS_TENBOX_IMAGES_DIR: tenbox/images
+          OSS_AGENTSPHERE_IMAGES_DIR: tenbox/images
         run: |
           pip install oss2 alibabacloud_cdn20180510
           python3 scripts/ci/upload_to_oss.py \
@@ -121,7 +121,7 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
           OSS_BUCKET_NAME: ${{ secrets.OSS_BUCKET_NAME }}
           OSS_PUBLIC_URL: https://files.xiaozhi.me
-          OSS_TENBOX_IMAGES_DIR: tenbox/images
+          OSS_AGENTSPHERE_IMAGES_DIR: tenbox/images
         run: |
           pip install oss2 alibabacloud_cdn20180510
           python3 scripts/ci/upload_to_oss.py \
@@ -179,7 +179,7 @@ jobs:
       - name: Update images.json
         env:
           OSS_PUBLIC_URL: https://files.xiaozhi.me
-          OSS_TENBOX_IMAGES_DIR: tenbox/images
+          OSS_AGENTSPHERE_IMAGES_DIR: tenbox/images
         run: |
           python3 scripts/ci/update_images_json.py \
             --target initramfs \

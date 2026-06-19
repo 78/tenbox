@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cstring>
 
-static const wchar_t* kDisplayPanelClass = L"TenBoxDisplayPanel";
+static const wchar_t* kDisplayPanelClass = L"AgentSphereDisplayPanel";
 static bool g_class_registered = false;
 
 static constexpr int kHintBarHeight = 20;

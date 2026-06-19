@@ -147,7 +147,7 @@ bool VmStore::LoadVmDir(const fs::path& vm_dir, std::string* error) {
         if (!runtime.last_failure) {
             runtime.last_failure = FailureInfo{
                 .code = "daemon_restart",
-                .message = "tenboxd restarted while this VM was active; runtime state is unknown",
+                .message = "agentsphered restarted while this VM was active; runtime state is unknown",
             };
         }
     }

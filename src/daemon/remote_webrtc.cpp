@@ -29,12 +29,12 @@ namespace tenbox::daemon {
 namespace {
 
 bool PreferConstrainedBaselineH264() {
-    const char* value = std::getenv("TENBOX_WEBRTC_H264_PROFILE");
+    const char* value = std::getenv("AGENTSPHERE_WEBRTC_H264_PROFILE");
     return value && std::string_view(value) == "baseline";
 }
 
 // Verbose webrtc logging is off by default to keep the daemon log readable
-// in production. Set TENBOX_WEBRTC_VERBOSE=1 (or build with _DEBUG) to get
+// in production. Set AGENTSPHERE_WEBRTC_VERBOSE=1 (or build with _DEBUG) to get
 // every SDP payload negotiation, data channel attach/close, peer state
 // transition (other than the terminal ones we always log), keyframe PLI
 // from the receiver, etc. Errors / warnings / first-time encoder open
@@ -44,7 +44,7 @@ bool VerboseWebRtcLogging() {
     return true;
 #else
     static const bool enabled = []() {
-        const char* value = std::getenv("TENBOX_WEBRTC_VERBOSE");
+        const char* value = std::getenv("AGENTSPHERE_WEBRTC_VERBOSE");
         return value && value[0] != '\0' && std::string_view(value) != "0";
     }();
     return enabled;
@@ -75,7 +75,7 @@ const char* PeerStateName(int state) {
     }
 }
 
-// Parses the legacy TENBOX_STUN_SERVERS env format: comma-separated
+// Parses the legacy AGENTSPHERE_STUN_SERVERS env format: comma-separated
 // (whitespace tolerated) URLs like
 // "stun:stun.qq.com:3478,stun:stun.miwifi.com:3478". Empty entries
 // are skipped. Used both for the dedicated STUN-only env var and as a
@@ -97,8 +97,8 @@ std::vector<std::string> SplitCommaSeparated(std::string_view view) {
     return out;
 }
 
-// Built-in defaults used when neither TENBOX_ICE_SERVERS nor
-// TENBOX_STUN_SERVERS is set. Defaults are skewed for mainland China
+// Built-in defaults used when neither AGENTSPHERE_ICE_SERVERS nor
+// AGENTSPHERE_STUN_SERVERS is set. Defaults are skewed for mainland China
 // deployments because that's where most of the production fleet lives
 // today and Google STUN (stun.l.google.com:19302) is regularly
 // UDP-blackholed by CN ISPs, which previously made WebRTC setup time
@@ -120,7 +120,7 @@ IceServerSpec DefaultStunServers() {
     return spec;
 }
 
-// Parses TENBOX_ICE_SERVERS, a JSON array of W3C-shaped RTCIceServer
+// Parses AGENTSPHERE_ICE_SERVERS, a JSON array of W3C-shaped RTCIceServer
 // dictionaries:
 //
 //   [
@@ -147,14 +147,14 @@ std::optional<std::vector<IceServerSpec>> ParseIceServersJson(std::string_view r
         parsed = nlohmann::json::parse(raw);
     } catch (const std::exception& e) {
         std::fprintf(stdout,
-                     "[WARN]  remote_webrtc: TENBOX_ICE_SERVERS is not valid JSON: %s\n",
+                     "[WARN]  remote_webrtc: AGENTSPHERE_ICE_SERVERS is not valid JSON: %s\n",
                      e.what());
         std::fflush(stdout);
         return std::nullopt;
     }
     if (!parsed.is_array()) {
         std::fprintf(stdout,
-                     "[WARN]  remote_webrtc: TENBOX_ICE_SERVERS must be a JSON array\n");
+                     "[WARN]  remote_webrtc: AGENTSPHERE_ICE_SERVERS must be a JSON array\n");
         std::fflush(stdout);
         return std::nullopt;
     }
@@ -183,7 +183,7 @@ std::optional<std::vector<IceServerSpec>> ParseIceServersJson(std::string_view r
 }
 
 std::vector<IceServerSpec> ConfiguredIceServers() {
-    if (const char* raw = std::getenv("TENBOX_ICE_SERVERS"); raw && raw[0] != '\0') {
+    if (const char* raw = std::getenv("AGENTSPHERE_ICE_SERVERS"); raw && raw[0] != '\0') {
         if (auto parsed = ParseIceServersJson(raw); parsed && !parsed->empty()) {
             return std::move(*parsed);
         }
@@ -191,7 +191,7 @@ std::vector<IceServerSpec> ConfiguredIceServers() {
         // returning an empty list - an operator who sets a broken
         // JSON value should still get a working daemon.
     }
-    if (const char* raw = std::getenv("TENBOX_STUN_SERVERS"); raw && raw[0] != '\0') {
+    if (const char* raw = std::getenv("AGENTSPHERE_STUN_SERVERS"); raw && raw[0] != '\0') {
         IceServerSpec spec;
         spec.urls = SplitCommaSeparated(raw);
         if (!spec.urls.empty()) return {std::move(spec)};
@@ -280,7 +280,7 @@ std::string StripLipSyncGroups(std::string sdp) {
 
 // Wire libdatachannel's internal logger into our stdout the first time
 // any peer is created. We only enable the chatty levels (Debug, Verbose)
-// when TENBOX_WEBRTC_VERBOSE is on; otherwise libdatachannel still
+// when AGENTSPHERE_WEBRTC_VERBOSE is on; otherwise libdatachannel still
 // surfaces warnings/errors so juice STUN failures, ICE state machine
 // transitions, etc. show up in the daemon journal during connectivity
 // debugging without requiring a code change. Initialization is one-shot
@@ -305,9 +305,9 @@ void EnsureLibDatachannelLoggerInstalled() {
         });
         // Default is hardware_concurrency() which is excessive for a daemon
         // handling a handful of concurrent remote desktop sessions.
-        // Override with TENBOX_WEBRTC_WORKER_THREADS=0 to restore the default.
+        // Override with AGENTSPHERE_WEBRTC_WORKER_THREADS=0 to restore the default.
         unsigned int pool_size = 4;
-        if (const char* v = std::getenv("TENBOX_WEBRTC_WORKER_THREADS"); v && v[0] != '\0') {
+        if (const char* v = std::getenv("AGENTSPHERE_WEBRTC_WORKER_THREADS"); v && v[0] != '\0') {
             const auto result = std::from_chars(v, v + std::strlen(v), pool_size);
             if (result.ec != std::errc{}) pool_size = 4;
         }

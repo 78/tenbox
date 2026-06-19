@@ -1,4 +1,4 @@
-# Build environment for TenBox rootfs/initramfs/kernel images.
+# Build environment for AgentSphere rootfs/initramfs/kernel images.
 # Native builds only — no cross-compilation. Use matching-arch runners.
 #
 # Two build targets:
@@ -15,7 +15,7 @@
 #   docker build --target full -t tenbox-builder scripts/docker/
 
 # --- Stage 1: build qemu-img with zstd (only pulled in by "full" target) ---
-FROM debian:trixie-slim AS qemu-build
+FROM debian:bookworm-slim AS qemu-build
 
 ARG QEMU_VERSION=9.2.2
 
@@ -39,7 +39,7 @@ RUN curl -fSL "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" \
     && strip build/qemu-img
 
 # --- Stage 2: base runtime (kernel / initramfs) ---
-FROM debian:trixie-slim AS base
+FROM debian:bookworm-slim AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     debootstrap \
@@ -67,6 +67,6 @@ FROM base AS full
 COPY --from=qemu-build /tmp/qemu-src/build/qemu-img /usr/local/bin/qemu-img
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0t64 libzstd1 libpixman-1-0 \
+    libglib2.0-0 libzstd1 libpixman-1-0 \
     && rm -rf /var/lib/apt/lists/* \
     && qemu-img --version

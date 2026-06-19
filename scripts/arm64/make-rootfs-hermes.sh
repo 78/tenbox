@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a Debian arm64 rootfs with Hermes Agent as qcow2 for TenBox macOS.
+# Build a Debian arm64 rootfs with Hermes Agent as qcow2 for AgentSphere macOS.
 #
 # Requires: debootstrap, qemu-utils.
 # Run as root on an arm64 host (or in a container).
@@ -19,12 +19,12 @@
 set -e
 
 ROOTFS_SIZE="100G"
-SUITE="${TENBOX_DEBIAN_SUITE:-trixie}"
-MIRROR="${TENBOX_DEBIAN_MIRROR:-http://deb.debian.org/debian}"
-MIRROR_SECURITY="${TENBOX_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-security}"
+SUITE="${AGENTSPHERE_DEBIAN_SUITE:-bookworm}"
+MIRROR="${AGENTSPHERE_DEBIAN_MIRROR:-http://deb.debian.org/debian}"
+MIRROR_SECURITY="${AGENTSPHERE_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-security}"
 ARCH="arm64"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-tenbox}"
+USER_NAME="${USER_NAME:-admin}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 HERMES_VERSION="${HERMES_VERSION-}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
@@ -149,14 +149,14 @@ CACHE_UV="$SCRIPTS_CACHE_DIR/uv_install.sh"
 CACHE_NODESOURCE="$SCRIPTS_CACHE_DIR/nodesource_setup_22.x.sh"
 CACHE_HERMES_WHEELS="$CACHE_DIR/hermes-wheels-arm64"
 
-WORK_ROOT="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-hermes-arm64}"
+WORK_ROOT="${AGENTSPHERE_WORK_DIR:-/tmp/tenbox-rootfs-hermes-arm64}"
 WORK_DIR="${WORK_ROOT}-${STATE_SUFFIX}"
 
 show_help() {
     cat << 'HELP'
 Usage: ./make-rootfs-hermes.sh [OPTIONS] [output.qcow2]
 
-Build a Debian arm64 rootfs image with Hermes Agent for TenBox macOS.
+Build a Debian arm64 rootfs image with Hermes Agent for AgentSphere macOS.
 
 Options:
   --help          Show this help message
@@ -325,7 +325,7 @@ mkdir -p "$MOUNT_DIR"
 
 total_steps=${#STEPS[@]}
 current_step=0
-DEBOOTSTRAP_RETRIES="${TENBOX_DEBOOTSTRAP_RETRIES:-3}"
+DEBOOTSTRAP_RETRIES="${AGENTSPHERE_DEBOOTSTRAP_RETRIES:-3}"
 
 run_step() {
     local step_name="$1"
@@ -769,7 +769,7 @@ UV_LINK_MODE=copy uv pip install qrcode[pil]
 # Skipped on purpose:
 #  - tinker-atropos (Manual Install Step 4): only used by the RL training
 #    toolset, which requires TINKER_API_KEY + WANDB_API_KEY at runtime.
-#    We don't do model fine-tuning in TenBox.
+#    We don't do model fine-tuning in AgentSphere.
 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g agent-browser
 
 ln -sf "\$INSTALL_DIR/venv/bin/hermes" /usr/local/bin/hermes
@@ -815,7 +815,7 @@ if [ ! -f "\$HERMES_DIR/.env" ]; then
 # Anthropic
 # ANTHROPIC_API_KEY=sk-ant-...
 
-# TenBox LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
+# AgentSphere LLM proxy provider (guestfwd: 10.0.2.3:80 -> host proxy)
 OPENAI_BASE_URL=http://10.0.2.3/v1
 OPENAI_API_KEY=tenbox
 HERMES_API_TIMEOUT=300

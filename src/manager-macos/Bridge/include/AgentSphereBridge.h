@@ -1,7 +1,7 @@
 #pragma once
 
 #import <Foundation/Foundation.h>
-#import "TenBoxIPC.h"
+#import "AgentSphereIPC.h"
 
 NS_ASSUME_NONNULL_BEGIN
 

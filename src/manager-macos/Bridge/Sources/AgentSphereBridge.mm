@@ -1,4 +1,4 @@
-#import "TenBoxBridge.h"
+#import "AgentSphereBridge.h"
 #include "ipc/unix_socket.h"
 #include "ipc/protocol_v1.h"
 #include <string>

@@ -30,7 +30,7 @@ Environment:
   DTB=/path/to/file.dtb      Override target DTB path.
 
 After a successful patch, reboot the host and rerun this script with --check or
-run TenBox's KVM probe/doctor.
+run AgentSphere's KVM probe/doctor.
 EOF
 }
 

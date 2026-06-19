@@ -1,12 +1,12 @@
 # Radxa A733 KVM VGIC
 
-This note records a Radxa Cubie A7S / Allwinner A733 host issue where TenBox
+This note records a Radxa Cubie A7S / Allwinner A733 host issue where AgentSphere
 cannot create an arm64 KVM VM because the host kernel does not expose a usable
 in-kernel VGIC device.
 
 ## Symptom
 
-TenBox runtime fails before the guest starts:
+AgentSphere runtime fails before the guest starts:
 
 ```text
 [INFO]  kvm: KVM_CREATE_DEVICE(VGIC_V3) unavailable: No such device
@@ -23,13 +23,13 @@ kvm [1]: IPA Size Limit: 40 bits
 kvm [1]: VHE mode initialized successfully
 ```
 
-That is not enough for TenBox. On arm64, TenBox requires the kernel's in-kernel
+That is not enough for AgentSphere. On arm64, AgentSphere requires the kernel's in-kernel
 VGIC device, created with `KVM_CREATE_DEVICE(KVM_DEV_TYPE_ARM_VGIC_V3)`.
 
 ## Diagnosis
 
 Run a small root-only probe or use QEMU/libvirt to confirm that VGIC device
-creation fails independently of TenBox. The important result is:
+creation fails independently of AgentSphere. The important result is:
 
 ```text
 KVM_CHECK_EXTENSION DEVICE_CTRL = 1
@@ -151,7 +151,7 @@ KVM_CHECK_EXTENSION IRQCHIP   = 1
 KVM_CREATE_DEVICE ARM_VGIC_V3 = 0 Success
 ```
 
-TenBox should then get past VM creation:
+AgentSphere should then get past VM creation:
 
 ```text
 [INFO]  kvm: aarch64 VM created (..., vgic=v3)
@@ -161,7 +161,7 @@ TenBox should then get past VM creation:
 ## Upstream Fix
 
 The proper fix belongs in the Radxa/Allwinner A733 DTS source for Cubie A7S,
-not in TenBox. Add the maintenance interrupt to the `gic` node, using symbolic
+not in AgentSphere. Add the maintenance interrupt to the `gic` node, using symbolic
 bindings in source form:
 
 ```dts

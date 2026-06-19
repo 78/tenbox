@@ -1,4 +1,4 @@
-#import "TenBoxIPC.h"
+#import "AgentSphereIPC.h"
 #include "ipc/unix_socket.h"
 #include "ipc/protocol_v1.h"
 #include "ipc/shared_framebuffer.h"

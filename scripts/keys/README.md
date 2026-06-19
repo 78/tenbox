@@ -1,7 +1,7 @@
-# TenBox archive signing key
+# AgentSphere archive signing key
 
 `tenbox-archive-keyring.gpg` is the public half of the GPG key used to
-sign the TenBox apt repository's `Release` / `InRelease` files at
+sign the AgentSphere apt repository's `Release` / `InRelease` files at
 `https://my.tenbox.ai/repo/dists/stable/`.
 
 ## How clients use it

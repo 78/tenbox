@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a Debian arm64 rootfs with QwenPaw as qcow2 for TenBox macOS.
+# Build a Debian arm64 rootfs with QwenPaw as qcow2 for AgentSphere macOS.
 # This is the AArch64 equivalent of x86_64/make-rootfs-qwenpaw.sh.
 #
 # Requires: debootstrap, qemu-utils.
@@ -15,12 +15,12 @@
 set -e
 
 ROOTFS_SIZE="100G"
-SUITE="trixie"
+SUITE="bookworm"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ARCH="arm64"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-tenbox}"
+USER_NAME="${USER_NAME:-admin}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,dhcpcd-base,\
@@ -46,7 +46,7 @@ mkdir -p "$CHECKPOINT_DIR" "$APT_CACHE_DIR" "$SCRIPTS_CACHE_DIR"
 CACHE_TAR="$(realpath -m "$CACHE_DIR/debootstrap-${SUITE}-arm64.tar")"
 CACHE_NODESOURCE="$SCRIPTS_CACHE_DIR/nodesource_setup_22.x.sh"
 
-WORK_DIR="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-qwenpaw-arm64}"
+WORK_DIR="${AGENTSPHERE_WORK_DIR:-/tmp/tenbox-rootfs-qwenpaw-arm64}"
 
 # Parse arguments
 FORCE_REBUILD=false
@@ -59,7 +59,7 @@ show_help() {
     cat << 'HELP'
 Usage: ./make-rootfs-qwenpaw.sh [OPTIONS] [output.qcow2]
 
-Build a Debian arm64 rootfs image with QwenPaw for TenBox macOS.
+Build a Debian arm64 rootfs image with QwenPaw for AgentSphere macOS.
 
 Options:
   --help          Show this help message
@@ -538,7 +538,7 @@ with open(cfg_path, \"w\") as f:
 print(\"  Tool Guard & File Guard disabled in\", cfg_path)
 "'
 
-echo "Configuring TenBox LLM provider..."
+echo "Configuring AgentSphere LLM provider..."
 mkdir -p /home/$USER_NAME/.qwenpaw.secret/providers/custom
 cp /tmp/rootfs-configs/qwenpaw-provider-tenbox.json /home/$USER_NAME/.qwenpaw.secret/providers/custom/tenbox.json
 cp /tmp/rootfs-configs/qwenpaw-active-model.json /home/$USER_NAME/.qwenpaw.secret/providers/active_model.json
@@ -769,7 +769,7 @@ check "qemu-guest-agent"  dpkg -s qemu-guest-agent
 check "pulseaudio"        dpkg -s pulseaudio
 check "node"              command -v node
 check "ntp"               dpkg -s systemd-timesyncd
-check "qwenpaw"           test -d /home/tenbox/.qwenpaw
+check "qwenpaw"           test -d /home/admin/.qwenpaw
 check "chromium"          dpkg -s chromium
 check "curl"              command -v curl
 check "wget"              command -v wget

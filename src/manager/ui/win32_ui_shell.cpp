@@ -301,7 +301,7 @@ static void HideMainWindowToTray(Win32UiShell::Impl* p, ManagerService& mgr) {
 
 // ── Window class registration ──
 
-static const wchar_t* kWndClass = L"TenBoxManagerWin32";
+static const wchar_t* kWndClass = L"AgentSphereManagerWin32";
 static LRESULT CALLBACK MainWndProc(HWND, UINT, WPARAM, LPARAM);
 
 static ATOM RegisterMainClass(HINSTANCE hinst) {

@@ -121,9 +121,9 @@ struct IceServerSpec {
 };
 
 // Returns the resolved ICE server list. Source of truth is (in order):
-//   1. TENBOX_ICE_SERVERS - JSON array of W3C-shaped entries, supports
+//   1. AGENTSPHERE_ICE_SERVERS - JSON array of W3C-shaped entries, supports
 //      STUN + TURN with credentials.
-//   2. TENBOX_STUN_SERVERS - legacy comma-separated STUN-only URLs.
+//   2. AGENTSPHERE_STUN_SERVERS - legacy comma-separated STUN-only URLs.
 //   3. Built-in CN-reachable STUN defaults.
 // Exposed so the cloud tunnel can advertise the same list to the
 // browser-side RTCPeerConnection - keeping both peers probing the same

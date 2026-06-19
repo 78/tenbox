@@ -58,10 +58,10 @@ std::unique_ptr<HvfVCpu> HvfVCpu::Create(uint32_t index, AddressSpace* addr_spac
                                              uint8_t* ram, uint64_t ram_size,
                                              const GuestMemMap* guest_mem) {
     if (index == 0) {
-        const char* env = getenv("TENBOX_EXIT_STATS");
+        const char* env = getenv("AGENTSPHERE_EXIT_STATS");
         if (env && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y')) {
             s_stats_enabled_.store(true, std::memory_order_relaxed);
-            LOG_INFO("hvf: VM exit statistics enabled (TENBOX_EXIT_STATS)");
+            LOG_INFO("hvf: VM exit statistics enabled (AGENTSPHERE_EXIT_STATS)");
         }
     }
 

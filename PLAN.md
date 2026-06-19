@@ -1,15 +1,15 @@
-# tenboxd — Headless Daemon & Remote Control Plan (HISTORICAL)
+# agentsphered — Headless Daemon & Remote Control Plan (HISTORICAL)
 
 > **Status (2026-05): superseded.** The product direction shifted from
 > "BYO-overlay + self-hosted HTTPS+WS" to a managed cloud (`my.tenbox.ai`) with
 > outbound device tunnels and browser remote desktop via WebRTC. The current
 > active plan is in [`TENBOXD.md`](TENBOXD.md). This file is kept as a record
 > of the original scoping discussion (Tailscale-friendly direct connections,
-> embedded web UI inside `tenboxd`, etc.) so we don't relitigate decisions
+> embedded web UI inside `agentsphered`, etc.) so we don't relitigate decisions
 > already made — but it is no longer the source of truth for what is shipping.
 
-This document captures the plan for turning TenBox into a client/server product
-with a headless daemon (`tenboxd`) that can run on Linux hosts (including
+This document captures the plan for turning AgentSphere into a client/server product
+with a headless daemon (`agentsphered`) that can run on Linux hosts (including
 Raspberry Pi 5), be controlled remotely from desktop managers, a web UI, or a
 CLI, and peacefully coexist with user-provided network overlays such as
 Tailscale or WireGuard.
@@ -21,7 +21,7 @@ leaves the product in a shippable state.
 
 ## 1. Motivation
 
-Today TenBox ships as a monolithic desktop app (Win32 manager on Windows,
+Today AgentSphere ships as a monolithic desktop app (Win32 manager on Windows,
 SwiftUI manager on macOS). The `ManagerService` class already contains all of
 the core VM lifecycle logic in a UI-agnostic form; the UI is just a callback
 subscriber. This makes it natural to:
@@ -34,7 +34,7 @@ subscriber. This makes it natural to:
   on a Pi) without forcing users through a GUI.
 
 This is the same architectural split Docker uses: `dockerd` + multiple
-clients. TenBox's equivalent is `tenboxd` + thin clients.
+clients. AgentSphere's equivalent is `agentsphered` + thin clients.
 
 ---
 
@@ -44,14 +44,14 @@ clients. TenBox's equivalent is `tenboxd` + thin clients.
 ┌─────────────────────────────────────────────────────────────────┐
 │  Host (Pi 5, Linux PC, or any Linux server)                     │
 │                                                                 │
-│   tenboxd  (daemon, headless)                                   │
+│   agentsphered  (daemon, headless)                                   │
 │    ├─ ManagerService (existing code, mostly unchanged)          │
 │    ├─ Local RPC:  Unix socket (trusted local clients)           │
 │    ├─ Remote RPC: HTTPS + WebSocket (TLS + token auth)          │
 │    ├─ Embedded static web UI                                    │
 │    └─ Spawns `agentsphere-vm-runtime` processes (one per VM)         │
 │                                                                 │
-│   agentsphere-vm-runtime (per VM, unchanged IPC back to tenboxd)     │
+│   agentsphere-vm-runtime (per VM, unchanged IPC back to agentsphered)     │
 └────────────────────────────────┬────────────────────────────────┘
                                  │ TLS + token
                                  │ (routed via LAN / Tailscale / WG)
@@ -65,12 +65,12 @@ clients. TenBox's equivalent is `tenboxd` + thin clients.
 
 ### 2.1 Process boundary
 
-- `tenboxd` owns VM state, persists `vm.json`, spawns runtimes, holds shared
+- `agentsphered` owns VM state, persists `vm.json`, spawns runtimes, holds shared
 memory framebuffers, proxies LLM traffic, and exposes the RPC surface.
 - `agentsphere-vm-runtime` is unchanged — it still talks to its parent over the
 existing `protocol_v1` IPC (Unix socket on Linux/macOS, named pipe on
 Windows).
-- Clients never talk to runtimes directly. Everything flows through `tenboxd`.
+- Clients never talk to runtimes directly. Everything flows through `agentsphered`.
 
 ### 2.2 Local vs remote transports
 
@@ -85,7 +85,7 @@ Both transports serve the **same** RPC schema.
 
 ### 2.3 Non-goals
 
-- **TenBox does not implement its own NAT traversal.** Tailscale / WireGuard /
+- **AgentSphere does not implement its own NAT traversal.** Tailscale / WireGuard /
 Cloudflare Tunnel / frp already solve this better than we ever could. We aim
 to be a good citizen on top of those overlays, not compete with them.
 - **No multi-tenant permissions in v1.** Single-admin token. Multi-user and
@@ -182,7 +182,7 @@ obviously cannot traverse the network. The plan:
 Design principles:
 
 - Keep shared-memory path for local same-host clients (zero-copy, no encode).
-- Encoder lives inside `tenboxd`, not in the runtime — runtime stays simple.
+- Encoder lives inside `agentsphered`, not in the runtime — runtime stays simple.
 - Frame deltas: we already have dirty-rect information in the display pipeline;
 use it to send only changed tiles where possible.
 - Input events (keyboard/pointer/wheel/resize) travel back over the same WS
@@ -209,7 +209,7 @@ Tech choices (initial proposal):
 - **TanStack Query** for the REST layer, thin WS client for streams.
 - **shadcn/ui** or **Mantine** for components — both have serious a11y and
 dark-mode out of the box.
-- Built assets embedded into `tenboxd` via a resource file (no separate web
+- Built assets embedded into `agentsphered` via a resource file (no separate web
 server to deploy).
 
 The web UI lives under `website-app/` (separate from the existing marketing
@@ -228,9 +228,9 @@ Plan:
 1. Extract a pure C++ `tenbox_client` library that wraps HTTP+WS calls and
   exposes the same callback-based API as today's `ManagerService`. The UI
    layer is callback-driven, so ideally it does not know whether it is talking
-   to an in-process `ManagerService` or a remote `tenboxd`.
+   to an in-process `ManagerService` or a remote `agentsphered`.
 2. Keep the "embedded" mode on Windows/macOS for v1: the manager can still
-  spawn a `tenboxd` child process and connect to it over Unix socket / named
+  spawn a `agentsphered` child process and connect to it over Unix socket / named
    pipe. This gives us a single code path internally.
 3. Add a "Hosts" switcher in the UI with:
   - "Local" (embedded daemon, default)
@@ -276,7 +276,7 @@ Proposed additions:
 
 ```
 src/
-├── daemon/                # NEW: tenboxd entry point
+├── daemon/                # NEW: agentsphered entry point
 │   ├── main.cpp
 │   ├── rpc/
 │   │   ├── http_server.{h,cpp}
@@ -306,7 +306,7 @@ The daemon work is logically independent from adding a Linux platform backend
 (KVM for aarch64 on Pi 5, optionally KVM for x86_64 later), but the two are
 the most natural to do **together** because:
 
-- `tenboxd` is most interesting on Linux (Pi 5 / home servers).
+- `agentsphered` is most interesting on Linux (Pi 5 / home servers).
 - The existing `ManagerService` is already portable; the missing piece on
 Linux is `src/platform/linux/hypervisor/`* (KVM backend).
 - Doing them in the same push avoids writing throwaway scaffolding.
@@ -365,7 +365,7 @@ the desktop manager and get a native experience for remote VMs.
 
 - WebRTC display transport with Pi 5 hardware H.264 encoding.
 - Optional embedded `tsnet` (Tailscale's Go library via cgo or a sidecar) so
-that `tenboxd` can join a tailnet without the user installing `tailscaled`.
+that `agentsphered` can join a tailnet without the user installing `tailscaled`.
 - Audit / session log, basic RBAC if product pushes that direction.
 - Packaging: `.deb` for Debian-based distros (Pi OS, Ubuntu), systemd unit
 file, `tenbox-web` service.
@@ -396,7 +396,7 @@ These are things to decide before/during Phase 1:
    both, selected by how the daemon was launched (systemd unit vs user
    session).
 6. **Backward compat**: do we keep "no-daemon" embedded mode on
-  Windows/macOS, or is `tenboxd` always running as a child process of the
+  Windows/macOS, or is `agentsphered` always running as a child process of the
    manager app on those platforms? Child-process approach keeps one code
    path; direct in-process usage is simpler for debugging.
 
@@ -422,7 +422,7 @@ daemon. We must resist until the single-admin case is genuinely polished.
 ## 12. Out of Scope for this Plan
 
 - Full multi-tenant / multi-user support.
-- A hosted control plane ("TenBox Cloud"). Users bring their own networking.
+- A hosted control plane ("AgentSphere Cloud"). Users bring their own networking.
 - Guest OS image marketplace beyond the existing `image_manager.py` sources.
 - Cluster / multi-host VM scheduling.
 
@@ -430,16 +430,16 @@ daemon. We must resist until the single-admin case is genuinely polished.
 
 ## 13. Prior Art & Positioning
 
-A clear-eyed look at what TenBox's architecture resembles, and — more
+A clear-eyed look at what AgentSphere's architecture resembles, and — more
 importantly — why we are still building it rather than composing existing
 tools.
 
 ### 13.1 Architectural analogues
 
 
-| TenBox component                                  | VMware analogue          | libvirt-world analogue              |
+| AgentSphere component                                  | VMware analogue          | libvirt-world analogue              |
 | ------------------------------------------------- | ------------------------ | ----------------------------------- |
-| `tenboxd` (headless daemon)                       | ESXi `hostd`             | `libvirtd`                          |
+| `agentsphered` (headless daemon)                       | ESXi `hostd`             | `libvirtd`                          |
 | `agentsphere-vm-runtime` (one per VM)                  | VMX process              | per-VM `qemu-system-`*              |
 | HTTPS + token RPC, Unix socket locally            | vSphere API over HTTPS   | `qemu:///system` + `qemu+tls://...` |
 | Embedded Web UI                                   | ESXi Host Client (HTML5) | Cockpit VMs module / Kimchi         |
@@ -448,26 +448,26 @@ tools.
 | Local shared-mem framebuffer + remote JPEG/WebRTC | VMware MKS / Blast       | SPICE / VNC + noVNC                 |
 
 
-Topologically, TenBox is **closest to a single-host ESXi with its built-in
+Topologically, AgentSphere is **closest to a single-host ESXi with its built-in
 Host Client**, and **closest in spirit to the libvirtd + virsh +
 virt-manager + Cockpit** open-source stack. Proxmox VE is the product that
 combines both (single-host-friendly, Web UI first, hobbyist-accessible) and
 is a useful UX reference — though our scope is narrower.
 
 **Explicitly not in scope:** anything resembling vCenter, Proxmox Cluster,
-or KubeVirt. TenBox is single-host by design; multi-host fleet management
+or KubeVirt. AgentSphere is single-host by design; multi-host fleet management
 is a different product.
 
 ### 13.2 Why not just libvirt on a Raspberry Pi?
 
 It is worth being honest: **a motivated user can already achieve much of
-what TenBox provides on a Pi 5 today** by installing
+what AgentSphere provides on a Pi 5 today** by installing
 `qemu-system-aarch64 + libvirt-daemon-system + cockpit-machines`, pointing
 virt-manager or Cockpit at it, and running their own guest images. Several
-hobbyists already do. That makes the "why TenBox" question non-trivial, and
+hobbyists already do. That makes the "why AgentSphere" question non-trivial, and
 the answer needs to hold up.
 
-TenBox's differentiation is at the **product layer, not the virtualization
+AgentSphere's differentiation is at the **product layer, not the virtualization
 layer**. We are not trying to beat libvirt at being a general-purpose
 virtualization toolkit; we are trying to be a better fit for a specific
 audience and a specific use case.
@@ -475,7 +475,7 @@ audience and a specific use case.
 **1. Vertical focus on AI-agent sandboxing.**
 libvirt is a general-purpose platform; it assumes users are comfortable
 editing domain XML, building storage pools, wiring up bridged networking,
-and installing a guest OS from scratch. TenBox's audience is "people who
+and installing a guest OS from scratch. AgentSphere's audience is "people who
 want to run an AI agent safely on their own machine" — which includes
 researchers, PMs, and hobbyists, not only sysadmins. For that audience we
 ship:
@@ -492,7 +492,7 @@ integration via a GUI, with sensible defaults.
 **2. Truly cross-platform client experience.**
 libvirt is Linux-only on the host side. Mac and Windows users either run
 Cockpit in a browser (adequate but not native) or install virt-manager
-(painful on macOS, requires X11). With TenBox:
+(painful on macOS, requires X11). With AgentSphere:
 
 - The same Desktop Manager app on macOS, Windows, or Linux can manage
 local VMs (HVF / WHVP / KVM) **and** remote VMs on a Pi 5 (KVM) from a
@@ -503,9 +503,9 @@ experience — something no libvirt-based setup offers.
 **3. Single-binary, zero-config deployment.**
 A libvirt setup on Debian 12+ now requires `libvirtd` + `virtqemud` +
 `virtnetworkd` + `virtlogd` + `qemu-system-`* plus PolicyKit rules, a
-network bridge, and a storage pool. `tenboxd` is designed to be **one
+network bridge, and a storage pool. `agentsphered` is designed to be **one
 binary + one systemd unit + an auto-generated TLS cert + token**.
-Installation and uninstallation are trivial. For "install TenBox on my Pi
+Installation and uninstallation are trivial. For "install AgentSphere on my Pi
 this afternoon to try it" this matters a lot.
 
 **4. Purpose-built remote UX, not retrofitted.**
@@ -518,12 +518,12 @@ SPICE TLS configuration, client compatibility issues, and separate port
 forwarding for each VM.
 
 **5. Integrated release vehicle.**
-`tenboxd`, the runtime, the guest images, the image catalog
+`agentsphered`, the runtime, the guest images, the image catalog
 (`image_manager.py`), and the managers are all released together and
 versioned together. A user gets a coherent experience; libvirt users
 assemble it themselves from many independently-versioned pieces.
 
-### 13.3 When users should NOT use TenBox
+### 13.3 When users should NOT use AgentSphere
 
 Being explicit about this keeps us honest and keeps the scope tight:
 
@@ -536,6 +536,6 @@ KubeVirt**.
 **libvirt + Terraform/Ansible providers**.
 
 If the user's question is "how do I virtualize things in general", libvirt
-is the correct answer. TenBox's answer is narrower and therefore can be
+is the correct answer. AgentSphere's answer is narrower and therefore can be
 sharper: "how do I safely run AI agents on my own hardware, including a
 Raspberry Pi, and control them from anywhere?"

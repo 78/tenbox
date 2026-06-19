@@ -143,7 +143,7 @@ void WriteGuestPanicFile(const std::string& snapshot) {
                                 std::string("guest_panic_") + stamp + ".txt");
     std::FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return;
-    std::fprintf(f, "# TenBox guest panic capture\n");
+    std::fprintf(f, "# AgentSphere guest panic capture\n");
     std::fprintf(f, "# vm_id:  %s\n", g_config.vm_id.c_str());
     std::fprintf(f, "# version:%s\n", g_config.version.c_str());
     std::fprintf(f, "# size:   %zu bytes\n\n", snapshot.size());
@@ -179,7 +179,7 @@ void WriteMetaFile(const char* stamp, EXCEPTION_POINTERS* ep,
     DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
     void* addr = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionAddress : nullptr;
 
-    std::fprintf(f, "TenBox runtime crash\n");
+    std::fprintf(f, "AgentSphere runtime crash\n");
     std::fprintf(f, "version : %s\n", g_config.version.c_str());
     std::fprintf(f, "vm_id   : %s\n", g_config.vm_id.c_str());
     std::fprintf(f, "pid     : %lu\n", GetCurrentProcessId());
@@ -300,7 +300,7 @@ void WriteMetaFilePosix(const char* stamp, int signo, const void* addr,
                                 std::string("crash_") + stamp + ".meta");
     std::FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return;
-    std::fprintf(f, "TenBox runtime crash\n");
+    std::fprintf(f, "AgentSphere runtime crash\n");
     std::fprintf(f, "version : %s\n", g_config.version.c_str());
     std::fprintf(f, "vm_id   : %s\n", g_config.vm_id.c_str());
     std::fprintf(f, "pid     : %ld\n", static_cast<long>(getpid()));
@@ -343,7 +343,7 @@ void SignalHandler(int signo, siginfo_t* info, void* /*ucontext*/) {
     if (fd >= 0) {
         void* frames[128];
         int n = backtrace(frames, 128);
-        dprintf(fd, "TenBox runtime crash\n");
+        dprintf(fd, "AgentSphere runtime crash\n");
         dprintf(fd, "version : %s\n", g_config.version.c_str());
         dprintf(fd, "vm_id   : %s\n", g_config.vm_id.c_str());
         dprintf(fd, "pid     : %ld\n", static_cast<long>(getpid()));

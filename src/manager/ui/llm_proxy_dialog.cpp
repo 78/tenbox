@@ -395,7 +395,7 @@ static INT_PTR CALLBACK LlmDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
 
         wchar_t appdata[MAX_PATH]{};
         SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appdata);
-        data->log_dir = std::wstring(appdata) + L"\\TenBox\\llm_logs";
+        data->log_dir = std::wstring(appdata) + L"\\AgentSphere\\llm_logs";
 
         std::wstring label_text = i18n::tr_w(i18n::S::kLlmLoggingHint);
         HWND log_label = CreateWindowExW(0, L"STATIC", label_text.c_str(),

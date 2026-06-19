@@ -115,7 +115,7 @@ static bool CreateVmWithHwGic(HvfVm* vm, uint32_t cpu_count,
 }
 
 static bool ShouldForceSoftGic() {
-    const char* val = std::getenv("TENBOX_FORCE_SOFT_GIC");
+    const char* val = std::getenv("AGENTSPHERE_FORCE_SOFT_GIC");
     return val && val[0] == '1';
 }
 
@@ -128,7 +128,7 @@ std::unique_ptr<HvfVm> HvfVm::Create(uint32_t cpu_count) {
 
     bool force_soft = ShouldForceSoftGic();
     if (force_soft) {
-        LOG_INFO("hvf: TENBOX_FORCE_SOFT_GIC=1, skipping hardware GIC");
+        LOG_INFO("hvf: AGENTSPHERE_FORCE_SOFT_GIC=1, skipping hardware GIC");
     }
 
     if (!force_soft &&

@@ -39,7 +39,7 @@ std::vector<RunningVm> CollectRunningVms(const VmStore& store);
 // stdout/stderr redirected to `log_path`) and return immediately.
 //
 // Detachment is mandatory, not a nicety: when apt's postinst calls
-// `systemctl restart tenboxd`, systemd SIGTERMs the daemon. If apt
+// `systemctl restart agentsphered`, systemd SIGTERMs the daemon. If apt
 // were a child of the daemon's process group, that signal would
 // cascade through the popen()'d shell and tear apt down mid-install,
 // leaving dpkg's status file half-written and the system stuck on

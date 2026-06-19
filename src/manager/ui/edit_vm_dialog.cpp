@@ -88,7 +88,7 @@ static LRESULT CALLBACK EditDlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARA
     return DefSubclassProc(dlg, msg, wp, lp);
 }
 
-static const wchar_t* kEditDlgClassName = L"TenBoxEditVmDlg";
+static const wchar_t* kEditDlgClassName = L"AgentSphereEditVmDlg";
 static bool g_edit_class_registered = false;
 
 static void RegisterEditDialogClass() {

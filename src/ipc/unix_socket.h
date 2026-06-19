@@ -10,7 +10,7 @@
 
 namespace ipc {
 
-// Unix Domain Socket transport for the TenBox IPC protocol.
+// Unix Domain Socket transport for the AgentSphere IPC protocol.
 // Provides bidirectional byte-stream communication between the
 // Manager (server) and Runtime (client) processes on macOS/Linux.
 //

@@ -4,11 +4,11 @@ import IOKit.pwr_mgt
 import Sparkle
 import SwiftUI
 
-let kTenBoxVersion: String = {
+let kAgentSphereVersion: String = {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
 }()
-let kTenBoxCopyright = "Copyright \u{00A9} 2026 AgentSphere"
-let kTenBoxWebsiteURL = URL(string: "https://agent-sphere.pangustudio.com/")!
+let kAgentSphereCopyright = "Copyright \u{00A9} 2026 AgentSphere"
+let kAgentSphereWebsiteURL = URL(string: "https://agent-sphere.pangustudio.com/")!
 
 final class CheckForUpdatesViewModel: ObservableObject {
     @Published var canCheckForUpdates = false
@@ -46,7 +46,7 @@ private final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
 }
 
 @main
-struct TenBoxApp: App {
+struct AgentSphereApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     private let updaterController: SPUStandardUpdaterController
     // 持有 delegate，防止被 ARC 释放
@@ -89,11 +89,11 @@ struct TenBoxApp: App {
     private static func showAboutPanel() {
         let options: [NSApplication.AboutPanelOptionKey: Any] = [
             .applicationName: "Agent Sphere",
-            .applicationVersion: kTenBoxVersion,
+            .applicationVersion: kAgentSphereVersion,
             .version: "",
             .credits: NSAttributedString(
                 string:
-                    "A lightweight AI Agent virtual machine manager for macOS.\n\n\(kTenBoxCopyright)",
+                    "A lightweight AI Agent virtual machine manager for macOS.\n\n\(kAgentSphereCopyright)",
                 attributes: [
                     .font: NSFont.systemFont(ofSize: 11),
                     .foregroundColor: NSColor.secondaryLabelColor,
@@ -146,7 +146,7 @@ struct TenBoxApp: App {
             CommandGroup(replacing: .sidebar) {}
             CommandGroup(replacing: .help) {
                 Button("Agent Sphere 网站...") {
-                    NSWorkspace.shared.open(kTenBoxWebsiteURL)
+                    NSWorkspace.shared.open(kAgentSphereWebsiteURL)
                 }
                 Button("帮助文档...") {
                     NSWorkspace.shared.open(
@@ -194,7 +194,7 @@ class AppState: ObservableObject {
         return host
     }
 
-    private var bridge = TenBoxBridgeWrapper()
+    private var bridge = AgentSphereBridgeWrapper()
     let clipboardHandler = ClipboardHandler()
     private var activeSessions: [String: VmSession] = [:]
     private var sessionCancellables: [String: AnyCancellable] = [:]
@@ -205,9 +205,9 @@ class AppState: ObservableObject {
 
     init() {
         refreshVmList()
-        NSLog("[TenBoxApp] Loaded %d VM(s):", vms.count)
+        NSLog("[AgentSphereApp] Loaded %d VM(s):", vms.count)
         for vm in vms {
-            NSLog("[TenBoxApp]   - [%@] \"%@\"", vm.id, vm.name)
+            NSLog("[AgentSphereApp]   - [%@] \"%@\"", vm.id, vm.name)
         }
         oidcService.loadStoredToken(oidcIssuer: oidcIssuer)
         oidcService.refreshUserInfo(cloudUrl: cloudUrl)
@@ -215,7 +215,7 @@ class AppState: ObservableObject {
         startLlmProxyIfNeeded()
         setupClipboard()
         stateObserver = NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("TenBoxVmStateChanged"),
+            forName: NSNotification.Name("AgentSphereVmStateChanged"),
             object: nil, queue: .main
         ) { [weak self] note in
             guard let self = self else { return }
@@ -686,7 +686,7 @@ class AppState: ObservableObject {
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
-    private let bridge = TenBoxBridgeWrapper()
+    private let bridge = AgentSphereBridgeWrapper()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false

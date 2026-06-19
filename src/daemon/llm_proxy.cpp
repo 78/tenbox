@@ -1,4 +1,4 @@
-// LLM API reverse proxy for tenboxd.
+// LLM API reverse proxy for agentsphered.
 //
 // Linux/POSIX port of src/manager/llm_proxy.cpp. The Win32 version uses
 // WinHTTP for the upstream call; here we use libcurl with

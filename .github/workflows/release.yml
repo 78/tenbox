@@ -110,15 +110,15 @@ jobs:
                       -DCMAKE_BUILD_TYPE=Release \
                       -DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG" \
                       -DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG" \
-                      -DTENBOX_STATIC_FFMPEG=ON \
-                      -DTENBOX_STATIC_RUNTIME=ON
+                      -DAGENTSPHERE_STATIC_FFMPEG=ON \
+                      -DAGENTSPHERE_STATIC_RUNTIME=ON
                   cmake --build build --parallel
                   cd build
-                  for bin in tenbox tenboxd tenbox-vm-runtime; do
+                  for bin in tenbox agentsphered tenbox-vm-runtime; do
                       objcopy --only-keep-debug "$bin" "$bin.debug"
                       strip --strip-debug --strip-unneeded "$bin"
                       # debuglink stores only basename, so cwd=build keeps the
-                      # embedded reference clean (tenboxd -> tenboxd.debug).
+                      # embedded reference clean (agentsphered -> agentsphered.debug).
                       objcopy --add-gnu-debuglink="$bin.debug" "$bin"
                       chmod 0644 "$bin.debug"
                   done
@@ -136,7 +136,7 @@ jobs:
           mkdir -p dist
           out="dist/tenbox_${{ steps.ver.outputs.version }}_${{ matrix.arch }}-dbgsym.tar.zst"
           tar --zstd -cf "$out" -C build \
-              tenbox.debug tenboxd.debug tenbox-vm-runtime.debug
+              tenbox.debug agentsphered.debug tenbox-vm-runtime.debug
           ( cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
 
       # Sanity-check the deb against Bullseye's dpkg (1.20). The runner
@@ -206,7 +206,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: TenBox ${{ steps.ver.outputs.version }}
+          name: AgentSphere ${{ steps.ver.outputs.version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

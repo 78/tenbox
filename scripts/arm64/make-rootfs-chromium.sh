@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a minimal Debian arm64 desktop rootfs as qcow2 for TenBox macOS.
+# Build a minimal Debian arm64 desktop rootfs as qcow2 for AgentSphere macOS.
 # This is the AArch64 equivalent of make-rootfs-chromium.sh.
 #
 # Requires: debootstrap, qemu-utils.
@@ -14,12 +14,12 @@
 set -e
 
 ROOTFS_SIZE="100G"
-SUITE="trixie"
+SUITE="bookworm"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ARCH="arm64"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-tenbox}"
+USER_NAME="${USER_NAME:-admin}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,dhcpcd-base,\
@@ -43,7 +43,7 @@ mkdir -p "$CHECKPOINT_DIR" "$APT_CACHE_DIR"
 
 CACHE_TAR="$(realpath -m "$CACHE_DIR/debootstrap-${SUITE}-arm64.tar")"
 
-WORK_DIR="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-arm64}"
+WORK_DIR="${AGENTSPHERE_WORK_DIR:-/tmp/tenbox-rootfs-arm64}"
 
 # Parse arguments
 FORCE_REBUILD=false
@@ -56,7 +56,7 @@ show_help() {
     cat << 'HELP'
 Usage: ./make-rootfs-chromium.sh [OPTIONS] [output.qcow2]
 
-Build a minimal Debian arm64 desktop rootfs image for TenBox macOS.
+Build a minimal Debian arm64 desktop rootfs image for AgentSphere macOS.
 
 Options:
   --help          Show this help message

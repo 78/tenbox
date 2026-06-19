@@ -2,7 +2,7 @@
 
 #include "daemon/resource_monitor.h"
 
-#ifdef TENBOX_ENABLE_LIBYUV
+#ifdef AGENTSPHERE_ENABLE_LIBYUV
 #include <libyuv.h>
 #endif
 
@@ -480,7 +480,7 @@ bool RuntimeManager::StartVm(const std::string& vm_id, std::string* error) {
         return false;
     }
     if (pid == 0) {
-        // Ensure runtime exits if tenboxd dies unexpectedly.
+        // Ensure runtime exits if agentsphered dies unexpectedly.
         ::prctl(PR_SET_PDEATHSIG, SIGTERM);
         if (::getppid() == 1) _exit(128);
         ::dup2(log_pipe[1], STDOUT_FILENO);
@@ -1256,7 +1256,7 @@ RemoteVideoSlice MakeSliceFromBgra(const uint8_t* bgra_base,
                                    uint32_t height,
                                    PixelFormat format) {
     RemoteVideoSlice slice;
-#ifdef TENBOX_ENABLE_LIBYUV
+#ifdef AGENTSPHERE_ENABLE_LIBYUV
     if (!bgra_base || bgra_stride <= 0 || width == 0 || height == 0) return slice;
     if (format != PixelFormat::kYuv420p && format != PixelFormat::kYuv444p) return slice;
 

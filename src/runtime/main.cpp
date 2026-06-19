@@ -68,7 +68,7 @@ static void WatchParentProcess(pid_t parent_pid, Vm* vm) {
 #endif // !_WIN32
 
 static void PrintVersion() {
-    fprintf(stderr, "TenBox vm-runtime v" TENBOX_VERSION "\n");
+    fprintf(stderr, "AgentSphere vm-runtime v" AGENTSPHERE_VERSION "\n");
 }
 
 static void PrintUsage(const char* prog) {
@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
     // during VmConfig parsing or Vm::Create produces a usable dump. vm_dir
     // may still be empty at this point — we re-install after argv parsing to
     // pick up the real VM directory if provided.
-    crash_handler::Install(std::string{}, "bootstrap", TENBOX_VERSION);
+    crash_handler::Install(std::string{}, "bootstrap", AGENTSPHERE_VERSION);
 
     VmConfig config;
     std::string vm_id = "default";
@@ -258,7 +258,7 @@ int main(int argc, char* argv[]) {
 
     // Refine crash handler config now that --vm-dir / --vm-id are known so
     // dumps land next to the VM's runtime.log instead of the process cwd.
-    crash_handler::Install(vm_dir, vm_id, TENBOX_VERSION);
+    crash_handler::Install(vm_dir, vm_id, AGENTSPHERE_VERSION);
 
     if (config.kernel_path.empty()) {
         fprintf(stderr, "Error: --kernel is required\n\n");

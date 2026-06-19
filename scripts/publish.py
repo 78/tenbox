@@ -1,5 +1,5 @@
 """
-TenBox Publish Manager - GUI tool for managing image and installer releases.
+AgentSphere Publish Manager - GUI tool for managing image and installer releases.
 
 Usage:
     python publish.py
@@ -120,9 +120,9 @@ def generate_appcast_xml(win_info: dict | None = None,
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="{SPARKLE_NS}" xmlns:dc="{DC_NS}">
   <channel>
-    <title>TenBox</title>
+    <title>AgentSphere</title>
     <link>https://tenbox.ai/api/appcast.xml</link>
-    <description>TenBox Updates</description>
+    <description>AgentSphere Updates</description>
     <language>zh-CN</language>
 {items_xml}
   </channel>
@@ -171,8 +171,8 @@ class OSSClient:
             auth = oss2.Auth(os.environ["OSS_ACCESS_KEY_ID"], os.environ["OSS_ACCESS_KEY_SECRET"])
             self.bucket = oss2.Bucket(auth, endpoint, os.environ["OSS_BUCKET_NAME"])
             self.public_url = os.environ.get("OSS_PUBLIC_URL", "").rstrip("/")
-            self.images_dir = os.environ.get("OSS_TENBOX_IMAGES_DIR", "tenbox/images").strip("/")
-            self.releases_dir = os.environ.get("OSS_TENBOX_RELEASES_DIR", "tenbox/releases").strip("/")
+            self.images_dir = os.environ.get("OSS_AGENTSPHERE_IMAGES_DIR", "tenbox/images").strip("/")
+            self.releases_dir = os.environ.get("OSS_AGENTSPHERE_RELEASES_DIR", "tenbox/releases").strip("/")
         except Exception as e:
             self._init_error = f"OSS 初始化失败: {e}"
 
@@ -1077,7 +1077,7 @@ class ReleasePublisher(ttk.Frame):
 
 def main():
     root = tk.Tk()
-    root.title("TenBox 发布管理工具")
+    root.title("AgentSphere 发布管理工具")
     root.geometry("1024x760")
     root.minsize(800, 550)
 
@@ -1094,7 +1094,7 @@ def main():
 
     # Show OSS status in title
     if not oss_client.available:
-        root.title("TenBox 发布管理工具  [OSS 未连接 - 仅支持手动输入 URL]")
+        root.title("AgentSphere 发布管理工具  [OSS 未连接 - 仅支持手动输入 URL]")
 
     root.mainloop()
 

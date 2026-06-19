@@ -294,10 +294,10 @@ std::string FormatPairCodeChunked(const std::string& code) {
 // Translate the cloud WS URL into the browser-facing pair page. Examples:
 //   wss://my.tenbox.ai/api/device-tunnel -> https://my.tenbox.ai/pair?code=...
 //   ws://127.0.0.1:18080/api/device-tunnel -> http://127.0.0.1:18080/pair?code=...
-// Allow `TENBOX_PAIR_URL_BASE` to override the host portion in dev when the
+// Allow `AGENTSPHERE_PAIR_URL_BASE` to override the host portion in dev when the
 // console runs on a different port (e.g. vite at :5173).
 std::string PairUrlFor(const std::string& cloud_url, const std::string& code) {
-    if (const char* override_base = std::getenv("TENBOX_PAIR_URL_BASE")) {
+    if (const char* override_base = std::getenv("AGENTSPHERE_PAIR_URL_BASE")) {
         if (*override_base) {
             std::string base = override_base;
             while (!base.empty() && base.back() == '/') base.pop_back();
@@ -538,11 +538,11 @@ bool CloudTunnel::Connect(std::string* error) {
     //
     // Operators stuck on broken dual-stack networks (rare: an AAAA route
     // is advertised but doesn't forward) can still pin the family with
-    // TENBOX_CLOUD_PREFER_FAMILY=v4 / v6 in the systemd EnvironmentFile.
+    // AGENTSPHERE_CLOUD_PREFER_FAMILY=v4 / v6 in the systemd EnvironmentFile.
     addrinfo hints{};
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_family = AF_UNSPEC;
-    if (const char* fam = std::getenv("TENBOX_CLOUD_PREFER_FAMILY")) {
+    if (const char* fam = std::getenv("AGENTSPHERE_CLOUD_PREFER_FAMILY")) {
         if (std::string_view(fam) == "v4") hints.ai_family = AF_INET;
         else if (std::string_view(fam) == "v6") hints.ai_family = AF_INET6;
         // anything else (including "any") leaves AF_UNSPEC.
@@ -660,10 +660,10 @@ bool CloudTunnel::Connect(std::string* error) {
     if (!default_port) request << ":" << url.port;
     // User-Agent identifies us in cloud-side logs and avoids any edge
     // network (Cloudflare bot fight mode etc.) that disfavours
-    // UA-less clients. Format follows the tenboxd/<version> convention
+    // UA-less clients. Format follows the agentsphered/<version> convention
     // used by host_updater's apt invocation.
     request << "\r\n"
-            << "User-Agent: tenboxd/" << TENBOX_VERSION << "\r\n"
+            << "User-Agent: agentsphered/" << AGENTSPHERE_VERSION << "\r\n"
             << "Upgrade: websocket\r\n"
             << "Connection: Upgrade\r\n"
             << "Sec-WebSocket-Version: 13\r\n"
@@ -1056,7 +1056,7 @@ nlohmann::json CloudTunnel::HostResourcesPayload() const {
         {"data_dir", config_.data_dir},
         {"socket_path", config_.socket_path},
         {"runtime_path", config_.runtime_path},
-        {"daemon_version", TENBOX_VERSION},
+        {"daemon_version", AGENTSPHERE_VERSION},
         {"daemon_uptime_seconds", std::max<int64_t>(0, UnixNow() - start_time_seconds_)},
         {"cloud_connected", connected_.load()},
         {"tenbox_vm_memory_bytes", vm_rss},
@@ -1273,7 +1273,7 @@ nlohmann::json CloudTunnel::HandleHostUpdate(const std::string& id,
     };
 
     const std::string target_version_preview = payload.value("target_version", "");
-    std::cerr << "[INFO] host.update: request received from=" << TENBOX_VERSION
+    std::cerr << "[INFO] host.update: request received from=" << AGENTSPHERE_VERSION
               << " target="
               << (target_version_preview.empty() ? "<latest>" : target_version_preview)
               << " (id=" << id << ")\n";
@@ -1306,7 +1306,7 @@ nlohmann::json CloudTunnel::HandleHostUpdate(const std::string& id,
     }
 
     const std::string target_version = target_version_preview;
-    const std::string from_version = TENBOX_VERSION;
+    const std::string from_version = AGENTSPHERE_VERSION;
 
     const std::string log_path =
         (std::filesystem::path(config_.data_dir) / "logs" / "update.log").string();
@@ -1922,8 +1922,8 @@ nlohmann::json CloudTunnel::CreateRemoteSession(const std::string& vm_id, const 
     // Advertise the same ICE server list the daemon itself is using so
     // both peers agree on the candidate-gathering servers (see
     // ResolvedIceServers for why the STUN defaults skew toward
-    // CN-reachable hosts; operators can override via TENBOX_ICE_SERVERS
-    // JSON or the legacy TENBOX_STUN_SERVERS comma list). In the
+    // CN-reachable hosts; operators can override via AGENTSPHERE_ICE_SERVERS
+    // JSON or the legacy AGENTSPHERE_STUN_SERVERS comma list). In the
     // self-hosted deployment path the daemon advertises this list
     // verbatim; in the managed cloud path the control-plane rewrites
     // the payload downstream to inject per-user TURN credentials (see
@@ -2033,8 +2033,8 @@ nlohmann::json CloudTunnel::HandleRemoteSignal(
         }
         // remote.configure fires every time the browser opens a session and
         // again on each window resize / quality change; treat it as debug.
-        // Set TENBOX_WEBRTC_VERBOSE=1 to surface it.
-        if (const char* v = std::getenv("TENBOX_WEBRTC_VERBOSE");
+        // Set AGENTSPHERE_WEBRTC_VERBOSE=1 to surface it.
+        if (const char* v = std::getenv("AGENTSPHERE_WEBRTC_VERBOSE");
             v && v[0] != '\0' && std::string_view(v) != "0") {
             std::cout << "[INFO]  cloud_tunnel: remote configure session=" << session_id
                       << " video_bitrate=" << video_bitrate_bps;
@@ -2089,7 +2089,7 @@ void CloudTunnel::PublishRemoteCursor(const std::string& vm_id, nlohmann::json c
 void CloudTunnel::TickMain() {
     pthread_setname_np(pthread_self(), "cloud-tick");
     // Push host memory/disk/load and per-VM disk/RSS on a slow schedule so
-    // tenboxd stays light: host metrics are cheap; VmResourcesSnapshot walks
+    // agentsphered stays light: host metrics are cheap; VmResourcesSnapshot walks
     // each VM directory for disk usage and is intentionally less frequent.
     // VM lifecycle state is already pushed asynchronously via vm.state_changed.
     using Clock = std::chrono::steady_clock;

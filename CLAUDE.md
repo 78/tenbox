@@ -1,11 +1,11 @@
-# TenBox Project Guide
+# AgentSphere Project Guide
 
 ## Overview
 
 Cross-platform VMM for running AI agents in isolated Linux VMs.
 
-- **Windows / macOS**: native GUI manager (`tenbox-manager.exe` / `TenBox.app`) launches per-VM `agentsphere-vm-runtime` processes.
-- **Linux**: `tenboxd` daemon manages VM lifecycle, exposes a local `tenbox` CLI, and provides optional browser-based remote desktop via WebRTC.
+- **Windows / macOS**: native GUI manager (`tenbox-manager.exe` / `AgentSphere.app`) launches per-VM `agentsphere-vm-runtime` processes.
+- **Linux**: `agentsphered` daemon manages VM lifecycle, exposes a local `tenbox` CLI, and provides optional browser-based remote desktop via WebRTC.
 
 All platforms share `src/core/` (VMM engine), `src/platform/` (hypervisor backends), `src/ipc/` (manager↔runtime protocol), and `src/runtime/` (the runtime process). Linux adds `src/daemon/`, `src/cli/`, and `src/client/`.
 
@@ -18,7 +18,7 @@ src/
 ├── platform/       Hypervisor backends — windows/ (WHVP), macos/ (HVF), linux/ (KVM), posix/
 ├── ipc/            Manager↔runtime protocol v1 + POSIX Unix socket transport
 ├── runtime/        agentsphere-vm-runtime process (all platforms)
-├── daemon/         tenboxd (Linux only)
+├── daemon/         agentsphered (Linux only)
 │   ├── main.cpp            Entry point, CLI flags, startup sequence
 │   ├── vm_store.cpp        VM registry (vm.json persistence)
 │   ├── runtime_manager.cpp VM process supervisor + display/audio/console IPC
@@ -56,7 +56,7 @@ ctest --test-dir build
 
 # KVM check
 tenbox doctor            # via CLI
-tenboxd --doctor         # standalone
+agentsphered --doctor         # standalone
 
 # VM lifecycle
 tenbox vm create --name my-vm --kernel build/Image --disk build/rootfs.qcow2
@@ -70,7 +70,7 @@ tenbox vm ls
 ## Architecture quick reference
 
 ```
-Linux:    browser/CLI ──► tenboxd (Unix socket / WSS → my.tenbox.ai)
+Linux:    browser/CLI ──► agentsphered (Unix socket / WSS → my.tenbox.ai)
                                   │
                     ┌─────────────┴─────────────┐
                     ▼                           ▼
@@ -84,18 +84,18 @@ Win/macOS: tenbox-manager ──IPC v1──► agentsphere-vm-runtime (WHVP / H
 
 - **C++20** throughout. Code comments in English, only where intent is non-obvious.
 - **ipc/protocol_v1.h** is the manager↔runtime wire boundary — check compatibility before touching it.
-- **Offline-first daemon**: `tenboxd --cloud-url ""` must disable all cloud connectivity without breaking local CLI.
+- **Offline-first daemon**: `agentsphered --cloud-url ""` must disable all cloud connectivity without breaking local CLI.
 - **LLM proxy** exists in two places: `src/daemon/llm_proxy.cpp` (Linux) and `src/manager/llm_proxy.cpp` (Windows); change both when the protocol changes.
 - **RemoteSession** is single-instance per VM. Read `remote_webrtc.cpp`'s `force` takeover path before adding DataChannels.
 - **macOS Caps Lock forwarding**: send Caps Lock as a tap (`down` then `up`) on each `flagsChanged` event; AppKit exposes it as a toggle state, but the guest input stack needs a full key press for every switch.
-- **Static build** (`TENBOX_STATIC_FFMPEG=ON`) requires `/opt/tenbox-deps` (only present inside the CI/packaging container). Dev builds use system shared libs — keep `ON` off by default.
+- **Static build** (`AGENTSPHERE_STATIC_FFMPEG=ON`) requires `/opt/tenbox-deps` (only present inside the CI/packaging container). Dev builds use system shared libs — keep `ON` off by default.
 - **Release**: `docs/release.md` — VERSION bump → commit → push → tag → push tag. Always push commit before tag.
 
 ## More details
 
 | Topic | Document |
 | --- | --- |
-| Daemon architecture | [docs/tenboxd.md](docs/tenboxd.md) |
+| Daemon architecture | [docs/agentsphered.md](docs/agentsphered.md) |
 | Build & images | [docs/build.md](docs/build.md) |
 | CLI reference | [docs/cli.md](docs/cli.md) |
 | Release process | [docs/release.md](docs/release.md) |

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a minimal Debian desktop rootfs as qcow2 for TenBox.
+# Build a minimal Debian desktop rootfs as qcow2 for AgentSphere.
 # XFCE desktop with Chromium browser and basic tools.
 # Requires: debootstrap, qemu-utils. Run as root in WSL2 or Linux.
 #
@@ -17,11 +17,11 @@
 set -e
 
 ROOTFS_SIZE="100G"
-SUITE="trixie"
+SUITE="bookworm"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-tenbox}"
+USER_NAME="${USER_NAME:-admin}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,dhcpcd-base,\
@@ -48,7 +48,7 @@ mkdir -p "$CHECKPOINT_DIR" "$APT_CACHE_DIR"
 CACHE_TAR="$(realpath -m "$CACHE_DIR/debootstrap-${SUITE}-chromium.tar")"
 
 # Work dir must be on WSL Linux FS (/tmp), not NTFS (DrvFS /mnt/*) - loop devices need mknod
-WORK_DIR="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-chromium}"
+WORK_DIR="${AGENTSPHERE_WORK_DIR:-/tmp/tenbox-rootfs-chromium}"
 
 # Parse arguments
 FORCE_REBUILD=false
@@ -61,7 +61,7 @@ show_help() {
     cat << 'HELP'
 Usage: ./make-rootfs-chromium.sh [OPTIONS] [output.qcow2]
 
-Build a minimal Debian desktop rootfs image for TenBox with Chromium browser.
+Build a minimal Debian desktop rootfs image for AgentSphere with Chromium browser.
 
 Options:
   --help          Show this help message

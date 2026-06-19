@@ -1,16 +1,16 @@
 #!/bin/bash
-# Build a minimal BusyBox initramfs for TenBox arm64 testing.
+# Build a minimal BusyBox initramfs for AgentSphere arm64 testing.
 # Runs on macOS — only requires: curl, gzip, ar, tar, python3.
 #
 # Usage:
 #   ./make-initramfs.sh [output_dir] [suite]
 #     output_dir - where to place initramfs-arm64.cpio.gz (default: ../build/share)
-#     suite      - Debian suite (default: trixie)
+#     suite      - Debian suite (default: bookworm)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTDIR="$(mkdir -p "${1:-$SCRIPT_DIR/../../build/share}" && cd "${1:-$SCRIPT_DIR/../../build/share}" && pwd)"
-SUITE="${2:-trixie}"
+SUITE="${2:-bookworm}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
 
@@ -224,7 +224,7 @@ sleep 0.2
 
 echo ""
 echo "========================================="
-echo " TenBox VM booted successfully! (arm64)"
+echo " AgentSphere VM booted successfully! (arm64)"
 echo "========================================="
 echo "Kernel:  $(uname -r) ($(uname -m))"
 echo "Memory:  $(head -1 /proc/meminfo)"

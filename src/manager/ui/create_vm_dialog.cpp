@@ -446,7 +446,7 @@ static void FetchOnlineImages(DialogData* data) {
         }
 
         auto images = image_source::ParseImages(images_result.data);
-        auto filtered = image_source::FilterImages(images, TENBOX_VERSION_STR);
+        auto filtered = image_source::FilterImages(images, AGENTSPHERE_VERSION_STR);
 
         {
             std::lock_guard<std::mutex> lock(g_cache_mutex);
@@ -1025,7 +1025,7 @@ static LRESULT CALLBACK DlgSubclassProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp
     return DefSubclassProc(dlg, msg, wp, lp);
 }
 
-static const wchar_t* kDialogClassName = L"TenBoxCreateVmDlg";
+static const wchar_t* kDialogClassName = L"AgentSphereCreateVmDlg";
 static bool g_class_registered = false;
 
 static void RegisterDialogClass() {

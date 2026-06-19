@@ -8,7 +8,7 @@ import Foundation
 final class SettingsStore {
     static let shared = SettingsStore()
 
-    private let queue = DispatchQueue(label: "com.tenbox.settings-store", qos: .utility)
+    private let queue = DispatchQueue(label: "com.agentsphere.settings-store", qos: .utility)
     private let fm = FileManager.default
 
     // MARK: - Default base directory

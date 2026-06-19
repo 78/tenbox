@@ -1,7 +1,7 @@
 import Foundation
-import TenBoxBridge
+import AgentSphereBridge
 
-class TenBoxBridgeWrapper {
+class AgentSphereBridgeWrapper {
     let configStore = VmConfigStore()
     let ipcServer = TBIpcServer()
     private(set) lazy var processManager = VmProcessManager(ipcServer: ipcServer, configStore: configStore)
@@ -51,7 +51,7 @@ class TenBoxBridgeWrapper {
                 guard let self = self else { return }
                 self.startVm(id: vmId)
                 NotificationCenter.default.post(
-                    name: Notification.Name("TenBoxVmStateChanged"),
+                    name: Notification.Name("AgentSphereVmStateChanged"),
                     object: vmId)
             }
 

@@ -1,6 +1,6 @@
 {
   "id": "tenbox",
-  "name": "TenBoxProxy",
+  "name": "AgentSphereProxy",
   "base_url": "http://10.0.2.3/v1",
   "api_key": "tenbox",
   "chat_model": "OpenAIChatModel",

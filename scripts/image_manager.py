@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TenBox Image Manager - Validate and manage images.json
+AgentSphere Image Manager - Validate and manage images.json
 
 Usage:
     python image_manager.py validate <path_to_images.json>

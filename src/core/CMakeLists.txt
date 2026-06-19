@@ -1,5 +1,5 @@
 # Common sources shared by all platforms
-set(TENBOX_CORE_SOURCES
+set(AGENTSPHERE_CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/vmm/vm.cpp
     ${CMAKE_SOURCE_DIR}/src/core/vmm/vm_io_loop.cpp
     ${CMAKE_SOURCE_DIR}/src/core/vmm/console_tx_batcher.cpp
@@ -29,18 +29,18 @@ set(TENBOX_CORE_SOURCES
 )
 
 if(WIN32)
-    list(APPEND TENBOX_CORE_SOURCES
+    list(APPEND AGENTSPHERE_CORE_SOURCES
         ${CMAKE_SOURCE_DIR}/src/core/util/hires_timer_win.cpp
     )
 elseif(APPLE)
-    list(APPEND TENBOX_CORE_SOURCES
+    list(APPEND AGENTSPHERE_CORE_SOURCES
         ${CMAKE_SOURCE_DIR}/src/core/util/hires_timer_mac.cpp
     )
 endif()
 
 # Architecture-specific sources
 if(WIN32 OR CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND TENBOX_CORE_SOURCES
+    list(APPEND AGENTSPHERE_CORE_SOURCES
         ${CMAKE_SOURCE_DIR}/src/core/arch/x86_64/boot.cpp
         ${CMAKE_SOURCE_DIR}/src/core/arch/x86_64/acpi.cpp
         ${CMAKE_SOURCE_DIR}/src/core/arch/x86_64/x86_machine.cpp
@@ -52,7 +52,7 @@ if(WIN32 OR CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         ${CMAKE_SOURCE_DIR}/src/core/device/acpi/acpi_pm.cpp
     )
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND TENBOX_CORE_SOURCES
+    list(APPEND AGENTSPHERE_CORE_SOURCES
         ${CMAKE_SOURCE_DIR}/src/core/arch/aarch64/boot.cpp
         ${CMAKE_SOURCE_DIR}/src/core/arch/aarch64/fdt_builder.cpp
         ${CMAKE_SOURCE_DIR}/src/core/arch/aarch64/pl011.cpp
@@ -62,7 +62,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     )
 endif()
 
-add_library(tenbox_core STATIC ${TENBOX_CORE_SOURCES})
+add_library(tenbox_core STATIC ${AGENTSPHERE_CORE_SOURCES})
 target_include_directories(tenbox_core
     PUBLIC
         ${CMAKE_SOURCE_DIR}/src

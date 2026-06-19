@@ -2,8 +2,8 @@
   <nav class="navbar" :class="{ scrolled }">
     <div class="container nav-inner">
       <a href="#" class="nav-brand">
-        <img src="../assets/logo.png" alt="TenBox" class="nav-logo" />
-        <span class="nav-name">TenBox</span>
+        <img src="../assets/logo.png" alt="AgentSphere" class="nav-logo" />
+        <span class="nav-name">AgentSphere</span>
       </a>
       <div class="nav-actions">
         <a

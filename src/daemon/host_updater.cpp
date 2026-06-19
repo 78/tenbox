@@ -25,7 +25,7 @@ namespace tenbox::daemon::host_updater {
 namespace {
 
 constexpr const char* kAptSourceList = "/etc/apt/sources.list.d/tenbox.list";
-constexpr const char* kDaemonBinary = "/usr/local/bin/tenboxd";
+constexpr const char* kDaemonBinary = "/usr/local/bin/agentsphered";
 
 std::string Trim(std::string value) {
     auto not_space = [](unsigned char c) { return !std::isspace(c); };
@@ -89,7 +89,7 @@ AptInstallStatus CheckAptManaged() {
         return status;
     }
     if (!FileExists(kDaemonBinary)) {
-        status.reason = "tenboxd binary not at expected path ";
+        status.reason = "agentsphered binary not at expected path ";
         status.reason += kDaemonBinary;
         return status;
     }
@@ -132,7 +132,7 @@ AptSpawnResult SpawnAptUpgrade(const std::string& target_version,
     result.log_path = log_path;
 
     // The hard problem: apt's postinst calls `systemctl restart
-    // tenboxd`, which makes systemd SIGTERM the *entire* tenboxd.service
+    // agentsphered`, which makes systemd SIGTERM the *entire* agentsphered.service
     // cgroup (KillMode=control-group is the default). A naked fork +
     // setsid is NOT enough: setsid escapes the session/pgrp but the
     // child stays in the service's cgroup and dies with it. We saw
@@ -141,7 +141,7 @@ AptSpawnResult SpawnAptUpgrade(const std::string& target_version,
     //
     // The fix is to launch apt via `systemd-run --scope --collect`,
     // which moves the started command into its own transient cgroup
-    // outside tenboxd.service. Once it's there, restarting our own
+    // outside agentsphered.service. Once it's there, restarting our own
     // service cannot touch it and dpkg always gets to finish.
     //   --scope    : run synchronously in the caller's place but in a
     //                fresh transient scope unit, NOT a service unit.
@@ -282,7 +282,7 @@ AptSpawnResult SpawnAptUpgrade(const std::string& target_version,
 
         // exec systemd-run, which moves us into a fresh transient
         // scope cgroup before exec-ing /bin/sh. Once we're in the new
-        // cgroup, `systemctl restart tenboxd` can no longer reach us.
+        // cgroup, `systemctl restart agentsphered` can no longer reach us.
         //
         // CRITICAL: `--setenv` must be a single argv of the form
         // `--setenv=KEY=VALUE` (or `--setenv KEY=VALUE` as two argvs).

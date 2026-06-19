@@ -1,6 +1,6 @@
-# tenboxd — Linux daemon architecture
+# agentsphered — Linux daemon architecture
 
-`tenboxd` is the host-side authority for TenBox on Linux. It owns VM lifecycle,
+`agentsphered` is the host-side authority for AgentSphere on Linux. It owns VM lifecycle,
 persists VM state, spawns and supervises one `agentsphere-vm-runtime` process per
 running VM, exposes a local CLI RPC socket, and maintains an outbound cloud
 tunnel when cloud registration is enabled.
@@ -8,7 +8,7 @@ tunnel when cloud registration is enabled.
 ## Process model
 
 ```
-tenboxd
+agentsphered
 ├── rpc_server          Unix socket server (one thread per connection)
 │   └── runtime_manager VM process supervisor
 │       ├── agentsphere-vm-runtime  [vm-abc ── KVM]
@@ -46,15 +46,15 @@ send newline-delimited JSON requests; the daemon replies with a JSON object
 
 **Socket path resolution** (`client.cpp:DefaultSocketPath()`, in priority order):
 
-1. `$TENBOX_SOCK` environment variable (explicit override)
-2. `/run/tenbox/tenbox.sock` — system install path (exists after `tenboxd` starts
+1. `$AGENTSPHERE_SOCK` environment variable (explicit override)
+2. `/run/tenbox/tenbox.sock` — system install path (exists after `agentsphered` starts
    under systemd)
 3. `$XDG_RUNTIME_DIR/tenbox.sock` — per-user dev daemon (when running
-   `./tenboxd` from a build tree without root)
+   `./agentsphered` from a build tree without root)
 4. `/tmp/tenbox-<uid>.sock` — last-resort fallback
 
-**Permissions**: on a system install the daemon reads `TENBOX_SOCKET_GROUP`
-from the environment (set to `tenbox` by `packaging/systemd/tenboxd.service`),
+**Permissions**: on a system install the daemon reads `AGENTSPHERE_SOCKET_GROUP`
+from the environment (set to `tenbox` by `packaging/systemd/agentsphered.service`),
 then `chown :tenbox` + `chmod 0660` the socket after `Listen()` succeeds. The
 directory `/run/tenbox/` is world-traversable (`0755`) so any user can
 `stat(2)` the socket and receive an honest `permission denied` rather than
@@ -63,7 +63,7 @@ The installer (`scripts/install-linux.sh`) adds `$SUDO_USER` to the group.
 
 ## Cloud tunnel
 
-When `cloud_url` is non-empty (`--cloud-url` / `TENBOX_CLOUD_URL`; default
+When `cloud_url` is non-empty (`--cloud-url` / `AGENTSPHERE_CLOUD_URL`; default
 `wss://my.tenbox.ai/api/device-tunnel`), the daemon opens and maintains an
 outbound WebSocket connection. Pass an empty string (`--cloud-url ""`) to
 disable all cloud connectivity.
@@ -133,8 +133,8 @@ stun:stun.miwifi.com:3478
 stun:stun.cloudflare.com:3478
 ```
 
-Override with `TENBOX_ICE_SERVERS` (JSON array of W3C `RTCIceServer` objects,
-supports TURN with credentials) or the legacy `TENBOX_STUN_SERVERS`
+Override with `AGENTSPHERE_ICE_SERVERS` (JSON array of W3C `RTCIceServer` objects,
+supports TURN with credentials) or the legacy `AGENTSPHERE_STUN_SERVERS`
 (comma-separated STUN URIs).
 
 ## Telemetry
@@ -158,11 +158,11 @@ so a newly-connected browser sees current state without waiting up to 30 s.
 1. Refuses if any VM is in `starting` / `running` / `stopping` / `rebooting`
    state — returns `vms_running` with the offending list.
 2. Confirms the binary is dpkg-managed (checks for `tenbox.list` and
-   `/usr/local/bin/tenboxd`).
+   `/usr/local/bin/agentsphered`).
 3. Runs `apt-get update && apt-get install -y --only-upgrade tenbox` on a worker
    thread; streams the transcript to `/var/lib/tenbox/logs/update.log`.
 4. Sends the reply envelope **before** `dpkg postinst` calls
-   `deb-systemd-invoke restart tenboxd`, so the cloud receives a structured
+   `deb-systemd-invoke restart agentsphered`, so the cloud receives a structured
    result rather than a bare connection close.
 
 Manual equivalent: `sudo apt-get install --only-upgrade tenbox`.
@@ -181,7 +181,7 @@ configured via the `host.llm_proxy.set` cloud message or the local
 
 ## KVM doctor
 
-`tenbox doctor` (CLI) and `tenboxd --doctor` run `kvm_doctor.cpp`, which
+`tenbox doctor` (CLI) and `agentsphered --doctor` run `kvm_doctor.cpp`, which
 checks:
 
 - CPU virtualisation flags (`vmx`/`svm` on x86_64; EL2 on arm64)
@@ -193,7 +193,7 @@ Output is structured JSON; exit code 2 means unsupported.
 ## Data layout
 
 ```
-/var/lib/tenbox/        (default; overridable via TENBOX_DATA_DIR / --data-dir)
+/var/lib/tenbox/        (default; overridable via AGENTSPHERE_DATA_DIR / --data-dir)
 ├── vms/
 │   └── <vm-id>/
 │       ├── vm.json           VM spec and runtime state
@@ -212,11 +212,11 @@ Output is structured JSON; exit code 2 means unsupported.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `TENBOX_CLOUD_URL` | `wss://my.tenbox.ai/api/device-tunnel` | Cloud tunnel endpoint; set to empty to disable |
-| `TENBOX_DATA_DIR` | `/var/lib/tenbox` | Daemon data directory |
-| `TENBOX_SOCK` | — | Override CLI socket path |
-| `TENBOX_SOCKET_GROUP` | — | Group to chown/chmod the socket to after `Listen()` |
-| `TENBOX_ICE_SERVERS` | — | JSON array of W3C `RTCIceServer` objects |
-| `TENBOX_STUN_SERVERS` | — | Comma-separated STUN URIs (legacy; used if `TENBOX_ICE_SERVERS` unset) |
-| `TENBOX_WEBRTC_WORKER_THREADS` | `4` | libdatachannel thread pool size (`0` = `hardware_concurrency`) |
-| `TENBOX_ENCODER_THREADS` | `1` | FFmpeg encoder threads per session (`0` = auto) |
+| `AGENTSPHERE_CLOUD_URL` | `wss://my.tenbox.ai/api/device-tunnel` | Cloud tunnel endpoint; set to empty to disable |
+| `AGENTSPHERE_DATA_DIR` | `/var/lib/tenbox` | Daemon data directory |
+| `AGENTSPHERE_SOCK` | — | Override CLI socket path |
+| `AGENTSPHERE_SOCKET_GROUP` | — | Group to chown/chmod the socket to after `Listen()` |
+| `AGENTSPHERE_ICE_SERVERS` | — | JSON array of W3C `RTCIceServer` objects |
+| `AGENTSPHERE_STUN_SERVERS` | — | Comma-separated STUN URIs (legacy; used if `AGENTSPHERE_ICE_SERVERS` unset) |
+| `AGENTSPHERE_WEBRTC_WORKER_THREADS` | `4` | libdatachannel thread pool size (`0` = `hardware_concurrency`) |
+| `AGENTSPHERE_ENCODER_THREADS` | `1` | FFmpeg encoder threads per session (`0` = auto) |

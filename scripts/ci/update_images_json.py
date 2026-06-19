@@ -17,7 +17,7 @@ The meta-dir contains JSON files (one per arch) with:
     { "arch": "x86_64", "filename": "...", "sha256": "...", "size": 123456 }
 
 Environment variables:
-    OSS_PUBLIC_URL, OSS_TENBOX_IMAGES_DIR
+    OSS_PUBLIC_URL, OSS_AGENTSPHERE_IMAGES_DIR
 """
 
 import argparse
@@ -91,7 +91,7 @@ def update_rootfs_entry(
     size = meta["size"]
     version = extract_version(filename, target, arch)
 
-    images_dir = os.environ.get("OSS_TENBOX_IMAGES_DIR", "tenbox/images").strip("/")
+    images_dir = os.environ.get("OSS_AGENTSPHERE_IMAGES_DIR", "tenbox/images").strip("/")
     public_url = os.environ.get("OSS_PUBLIC_URL", "").rstrip("/")
     download_url = f"{public_url}/{images_dir}/{image_id}/{filename}"
 
@@ -135,7 +135,7 @@ def update_kernel_entries(images: list[dict], meta: dict, *, use_sha256: bool) -
     size = meta["size"]
     platform = PLATFORM_MAP.get(arch, arch)
 
-    images_dir = os.environ.get("OSS_TENBOX_IMAGES_DIR", "tenbox/images").strip("/")
+    images_dir = os.environ.get("OSS_AGENTSPHERE_IMAGES_DIR", "tenbox/images").strip("/")
     public_url = os.environ.get("OSS_PUBLIC_URL", "").rstrip("/")
     oss_dir = get_oss_dir("kernel", arch)
     download_url = f"{public_url}/{images_dir}/{oss_dir}/{filename}"
@@ -163,7 +163,7 @@ def update_initramfs_entries(images: list[dict], meta: dict, *, use_sha256: bool
     size = meta["size"]
     platform = PLATFORM_MAP.get(arch, arch)
 
-    images_dir = os.environ.get("OSS_TENBOX_IMAGES_DIR", "tenbox/images").strip("/")
+    images_dir = os.environ.get("OSS_AGENTSPHERE_IMAGES_DIR", "tenbox/images").strip("/")
     public_url = os.environ.get("OSS_PUBLIC_URL", "").rstrip("/")
     oss_dir = get_oss_dir("initramfs", arch)
     download_url = f"{public_url}/{images_dir}/{oss_dir}/{filename}"

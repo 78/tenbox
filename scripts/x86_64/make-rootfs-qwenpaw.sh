@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a Debian base rootfs as qcow2 for TenBox Phase 2.
+# Build a Debian base rootfs as qcow2 for AgentSphere Phase 2.
 # Requires: debootstrap, qemu-utils. Run as root in WSL2 or Linux.
 #
 # Features:
@@ -16,11 +16,11 @@
 set -e
 
 ROOTFS_SIZE="100G"
-SUITE="trixie"
+SUITE="bookworm"
 MIRROR="http://deb.debian.org/debian"
 MIRROR_SECURITY="http://deb.debian.org/debian-security"
 ROOT_PASSWORD="${ROOT_PASSWORD:-tenbox}"
-USER_NAME="${USER_NAME:-tenbox}"
+USER_NAME="${USER_NAME:-admin}"
 USER_PASSWORD="${USER_PASSWORD:-tenbox}"
 INCLUDE_PKGS="systemd-sysv,udev,dbus,sudo,\
 iproute2,iputils-ping,ifupdown,dhcpcd-base,\
@@ -49,7 +49,7 @@ CACHE_TAR="$(realpath -m "$CACHE_DIR/debootstrap-${SUITE}-base.tar")"
 CACHE_NODESOURCE="$SCRIPTS_CACHE_DIR/nodesource_setup_22.x.sh"
 
 # Work dir must be on WSL Linux FS (/tmp), not NTFS (DrvFS /mnt/*) - loop devices need mknod
-WORK_DIR="${TENBOX_WORK_DIR:-/tmp/tenbox-rootfs-qwenpaw}"
+WORK_DIR="${AGENTSPHERE_WORK_DIR:-/tmp/tenbox-rootfs-qwenpaw}"
 
 # Parse arguments
 FORCE_REBUILD=false
@@ -62,7 +62,7 @@ show_help() {
     cat << 'HELP'
 Usage: ./make-rootfs.sh [OPTIONS] [output.qcow2]
 
-Build a Debian rootfs image for TenBox.
+Build a Debian rootfs image for AgentSphere.
 
 Options:
   --help          Show this help message
@@ -629,7 +629,7 @@ with open(cfg_path, \"w\") as f:
 print(\"  Tool Guard & File Guard disabled in\", cfg_path)
 "'
 
-echo "Configuring TenBox LLM provider..."
+echo "Configuring AgentSphere LLM provider..."
 mkdir -p /home/$USER_NAME/.qwenpaw.secret/providers/custom
 cp /tmp/rootfs-configs/qwenpaw-provider-tenbox.json /home/$USER_NAME/.qwenpaw.secret/providers/custom/tenbox.json
 cp /tmp/rootfs-configs/qwenpaw-active-model.json /home/$USER_NAME/.qwenpaw.secret/providers/active_model.json
@@ -856,7 +856,7 @@ check "qemu-guest-agent"  dpkg -s qemu-guest-agent
 check "pulseaudio"        dpkg -s pulseaudio
 check "node"              command -v node
 check "ntp"               dpkg -s systemd-timesyncd
-check "qwenpaw"           test -d /home/tenbox/.qwenpaw
+check "qwenpaw"           test -d /home/admin/.qwenpaw
 check "chromium"          dpkg -s chromium
 check "curl"              command -v curl
 check "wget"              command -v wget

@@ -2,9 +2,9 @@
 
 ## `tenbox` — daemon CLI
 
-`tenbox` communicates with a running `tenboxd` over the local Unix socket. The
-socket is auto-discovered (see `docs/tenboxd.md` — Local RPC); override with
-`$TENBOX_SOCK`.
+`tenbox` communicates with a running `agentsphered` over the local Unix socket. The
+socket is auto-discovered (see `docs/agentsphered.md` — Local RPC); override with
+`$AGENTSPHERE_SOCK`.
 
 ```
 tenbox <command> [options]
@@ -66,7 +66,7 @@ tenbox <command> [options]
 
 ## `agentsphere-vm-runtime` — direct runtime CLI
 
-The runtime is normally launched by `tenboxd` (or by the GUI manager on
+The runtime is normally launched by `agentsphered` (or by the GUI manager on
 Windows/macOS). It can also be invoked directly for development and debugging.
 
 On Windows the binary is `agentsphere-vm-runtime.exe`; on macOS and Linux it is
@@ -100,7 +100,7 @@ agentsphere-vm-runtime --kernel <path> [options]
 
 ### NAT networking
 
-When `--net` is passed, TenBox provides a user-mode network stack (lwIP):
+When `--net` is passed, AgentSphere provides a user-mode network stack (lwIP):
 
 | Address | Role |
 | --- | --- |
