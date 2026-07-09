@@ -143,25 +143,32 @@ class AppState: ObservableObject {
     @Published var showForceStopConfirm = false
     @Published var showSharedFoldersSheet = false
     @Published var showPortForwardsSheet = false
+    @Published var showAgentToolsSheet = false
     @Published var startVmError: String?
     @Published var hostForwardError: String?
     @Published var llmMappings: [LlmModelMapping] = []
     @Published var llmLoggingEnabled = false
+    @Published var agentBackupSchedules: [String: AgentBackupSchedule] = [:]
 
     let llmProxy = LlmProxyService()
+    private let agentTools = AgentToolsService()
     private static let kLlmGuestIp = "10.0.2.3"
     private static let kLlmGuestPort: UInt16 = 80
 
     private var bridge = TenBoxBridgeWrapper()
     let clipboardHandler = ClipboardHandler()
     private var activeSessions: [String: VmSession] = [:]
+    private var runtimeSharedFolders: [String: [SharedFolder]] = [:]
     private var sessionCancellables: [String: AnyCancellable] = [:]
     private var stateObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
+    private var agentBackupTimer: Timer?
+    private var scheduledBackupsRunning: Set<String> = []
     private var pendingVmStartId: String?
     private var sleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
 
     init() {
+        bridge.configStore.purgeAgentToolSharedFolders()
         refreshVmList()
         NSLog("[TenBoxApp] Loaded %d VM(s):", vms.count)
         for vm in vms {
@@ -169,6 +176,8 @@ class AppState: ObservableObject {
         }
         loadLlmMappings()
         startLlmProxyIfNeeded()
+        loadAgentBackupSchedules()
+        startAgentBackupScheduler()
         setupClipboard()
         stateObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("TenBoxVmStateChanged"),
@@ -224,6 +233,7 @@ class AppState: ObservableObject {
 
     deinit {
         clipboardHandler.stopMonitoring()
+        agentBackupTimer?.invalidate()
         releaseSleepAssertion()
         if let obs = stateObserver {
             NotificationCenter.default.removeObserver(obs)
@@ -429,6 +439,20 @@ class AppState: ObservableObject {
         sendSharedFoldersUpdateIfRunning(vmId: vmId)
     }
 
+    func addRuntimeSharedFolder(_ folder: SharedFolder, toVm vmId: String) {
+        runtimeSharedFolders[vmId, default: []].removeAll { $0.tag == folder.tag }
+        runtimeSharedFolders[vmId, default: []].append(folder)
+        sendSharedFoldersUpdateIfRunning(vmId: vmId)
+    }
+
+    func removeRuntimeSharedFolder(tag: String, fromVm vmId: String) {
+        runtimeSharedFolders[vmId]?.removeAll { $0.tag == tag }
+        if runtimeSharedFolders[vmId]?.isEmpty == true {
+            runtimeSharedFolders.removeValue(forKey: vmId)
+        }
+        sendSharedFoldersUpdateIfRunning(vmId: vmId)
+    }
+
     func addHostForward(_ pf: HostForward, toVm vmId: String) {
         _ = bridge.addHostForward(pf, toVm: vmId)
         refreshVmList()
@@ -453,6 +477,354 @@ class AppState: ObservableObject {
         sendNetworkUpdateIfRunning(vmId: vmId)
     }
 
+    func exportAgentProfile(vmId: String, agent: AgentKind, destinationURL: URL,
+                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.exportProfile(vm: vm, session: session, appState: self, agent: agent,
+                                 destinationURL: destinationURL, completion: completion)
+    }
+
+    func importAgentProfile(vmId: String, agent: AgentKind, sourceURL: URL,
+                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.importProfile(vm: vm, session: session, appState: self, agent: agent,
+                                 sourceURL: sourceURL, completion: completion)
+    }
+
+    func migrateOpenClawToHermes(sourceVmId: String, targetVmId: String,
+                                 options: AgentMigrationOptions = AgentMigrationOptions(),
+                                 progress: @escaping (AgentMigrationProgress) -> Void = { _ in },
+        completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard sourceVmId != targetVmId else {
+            completion(.failure(ConsoleCommandError(AgentText("Source VM and target VM cannot be the same.", "来源 VM 和目标 VM 不能相同"))))
+            return
+        }
+        guard let sourceVm = vms.first(where: { $0.id == sourceVmId }) else {
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM was not found.", "找不到 OpenClaw 来源 VM"))))
+            return
+        }
+        guard let targetVm = vms.first(where: { $0.id == targetVmId }) else {
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM was not found.", "找不到 Hermes 目标 VM"))))
+            return
+        }
+        guard sourceVm.state == .running else {
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM is not running.", "OpenClaw 来源 VM 未运行"))))
+            return
+        }
+        guard targetVm.state == .running else {
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM is not running.", "Hermes 目标 VM 未运行"))))
+            return
+        }
+
+        let sourceSession = getOrCreateSession(for: sourceVmId)
+        let targetSession = getOrCreateSession(for: targetVmId)
+        if !sourceSession.connected || !sourceSession.ipcClient.isConnected {
+            sourceSession.connectIfNeeded()
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM execution channel is not connected. Try again shortly.", "OpenClaw 来源 VM 执行通道未连接，请稍后重试"))))
+            return
+        }
+        guard sourceSession.guestAgentConnected else {
+            completion(.failure(ConsoleCommandError(AgentText("OpenClaw source VM Guest Agent is not connected.", "OpenClaw 来源 VM Guest Agent 未连接"))))
+            return
+        }
+        if !targetSession.connected || !targetSession.ipcClient.isConnected {
+            targetSession.connectIfNeeded()
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM execution channel is not connected. Try again shortly.", "Hermes 目标 VM 执行通道未连接，请稍后重试"))))
+            return
+        }
+        guard targetSession.guestAgentConnected else {
+            completion(.failure(ConsoleCommandError(AgentText("Hermes target VM Guest Agent is not connected.", "Hermes 目标 VM Guest Agent 未连接"))))
+            return
+        }
+
+        agentTools.migrateOpenClawToHermes(sourceVm: sourceVm,
+                                           sourceSession: sourceSession,
+                                           targetVm: targetVm,
+                                           targetSession: targetSession,
+                                           appState: self,
+                                           options: options,
+                                           keepCount: agentBackupSchedule(vmId: targetVmId, agent: .hermes).keepCount,
+                                           progress: progress,
+                                           completion: completion)
+    }
+
+    func agentBackupStatus(vmId: String, agent: AgentKind,
+                           completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.backupStatus(vm: vm, session: session, appState: self, agent: agent,
+                                completion: completion)
+    }
+
+    func listAgentBackups(vmId: String, agent: AgentKind) -> [AgentBackupPackage] {
+        (try? agentTools.listBackupPackages(vmId: vmId, agent: agent)) ?? []
+    }
+
+    func snapshotAgentBackup(vmId: String, agent: AgentKind,
+                             completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.snapshotBackup(vm: vm, session: session, appState: self, agent: agent,
+                                  keepCount: agentBackupSchedule(vmId: vmId, agent: agent).keepCount,
+                                  completion: completion)
+    }
+
+    func restoreAgentBackup(vmId: String, agent: AgentKind, packageURL: URL,
+                            completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.restoreBackup(vm: vm, session: session, appState: self, agent: agent,
+                                 packageURL: packageURL, completion: completion)
+    }
+
+    func agentHealthStatus(vmId: String, agent: AgentKind,
+                           completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.healthStatus(vm: vm, session: session, appState: self, agent: agent,
+                                completion: completion)
+    }
+
+    func restartAgent(vmId: String, agent: AgentKind,
+                      completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.restartAgent(vm: vm, session: session, appState: self, agent: agent,
+                                keepCount: agentBackupSchedule(vmId: vmId, agent: agent).keepCount,
+                                completion: completion)
+    }
+
+    func testAgentModel(vmId: String, agent: AgentKind,
+                        completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.testModel(vm: vm, session: session, appState: self, agent: agent,
+                             completion: completion)
+    }
+
+    func resetAgentConfig(vmId: String, agent: AgentKind,
+                          completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.resetAgentConfig(vm: vm, session: session, appState: self, agent: agent,
+                                    keepCount: agentBackupSchedule(vmId: vmId, agent: agent).keepCount,
+                                    completion: completion)
+    }
+
+    func exportAgentDiagnostics(vmId: String, agent: AgentKind,
+                                completion: @escaping (Result<AgentToolResult, Error>) -> Void) {
+        guard let vm = vms.first(where: { $0.id == vmId }) else {
+            completion(.failure(ConsoleCommandError("找不到 VM")))
+            return
+        }
+        let session = getOrCreateSession(for: vmId)
+        agentTools.exportDiagnostics(vm: vm, session: session, appState: self, agent: agent,
+                                     completion: completion)
+    }
+
+    func agentBackupSchedule(vmId: String, agent: AgentKind) -> AgentBackupSchedule {
+        agentBackupSchedules[Self.agentBackupScheduleKey(vmId: vmId, agent: agent)] ?? AgentBackupSchedule()
+    }
+
+    func setAgentBackupSchedule(_ schedule: AgentBackupSchedule, vmId: String, agent: AgentKind) {
+        let previous = agentBackupSchedule(vmId: vmId, agent: agent)
+        var normalized = AgentBackupSchedule(
+            enabled: schedule.enabled,
+            hour: schedule.hour,
+            minute: schedule.minute,
+            keepCount: schedule.keepCount,
+            lastRunDate: schedule.lastRunDate,
+            lastAttemptAt: schedule.lastAttemptAt,
+            lastAttemptStatus: schedule.lastAttemptStatus,
+            lastAttemptMessage: schedule.lastAttemptMessage
+        )
+        let now = Date()
+        let calendar = Calendar.current
+        let nowMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+        let scheduledMinutes = normalized.hour * 60 + normalized.minute
+        if !previous.enabled && normalized.enabled && nowMinutes >= scheduledMinutes {
+            normalized.lastRunDate = Self.agentBackupDateKey(now)
+        }
+        agentBackupSchedules[Self.agentBackupScheduleKey(vmId: vmId, agent: agent)] = normalized
+        saveAgentBackupSchedules()
+        agentTools.rotateBackups(vmId: vmId, agent: agent, keep: normalized.keepCount)
+    }
+
+    private static func agentBackupScheduleKey(vmId: String, agent: AgentKind) -> String {
+        "\(vmId)|\(agent.rawValue)"
+    }
+
+    private func loadAgentBackupSchedules() {
+        guard let agentBackups = readSettingsJSON()["agent_backups"] as? [String: Any],
+              let schedules = agentBackups["schedules"] as? [String: Any] else {
+            agentBackupSchedules = [:]
+            return
+        }
+        var loaded: [String: AgentBackupSchedule] = [:]
+        for (key, value) in schedules {
+            guard let dict = value as? [String: Any] else { continue }
+            loaded[key] = AgentBackupSchedule(
+                enabled: dict["enabled"] as? Bool ?? false,
+                hour: dict["hour"] as? Int ?? AgentBackupSchedule.defaultHour,
+                minute: dict["minute"] as? Int ?? AgentBackupSchedule.defaultMinute,
+                keepCount: dict["keep_count"] as? Int ?? AgentBackupSchedule.defaultKeepCount,
+                lastRunDate: dict["last_run_date"] as? String,
+                lastAttemptAt: dict["last_attempt_at"] as? String,
+                lastAttemptStatus: dict["last_attempt_status"] as? String,
+                lastAttemptMessage: dict["last_attempt_message"] as? String
+            )
+        }
+        agentBackupSchedules = loaded
+    }
+
+    private func saveAgentBackupSchedules() {
+        var json = readSettingsJSON()
+        let schedules: [String: [String: Any]] = agentBackupSchedules.mapValues { schedule in
+            var value: [String: Any] = [
+                "enabled": schedule.enabled,
+                "hour": schedule.hour,
+                "minute": schedule.minute,
+                "keep_count": schedule.keepCount,
+            ]
+            if let lastRunDate = schedule.lastRunDate {
+                value["last_run_date"] = lastRunDate
+            }
+            if let lastAttemptAt = schedule.lastAttemptAt {
+                value["last_attempt_at"] = lastAttemptAt
+            }
+            if let lastAttemptStatus = schedule.lastAttemptStatus {
+                value["last_attempt_status"] = lastAttemptStatus
+            }
+            if let lastAttemptMessage = schedule.lastAttemptMessage {
+                value["last_attempt_message"] = lastAttemptMessage
+            }
+            return value
+        }
+        json["agent_backups"] = ["schedules": schedules] as [String: Any]
+        writeSettingsJSON(json)
+    }
+
+    private func startAgentBackupScheduler() {
+        agentBackupTimer?.invalidate()
+        agentBackupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.runDueAgentBackups()
+        }
+        runDueAgentBackups()
+    }
+
+    private func runDueAgentBackups(now: Date = Date()) {
+        let calendar = Calendar.current
+        let today = Self.agentBackupDateKey(now)
+        let nowMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+
+        for (key, schedule) in agentBackupSchedules {
+            guard schedule.enabled, schedule.lastRunDate != today else { continue }
+            let scheduledMinutes = schedule.hour * 60 + schedule.minute
+            guard nowMinutes >= scheduledMinutes else { continue }
+            guard !scheduledBackupsRunning.contains(key) else { continue }
+
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2,
+                  let agent = AgentKind(rawValue: parts[1]) else {
+                continue
+            }
+            guard let vm = vms.first(where: { $0.id == parts[0] }) else { continue }
+            guard vm.state == .running else {
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: AgentText("VM is not running", "VM 未运行"), at: now)
+                continue
+            }
+
+            let session = getOrCreateSession(for: vm.id)
+            if !session.connected || !session.ipcClient.isConnected {
+                session.connectIfNeeded()
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: AgentText("Execution channel is not connected", "执行通道未连接"), at: now)
+                continue
+            }
+            guard session.guestAgentConnected else {
+                updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: AgentText("Execution channel is not connected", "执行通道未连接"), at: now)
+                continue
+            }
+
+            scheduledBackupsRunning.insert(key)
+            agentTools.snapshotBackup(vm: vm, session: session, appState: self, agent: agent, keepCount: schedule.keepCount) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.scheduledBackupsRunning.remove(key)
+                    switch result {
+                    case .success:
+                        self.updateAgentBackupAttempt(key: key, base: schedule, status: "success", message: AgentText("Succeeded", "成功"), at: now, lastRunDate: today)
+                        NSLog("[AgentBackup] Scheduled backup completed: %@ %@", vm.id, agent.rawValue)
+                    case .failure(let error):
+                        self.updateAgentBackupAttempt(key: key, base: schedule, status: "failed", message: error.localizedDescription, at: now, lastRunDate: today)
+                        NSLog("[AgentBackup] Scheduled backup failed: %@ %@ %@", vm.id, agent.rawValue, error.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    private func updateAgentBackupAttempt(key: String,
+                                          base: AgentBackupSchedule,
+                                          status: String,
+                                          message: String,
+                                          at date: Date,
+                                          lastRunDate: String? = nil) {
+        var updated = agentBackupSchedules[key] ?? base
+        updated.lastAttemptAt = Self.agentBackupAttemptTimeText(date)
+        updated.lastAttemptStatus = status
+        updated.lastAttemptMessage = message
+        if let lastRunDate {
+            updated.lastRunDate = lastRunDate
+        }
+        agentBackupSchedules[key] = updated
+        saveAgentBackupSchedules()
+    }
+
+    private static func agentBackupDateKey(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func agentBackupAttemptTimeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
+
     // MARK: - LLM Proxy settings
 
     private var settingsPath: String {
@@ -462,10 +834,22 @@ class AppState: ObservableObject {
         return dir + "/settings.json"
     }
 
-    func loadLlmMappings() {
+    private func readSettingsJSON() -> [String: Any] {
         guard let data = FileManager.default.contents(atPath: settingsPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let llmProxy = json["llm_proxy"] as? [String: Any],
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return json
+    }
+
+    private func writeSettingsJSON(_ json: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
+            try? data.write(to: URL(fileURLWithPath: settingsPath))
+        }
+    }
+
+    func loadLlmMappings() {
+        guard let llmProxy = readSettingsJSON()["llm_proxy"] as? [String: Any],
               let mappingsArray = llmProxy["mappings"] as? [[String: Any]] else {
             llmMappings = []
             return
@@ -484,11 +868,7 @@ class AppState: ObservableObject {
     }
 
     private func saveLlmMappings() {
-        var json: [String: Any] = [:]
-        if let data = FileManager.default.contents(atPath: settingsPath),
-           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = existing
-        }
+        var json = readSettingsJSON()
         let mappingsArray: [[String: Any]] = llmMappings.map { m in
             [
                 "alias": m.alias,
@@ -502,9 +882,7 @@ class AppState: ObservableObject {
             "mappings": mappingsArray,
             "enable_logging": llmLoggingEnabled,
         ] as [String: Any]
-        if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
-            try? data.write(to: URL(fileURLWithPath: settingsPath))
-        }
+        writeSettingsJSON(json)
     }
 
     func addLlmMapping(_ mapping: LlmModelMapping) {
@@ -558,7 +936,8 @@ class AppState: ObservableObject {
     private func sendSharedFoldersUpdateIfRunning(vmId: String) {
         guard let session = activeSessions[vmId], session.ipcClient.isConnected,
               let vm = vms.first(where: { $0.id == vmId }) else { return }
-        let entries = vm.sharedFolders.map { f in
+        let folders = vm.sharedFolders + (runtimeSharedFolders[vmId] ?? [])
+        let entries = folders.map { f in
             "\(f.tag)|\(f.hostPath)|\(f.readonly ? "1" : "0")"
         }
         session.ipcClient.sendSharedFoldersUpdate(entries: entries)
@@ -676,5 +1055,10 @@ private struct VmCommandMenuContent: View {
             appState.showPortForwardsSheet = true
         }
         .disabled(vm == nil)
+
+        Button(AgentText("Agent Toolbox...", "Agent急救箱...")) {
+            appState.showAgentToolsSheet = true
+        }
+        .disabled(vm == nil || !isRunning)
     }
 }
