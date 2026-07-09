@@ -18,6 +18,13 @@ IDB_TOOLBAR_SHARED_FOLDERS  BITMAP "resources/shared_folders.bmp"
 IDB_TOOLBAR_PORT_FORWARDS   BITMAP "resources/port_forwards.bmp"
 IDB_TOOLBAR_DPI_ZOOM        BITMAP "resources/dpi_zoom.bmp"
 IDB_TOOLBAR_LLM_PROXY       BITMAP "resources/llm_proxy.bmp"
+IDB_TOOLBAR_FULLSCREEN      BITMAP "resources/fullscreen.bmp"
+IDB_FS_EXIT                 BITMAP "resources/fs_exit.bmp"
+IDB_FS_PIN                  BITMAP "resources/fs_pin.bmp"
+IDB_FS_UNPIN                BITMAP "resources/fs_unpin.bmp"
+IDB_FS_ZOOM                 BITMAP "resources/fs_zoom.bmp"
+IDB_FS_ZOOM_ACTIVE          BITMAP "resources/fs_zoom_active.bmp"
+IDB_TOOLBAR_FULLSCREEN_EXIT BITMAP "resources/fullscreen_exit.bmp"
 
 // Version information
 VS_VERSION_INFO VERSIONINFO
