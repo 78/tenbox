@@ -665,6 +665,9 @@ fi
 if command -v npm &>/dev/null; then
     npm config set registry https://registry.npmmirror.com --global
     runuser -l $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
+    # npm must not leave root-owned files under the tenbox home.
+    [ -d /home/$USER_NAME/.npm ] && chown -R $USER_NAME:$USER_NAME /home/$USER_NAME/.npm
+    [ -f /home/$USER_NAME/.npmrc ] && chown $USER_NAME:$USER_NAME /home/$USER_NAME/.npmrc
 fi
 EOF
 }
@@ -770,13 +773,19 @@ UV_LINK_MODE=copy uv pip install qrcode[pil]
 #  - tinker-atropos (Manual Install Step 4): only used by the RL training
 #    toolset, which requires TINKER_API_KEY + WANDB_API_KEY at runtime.
 #    We don't do model fine-tuning in TenBox.
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g agent-browser
+# Keep npm cache/logs out of the tenbox home: HOME is set to USER_HOME for
+# uv/hermes paths above, so override it for this root-owned global install.
+HOME=/root PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g agent-browser
 
 ln -sf "\$INSTALL_DIR/venv/bin/hermes" /usr/local/bin/hermes
 ln -sf "\$INSTALL_DIR/venv/bin/hermes-agent" /usr/local/bin/hermes-agent
 
 chown -R $USER_NAME:$USER_NAME "\$HERMES_HOME"
 [ -d "\$USER_HOME/.local" ] && chown -R $USER_NAME:$USER_NAME "\$USER_HOME/.local"
+# Ensure tenbox can use/upgrade npm later (cache must not stay root-owned).
+[ -d "\$USER_HOME/.npm" ] && chown -R $USER_NAME:$USER_NAME "\$USER_HOME/.npm"
+[ -d "\$USER_HOME/.npm-global" ] && chown -R $USER_NAME:$USER_NAME "\$USER_HOME/.npm-global"
+[ -f "\$USER_HOME/.npmrc" ] && chown $USER_NAME:$USER_NAME "\$USER_HOME/.npmrc"
 EOF
 
     DETECTED_HERMES_VERSION=$(sudo chroot "$MOUNT_DIR" runuser -l "$USER_NAME" -c \
