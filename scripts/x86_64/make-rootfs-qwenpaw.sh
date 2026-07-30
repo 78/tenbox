@@ -579,6 +579,9 @@ fi
 if command -v npm &>/dev/null; then
     npm config set registry https://registry.npmmirror.com --global
     runuser -l $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
+    # npm must not leave root-owned files under the tenbox home.
+    [ -d /home/$USER_NAME/.npm ] && chown -R $USER_NAME:$USER_NAME /home/$USER_NAME/.npm
+    [ -f /home/$USER_NAME/.npmrc ] && chown $USER_NAME:$USER_NAME /home/$USER_NAME/.npmrc
 fi
 EOF
 }

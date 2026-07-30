@@ -665,6 +665,9 @@ fi
 if command -v npm &>/dev/null; then
     npm config set registry https://registry.npmmirror.com --global
     runuser -l $USER_NAME -s /bin/bash -c "npm config set registry https://registry.npmmirror.com"
+    # npm must not leave root-owned files under the tenbox home.
+    [ -d /home/$USER_NAME/.npm ] && chown -R $USER_NAME:$USER_NAME /home/$USER_NAME/.npm
+    [ -f /home/$USER_NAME/.npmrc ] && chown $USER_NAME:$USER_NAME /home/$USER_NAME/.npmrc
 fi
 EOF
 }
@@ -719,7 +722,7 @@ ln -sf \$USER_HOME/.local/bin/uvx /usr/local/bin/uvx
 # Ensure uv, hermes venv python, and user-local bins are on PATH
 if ! grep -q 'hermes/hermes-agent/venv/bin' \$USER_HOME/.bashrc 2>/dev/null; then
     cat >> \$USER_HOME/.bashrc << 'HERMES_PATH'
-export PATH="\$HOME/.hermes/hermes-agent/venv/bin:\$HOME/.local/bin:\$PATH"
+export PATH="\$HOME/.hermes/node/bin:\$HOME/.hermes/hermes-agent/venv/bin:\$HOME/.local/bin:\$PATH"
 HERMES_PATH
     chown $USER_NAME:$USER_NAME \$USER_HOME/.bashrc
 fi
@@ -770,13 +773,24 @@ UV_LINK_MODE=copy uv pip install qrcode[pil]
 #  - tinker-atropos (Manual Install Step 4): only used by the RL training
 #    toolset, which requires TINKER_API_KEY + WANDB_API_KEY at runtime.
 #    We don't do model fine-tuning in TenBox.
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g agent-browser
+# Official Hermes layout: agent-browser lives under $HERMES_HOME/node via
+# npm --prefix (user-writable; no root global install into /usr/local).
+# --ignore-scripts skips Playwright browser download; TenBox uses system
+# Chromium via AGENT_BROWSER_EXECUTABLE_PATH / PLAYWRIGHT_* env.
+mkdir -p "\$HERMES_HOME/node" /var/cache/npm
+# Keep npm cache out of the tenbox home while installing into HERMES_HOME/node.
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm_config_cache=/var/cache/npm \
+    npm install -g --prefix "\$HERMES_HOME/node" --ignore-scripts agent-browser
 
 ln -sf "\$INSTALL_DIR/venv/bin/hermes" /usr/local/bin/hermes
 ln -sf "\$INSTALL_DIR/venv/bin/hermes-agent" /usr/local/bin/hermes-agent
 
 chown -R $USER_NAME:$USER_NAME "\$HERMES_HOME"
 [ -d "\$USER_HOME/.local" ] && chown -R $USER_NAME:$USER_NAME "\$USER_HOME/.local"
+# Defensive: any npm cache left under the tenbox home must be user-owned.
+[ -d "\$USER_HOME/.npm" ] && chown -R $USER_NAME:$USER_NAME "\$USER_HOME/.npm"
+[ -d "\$USER_HOME/.npm-global" ] && chown -R $USER_NAME:$USER_NAME "\$USER_HOME/.npm-global"
+[ -f "\$USER_HOME/.npmrc" ] && chown $USER_NAME:$USER_NAME "\$USER_HOME/.npmrc"
 EOF
 
     DETECTED_HERMES_VERSION=$(sudo chroot "$MOUNT_DIR" runuser -l "$USER_NAME" -c \
@@ -868,7 +882,7 @@ StartLimitBurst=5
 Type=simple
 ExecStart=\$HERMES_AGENT_DIR/venv/bin/python -m hermes_cli.main gateway run --replace
 WorkingDirectory=\$HERMES_AGENT_DIR
-Environment="PATH=\$HERMES_AGENT_DIR/venv/bin:\$HERMES_AGENT_DIR/node_modules/.bin:/usr/bin:\$USER_HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=\$HERMES_DIR/node/bin:\$HERMES_AGENT_DIR/venv/bin:\$HERMES_AGENT_DIR/node_modules/.bin:/usr/bin:\$USER_HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="VIRTUAL_ENV=\$HERMES_AGENT_DIR/venv"
 Environment="HERMES_HOME=\$HERMES_DIR"
 # Point any Playwright-driven code at the preinstalled system chromium
