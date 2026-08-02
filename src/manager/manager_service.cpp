@@ -32,6 +32,7 @@ extern FILE* GetManagerLogFile();
 } while (0)
 
 #include <windows.h>
+#include <wincrypt.h>
 
 #include <algorithm>
 #include <array>
@@ -77,6 +78,24 @@ std::string DecodeHex(const std::string& value) {
         if (hi < 0 || lo < 0) return {};
         out[i] = static_cast<char>((hi << 4) | lo);
     }
+    return out;
+}
+
+std::string DecodeBase64(const std::string& value) {
+    if (value.empty()) return {};
+    DWORD needed = 0;
+    if (!CryptStringToBinaryA(value.c_str(), static_cast<DWORD>(value.size()),
+                              CRYPT_STRING_BASE64, nullptr, &needed, nullptr, nullptr) ||
+        needed == 0) {
+        return {};
+    }
+    std::string out(needed, '\0');
+    if (!CryptStringToBinaryA(value.c_str(), static_cast<DWORD>(value.size()),
+                              CRYPT_STRING_BASE64,
+                              reinterpret_cast<BYTE*>(out.data()), &needed, nullptr, nullptr)) {
+        return {};
+    }
+    out.resize(needed);
     return out;
 }
 
@@ -416,19 +435,7 @@ bool ManagerService::EditVm(const std::string& vm_id, const VmMutablePatch& patc
     }
 
     if (running && patch.shared_folders) {
-        ipc::Message msg;
-        msg.channel = ipc::Channel::kControl;
-        msg.kind = ipc::Kind::kRequest;
-        msg.type = "runtime.update_shared_folders";
-        msg.vm_id = vm_id;
-        msg.request_id = GetTickCount64();
-        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
-        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
-            const auto& f = vm.spec.shared_folders[i];
-            msg.fields["folder_" + std::to_string(i)] =
-                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
-        }
-        SendRuntimeMessage(vm, msg);
+        SendSharedFoldersUpdateLocked(vm_id, vm);
     }
 
     return true;
@@ -863,6 +870,26 @@ bool ManagerService::SendRuntimeMessage(VmRecord& vm, const ipc::Message& msg) {
     return true;
 }
 
+void ManagerService::SendSharedFoldersUpdateLocked(const std::string& vm_id, VmRecord& vm) {
+    if (vm.state != VmPowerState::kRunning) return;
+    std::vector<SharedFolder> folders = vm.spec.shared_folders;
+    folders.insert(folders.end(), vm.runtime_shared_folders.begin(), vm.runtime_shared_folders.end());
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kControl;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "runtime.update_shared_folders";
+    msg.vm_id = vm_id;
+    msg.request_id = GetTickCount64();
+    msg.fields["folder_count"] = std::to_string(folders.size());
+    for (size_t i = 0; i < folders.size(); ++i) {
+        const auto& f = folders[i];
+        msg.fields["folder_" + std::to_string(i)] =
+            f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
+    }
+    SendRuntimeMessage(vm, msg);
+}
+
 void ManagerService::ApplyPendingPatchLocked(VmRecord& vm) {
     if (!vm.pending_patch) return;
     const auto patch = *vm.pending_patch;
@@ -872,6 +899,7 @@ void ManagerService::ApplyPendingPatchLocked(VmRecord& vm) {
 }
 
 void ManagerService::CleanupRuntimeHandles(VmRecord& vm) {
+    FailPendingGuestExecForVm(vm.spec.vm_id, "VM runtime disconnected");
     vm.runtime.pipe_connected = false;
     if (vm.runtime.process_handle) {
         HANDLE proc = reinterpret_cast<HANDLE>(vm.runtime.process_handle);
@@ -887,6 +915,7 @@ void ManagerService::CleanupRuntimeHandles(VmRecord& vm) {
         vm.runtime.process_handle = nullptr;
     }
     vm.runtime.process_id = 0;
+    vm.runtime_shared_folders.clear();
     vm.runtime.recv_pending.clear();
     vm.runtime.recv_payload_needed = 0;
     vm.runtime.recv_pending_msg = {};
@@ -966,6 +995,88 @@ bool ManagerService::IsGuestAgentConnected(const std::string& vm_id) const {
     const VmRecord* vm = FindVm(vm_id);
     if (!vm) return false;
     return vm->guest_agent_connected;
+}
+
+bool ManagerService::RunGuestAgentCommand(const std::string& vm_id,
+                                          const std::string& command,
+                                          uint32_t timeout_ms,
+                                          GuestExecCallback callback,
+                                          const std::string& user) {
+    if (command.empty()) {
+        if (callback) {
+            GuestExecResult result;
+            result.error = "missing command";
+            callback(std::move(result));
+        }
+        return false;
+    }
+
+    timeout_ms = std::clamp<uint32_t>(timeout_ms, 1000, 600000);
+    const uint64_t request_id = next_guest_exec_request_id_.fetch_add(1, std::memory_order_relaxed);
+
+    {
+        std::lock_guard<std::mutex> exec_lock(guest_exec_mutex_);
+        pending_guest_exec_[request_id] = PendingGuestExec{vm_id, std::move(callback)};
+    }
+
+    bool sent = false;
+    {
+        std::lock_guard<std::mutex> lock(vms_mutex_);
+        VmRecord* vm = FindVm(vm_id);
+        if (vm && vm->state == VmPowerState::kRunning &&
+            vm->runtime.pipe_connected && vm->guest_agent_connected) {
+            ipc::Message msg;
+            msg.channel = ipc::Channel::kControl;
+            msg.kind = ipc::Kind::kRequest;
+            msg.type = "runtime.guest_exec";
+            msg.vm_id = vm_id;
+            msg.request_id = request_id;
+            msg.fields["command_hex"] = EncodeHex(command);
+            msg.fields["timeout_ms"] = std::to_string(timeout_ms);
+            if (!user.empty()) msg.fields["user"] = user;
+            sent = SendRuntimeMessage(*vm, msg);
+        }
+    }
+
+    if (!sent) {
+        GuestExecCallback cb;
+        {
+            std::lock_guard<std::mutex> exec_lock(guest_exec_mutex_);
+            auto it = pending_guest_exec_.find(request_id);
+            if (it != pending_guest_exec_.end()) {
+                cb = std::move(it->second.callback);
+                pending_guest_exec_.erase(it);
+            }
+        }
+        if (cb) {
+            GuestExecResult result;
+            result.error = "Guest Agent 未连接或 VM 未运行";
+            cb(std::move(result));
+        }
+        return false;
+    }
+    return true;
+}
+
+void ManagerService::FailPendingGuestExecForVm(const std::string& vm_id, const std::string& error) {
+    std::vector<GuestExecCallback> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(guest_exec_mutex_);
+        for (auto it = pending_guest_exec_.begin(); it != pending_guest_exec_.end(); ) {
+            if (it->second.vm_id == vm_id) {
+                callbacks.push_back(std::move(it->second.callback));
+                it = pending_guest_exec_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& cb : callbacks) {
+        if (!cb) continue;
+        GuestExecResult result;
+        result.error = error;
+        cb(std::move(result));
+    }
 }
 
 bool ManagerService::SendKeyEvent(const std::string& vm_id, uint32_t key_code, bool pressed) {
@@ -1133,6 +1244,12 @@ bool ManagerService::AddSharedFolder(const std::string& vm_id, const SharedFolde
             return false;
         }
     }
+    for (const auto& sf : vm.runtime_shared_folders) {
+        if (sf.tag == folder.tag) {
+            if (error) *error = "shared folder with tag '" + folder.tag + "' already exists";
+            return false;
+        }
+    }
     
     // Check host path exists
     DWORD attrs = GetFileAttributesA(folder.host_path.c_str());
@@ -1145,19 +1262,7 @@ bool ManagerService::AddSharedFolder(const std::string& vm_id, const SharedFolde
     settings::SaveVmManifest(vm.spec);
     
     if (vm.state == VmPowerState::kRunning) {
-        ipc::Message msg;
-        msg.channel = ipc::Channel::kControl;
-        msg.kind = ipc::Kind::kRequest;
-        msg.type = "runtime.update_shared_folders";
-        msg.vm_id = vm_id;
-        msg.request_id = GetTickCount64();
-        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
-        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
-            const auto& f = vm.spec.shared_folders[i];
-            msg.fields["folder_" + std::to_string(i)] =
-                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
-        }
-        SendRuntimeMessage(vm, msg);
+        SendSharedFoldersUpdateLocked(vm_id, vm);
     }
     
     return true;
@@ -1184,19 +1289,7 @@ bool ManagerService::RemoveSharedFolder(const std::string& vm_id, const std::str
     settings::SaveVmManifest(vm.spec);
     
     if (vm.state == VmPowerState::kRunning) {
-        ipc::Message msg;
-        msg.channel = ipc::Channel::kControl;
-        msg.kind = ipc::Kind::kRequest;
-        msg.type = "runtime.update_shared_folders";
-        msg.vm_id = vm_id;
-        msg.request_id = GetTickCount64();
-        msg.fields["folder_count"] = std::to_string(vm.spec.shared_folders.size());
-        for (size_t i = 0; i < vm.spec.shared_folders.size(); ++i) {
-            const auto& f = vm.spec.shared_folders[i];
-            msg.fields["folder_" + std::to_string(i)] =
-                f.tag + "|" + f.host_path + "|" + (f.readonly ? "1" : "0");
-        }
-        SendRuntimeMessage(vm, msg);
+        SendSharedFoldersUpdateLocked(vm_id, vm);
     }
     
     return true;
@@ -1209,6 +1302,61 @@ std::vector<SharedFolder> ManagerService::GetSharedFolders(const std::string& vm
         return {};
     }
     return vm->spec.shared_folders;
+}
+
+bool ManagerService::AddRuntimeSharedFolder(const std::string& vm_id, const SharedFolder& folder,
+                                            std::string* error) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
+        if (error) *error = "vm not found";
+        return false;
+    }
+    VmRecord& vm = *vmp;
+    if (vm.state != VmPowerState::kRunning) {
+        if (error) *error = "VM must be running";
+        return false;
+    }
+    for (const auto& sf : vm.spec.shared_folders) {
+        if (sf.tag == folder.tag) {
+            if (error) *error = "shared folder with tag '" + folder.tag + "' already exists";
+            return false;
+        }
+    }
+    for (const auto& sf : vm.runtime_shared_folders) {
+        if (sf.tag == folder.tag) {
+            if (error) *error = "shared folder with tag '" + folder.tag + "' already exists";
+            return false;
+        }
+    }
+    DWORD attrs = GetFileAttributesA(folder.host_path.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (error) *error = "host path does not exist or is not a directory";
+        return false;
+    }
+    vm.runtime_shared_folders.push_back(folder);
+    SendSharedFoldersUpdateLocked(vm_id, vm);
+    return true;
+}
+
+bool ManagerService::RemoveRuntimeSharedFolder(const std::string& vm_id, const std::string& tag,
+                                               std::string* error) {
+    std::lock_guard<std::mutex> lock(vms_mutex_);
+    VmRecord* vmp = FindVm(vm_id);
+    if (!vmp) {
+        if (error) *error = "vm not found";
+        return false;
+    }
+    VmRecord& vm = *vmp;
+    auto it = std::find_if(vm.runtime_shared_folders.begin(), vm.runtime_shared_folders.end(),
+                           [&tag](const SharedFolder& sf) { return sf.tag == tag; });
+    if (it == vm.runtime_shared_folders.end()) {
+        if (error) *error = "shared folder with tag '" + tag + "' not found";
+        return false;
+    }
+    vm.runtime_shared_folders.erase(it);
+    SendSharedFoldersUpdateLocked(vm_id, vm);
+    return true;
 }
 
 bool ManagerService::AddHostForward(const std::string& vm_id, const HostForward& forward,
@@ -1970,6 +2118,35 @@ void ManagerService::HandleIncomingMessage(const std::string& vm_id, const ipc::
     }
 
     // Guest Agent state events
+    if (msg.channel == ipc::Channel::kControl &&
+        msg.kind == ipc::Kind::kResponse &&
+        msg.type == "runtime.guest_exec.result") {
+        GuestExecCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(guest_exec_mutex_);
+            auto it = pending_guest_exec_.find(msg.request_id);
+            if (it != pending_guest_exec_.end()) {
+                cb = std::move(it->second.callback);
+                pending_guest_exec_.erase(it);
+            }
+        }
+        if (cb) {
+            GuestExecResult result;
+            auto get = [&](const char* key) -> std::string {
+                auto it = msg.fields.find(key);
+                return it == msg.fields.end() ? std::string{} : it->second;
+            };
+            result.ok = get("ok") == "true";
+            const auto exit_code = get("exit_code");
+            if (!exit_code.empty()) result.exit_code = std::atoi(exit_code.c_str());
+            result.stdout_text = DecodeBase64(get("out_b64"));
+            result.stderr_text = DecodeBase64(get("err_b64"));
+            result.error = get("error");
+            cb(std::move(result));
+        }
+        return;
+    }
+
     if (msg.channel == ipc::Channel::kControl &&
         msg.kind == ipc::Kind::kEvent &&
         msg.type == "guest_agent.state") {

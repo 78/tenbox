@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <string>
 
 namespace settings {
@@ -156,6 +157,25 @@ AppSettings LoadSettings(const std::string& data_dir) {
             if (lp.contains("enable_logging") && lp["enable_logging"].is_boolean())
                 s.llm_proxy.enable_logging = lp["enable_logging"].get<bool>();
         }
+        if (j.contains("agent_backups") && j["agent_backups"].is_object()) {
+            auto& ab = j["agent_backups"];
+            if (ab.contains("schedules") && ab["schedules"].is_object()) {
+                for (auto it = ab["schedules"].begin(); it != ab["schedules"].end(); ++it) {
+                    if (!it.value().is_object()) continue;
+                    AgentBackupSchedule schedule;
+                    auto& item = it.value();
+                    schedule.enabled = item.value("enabled", false);
+                    schedule.hour = std::clamp(item.value("hour", 3), 0, 23);
+                    schedule.minute = std::clamp(item.value("minute", 0), 0, 59);
+                    schedule.keep_count = std::clamp(item.value("keep_count", 7), 1, 99);
+                    schedule.last_run_date = item.value("last_run_date", "");
+                    schedule.last_attempt_at = item.value("last_attempt_at", "");
+                    schedule.last_attempt_status = item.value("last_attempt_status", "");
+                    schedule.last_attempt_message = item.value("last_attempt_message", "");
+                    s.agent_backup_schedules[it.key()] = std::move(schedule);
+                }
+            }
+        }
         if (j.contains("vm_paths") && j["vm_paths"].is_array()) {
             auto default_storage = DefaultVmStorageDir();
             for (auto& item : j["vm_paths"]) {
@@ -229,6 +249,27 @@ void SaveSettings(const std::string& data_dir, const AppSettings& s) {
         lp["mappings"] = mappings;
         lp["enable_logging"] = s.llm_proxy.enable_logging;
         j["llm_proxy"] = lp;
+    }
+
+    {
+        json schedules = json::object();
+        for (const auto& [key, schedule] : s.agent_backup_schedules) {
+            json item;
+            item["enabled"] = schedule.enabled;
+            item["hour"] = schedule.hour;
+            item["minute"] = schedule.minute;
+            item["keep_count"] = schedule.keep_count;
+            if (!schedule.last_run_date.empty())
+                item["last_run_date"] = schedule.last_run_date;
+            if (!schedule.last_attempt_at.empty())
+                item["last_attempt_at"] = schedule.last_attempt_at;
+            if (!schedule.last_attempt_status.empty())
+                item["last_attempt_status"] = schedule.last_attempt_status;
+            if (!schedule.last_attempt_message.empty())
+                item["last_attempt_message"] = schedule.last_attempt_message;
+            schedules[key] = item;
+        }
+        j["agent_backups"] = {{"schedules", schedules}};
     }
 
     auto path = fs::path(data_dir) / "settings.json";

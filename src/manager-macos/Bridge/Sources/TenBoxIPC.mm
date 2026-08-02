@@ -50,6 +50,18 @@ static std::string HexDecode(const std::string& hex) {
     return out;
 }
 
+static NSString* DecodeBase64Utf8(const std::string& value) {
+    if (value.empty()) return @"";
+    NSString* b64 = [NSString stringWithUTF8String:value.c_str()];
+    NSData* data = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
+    if (!data) return @"";
+    NSString* text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!text) {
+        text = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+    }
+    return text ?: @"";
+}
+
 @implementation TBIpcClient {
     std::unique_ptr<ipc::UnixSocketConnection> _connection;
     std::mutex _sendLock;
@@ -132,7 +144,8 @@ static std::string HexDecode(const std::string& hex) {
     msg.channel = ipc::Channel::kControl;
     msg.kind = ipc::Kind::kRequest;
     msg.type = "runtime.command";
-    msg.fields["command"] = command.UTF8String;
+    std::string raw = command.UTF8String;
+    msg.fields["command_hex"] = HexEncode(raw);
 
     std::lock_guard<std::mutex> lock(_sendLock);
     std::string encoded = ipc::Encode(msg);
@@ -142,6 +155,25 @@ static std::string HexDecode(const std::string& hex) {
 
 - (BOOL)sendSyncTimeCommand {
     return [self sendControlCommand:@"sync-time"];
+}
+
+- (BOOL)sendGuestExecCommand:(NSString *)command user:(NSString *)user requestId:(uint64_t)requestId timeoutMs:(uint32_t)timeoutMs {
+    if (!_connection || !_connection->IsValid()) return NO;
+
+    ipc::Message msg;
+    msg.channel = ipc::Channel::kControl;
+    msg.kind = ipc::Kind::kRequest;
+    msg.type = "runtime.guest_exec";
+    msg.request_id = requestId;
+    std::string raw = command.UTF8String;
+    msg.fields["command_hex"] = HexEncode(raw);
+    if (user.length > 0) {
+        msg.fields["user"] = user.UTF8String;
+    }
+    msg.fields["timeout_ms"] = std::to_string(timeoutMs);
+
+    std::lock_guard<std::mutex> lock(_sendLock);
+    return _connection->Send(ipc::Encode(msg));
 }
 
 #pragma mark - Send: Input
@@ -354,6 +386,7 @@ static std::string HexDecode(const std::string& hex) {
                  clipboardRequestHandler:(void (^)(uint32_t))clipboardRequestHandler
                     runtimeStateHandler:(void (^)(NSString *))runtimeStateHandler
                   guestAgentStateHandler:(void (^)(BOOL))guestAgentStateHandler
+                  guestExecResultHandler:(void (^)(uint64_t, BOOL, int32_t, NSString *, NSString *, NSString * _Nullable))guestExecResultHandler
                     displayStateHandler:(void (^)(BOOL, uint32_t, uint32_t))displayStateHandler
                        disconnectHandler:(void (^)(void))disconnectHandler {
     if (_recvThread.joinable()) {
@@ -373,6 +406,7 @@ static std::string HexDecode(const std::string& hex) {
     typedef void (^ClipReqBlock)(uint32_t);
     typedef void (^StateBlock)(NSString *);
     typedef void (^BoolBlock)(BOOL);
+    typedef void (^GuestExecBlock)(uint64_t, BOOL, int32_t, NSString *, NSString *, NSString * _Nullable);
     typedef void (^DispStateBlock)(BOOL, uint32_t, uint32_t);
     typedef void (^VoidBlock)(void);
 
@@ -385,10 +419,11 @@ static std::string HexDecode(const std::string& hex) {
     ClipReqBlock   crH = [clipboardRequestHandler copy];
     StateBlock     rsH = [runtimeStateHandler copy];
     BoolBlock      gaH = [guestAgentStateHandler copy];
+    GuestExecBlock geH = [guestExecResultHandler copy];
     DispStateBlock dsH = [displayStateHandler copy];
     VoidBlock      dh  = [disconnectHandler copy];
 
-    _recvThread = std::thread([self, fh, cuH, ah, coh, cgH, cdH, crH, rsH, gaH, dsH, dh] {
+    _recvThread = std::thread([self, fh, cuH, ah, coh, cgH, cdH, crH, rsH, gaH, geH, dsH, dh] {
         // Streaming parser — mirrors the Windows DispatchPipeData approach.
         // One large read buffer, parse header lines + payloads in-place.
         std::string pending;
@@ -409,7 +444,7 @@ static std::string HexDecode(const std::string& hex) {
                     payload_needed = 0;
 
                     auto& msg = pending_msg;
-                    [self dispatchMsg:msg fh:fh cuH:cuH ah:ah coh:coh cgH:cgH cdH:cdH crH:crH rsH:rsH gaH:gaH dsH:dsH];
+                    [self dispatchMsg:msg fh:fh cuH:cuH ah:ah coh:coh cgH:cgH cdH:cdH crH:crH rsH:rsH gaH:gaH geH:geH dsH:dsH];
                     continue;
                 }
 
@@ -432,7 +467,7 @@ static std::string HexDecode(const std::string& hex) {
                 }
 
                 auto& msg = *decoded;
-                [self dispatchMsg:msg fh:fh cuH:cuH ah:ah coh:coh cgH:cgH cdH:cdH crH:crH rsH:rsH gaH:gaH dsH:dsH];
+                [self dispatchMsg:msg fh:fh cuH:cuH ah:ah coh:coh cgH:cgH cdH:cdH crH:crH rsH:rsH gaH:gaH geH:geH dsH:dsH];
             }
         };
 
@@ -466,6 +501,7 @@ static std::string HexDecode(const std::string& hex) {
                 crH:(void (^)(uint32_t))crH
                 rsH:(void (^)(NSString *))rsH
                 gaH:(void (^)(BOOL))gaH
+                geH:(void (^)(uint64_t, BOOL, int32_t, NSString *, NSString *, NSString * _Nullable))geH
                 dsH:(void (^)(BOOL, uint32_t, uint32_t))dsH {
 
     auto getU32 = [&](const char* key) -> uint32_t {
@@ -634,6 +670,36 @@ static std::string HexDecode(const std::string& hex) {
         BOOL connected = (ci != msg.fields.end() && ci->second == "1");
         IPC_DEBUG_LOG(@"[IPC] << %s guest_agent.state connected=%d", GetTimestamp().c_str(), connected);
         dispatch_async(dispatch_get_main_queue(), ^{ gaH(connected); });
+    }
+    else if (msg.type == "runtime.guest_exec.result") {
+        BOOL ok = false;
+        int32_t exitCode = -1;
+        NSString* outText = @"";
+        NSString* errText = @"";
+        NSString* errorText = nil;
+
+        auto okIt = msg.fields.find("ok");
+        ok = (okIt != msg.fields.end() && okIt->second == "true");
+        auto codeIt = msg.fields.find("exit_code");
+        if (codeIt != msg.fields.end()) {
+            exitCode = static_cast<int32_t>(std::strtol(codeIt->second.c_str(), nullptr, 10));
+        }
+        auto outIt = msg.fields.find("out_b64");
+        if (outIt != msg.fields.end()) {
+            outText = DecodeBase64Utf8(outIt->second);
+        }
+        auto errIt = msg.fields.find("err_b64");
+        if (errIt != msg.fields.end()) {
+            errText = DecodeBase64Utf8(errIt->second);
+        }
+        auto errorIt = msg.fields.find("error");
+        if (errorIt != msg.fields.end()) {
+            errorText = [NSString stringWithUTF8String:errorIt->second.c_str()];
+        }
+        uint64_t reqId = msg.request_id;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            geH(reqId, ok, exitCode, outText, errText, errorText);
+        });
     }
     else if (msg.type == "display.state") {
         auto ai = msg.fields.find("active");

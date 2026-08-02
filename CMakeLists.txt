@@ -167,4 +167,5 @@ endif()
 
 # macOS manager is built separately via Xcode/SwiftPM (src/manager-macos)
 
+enable_testing()
 add_subdirectory(tests)

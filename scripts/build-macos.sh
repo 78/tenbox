@@ -224,6 +224,10 @@ elif [ -f "$METAL_SRC" ]; then
     echo "  -> Copied Shaders.metal (fallback)"
 fi
 
+mkdir -p "$APP_DIR/Contents/Resources/AgentTools"
+cp "$ROOT_DIR/src/agent_tools/guest/agent_tools.sh" "$APP_DIR/Contents/Resources/AgentTools/agent_tools.sh"
+echo "  -> Copied Agent tools guest script"
+
 # Copy Sparkle framework from SPM build artifacts (universal xcframework)
 SPM_SCRATCH_REF="$MANAGER_SRC/.build-arm64"
 SPARKLE_FRAMEWORK=$(find -L "$SPM_SCRATCH_REF/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)

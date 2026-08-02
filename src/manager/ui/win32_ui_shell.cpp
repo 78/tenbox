@@ -3,12 +3,14 @@
 #include "manager/ui/create_vm_dialog.h"
 #include "manager/ui/settings_dialog.h"
 #include "manager/ui/llm_proxy_dialog.h"
+#include "manager/ui/agent_tools_dialog.h"
 #include "manager/ui/win32_display_panel.h"
 #include "manager/ui/info_tab.h"
 #include "manager/ui/console_tab.h"
 #include "manager/ui/vm_listview.h"
 #include "manager/i18n.h"
 #include "manager/app_settings.h"
+#include "manager/agent_tools_service.h"
 #include "manager/resource.h"
 #include "version.h"
 
@@ -32,7 +34,9 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -61,6 +65,7 @@ enum CmdId : UINT {
     IDM_LLM_PROXY     = 1027,
     IDM_HELP_DOC      = 1028,
     IDM_TRAY_TOGGLE   = 1029,
+    IDM_AGENT_TOOLS    = 1030,
 };
 
 // ── Control IDs ──
@@ -159,6 +164,7 @@ struct Win32UiShell::Impl {
     UINT_PTR resize_timer_id = 0;
     static constexpr UINT kResizeTimerId = 9001;
     static constexpr UINT kResizeDebounceMs = 500;
+    static constexpr UINT kAgentBackupTimerId = 9002;
 
     HFONT ui_font     = nullptr;
     HFONT mono_font   = nullptr;
@@ -202,6 +208,7 @@ struct Win32UiShell::Impl {
 
     std::unordered_map<std::string, VmUiState> vm_ui_states;
     std::unordered_map<std::string, std::unique_ptr<WasapiAudioPlayer>> audio_players;
+    std::set<std::string> scheduled_agent_backups_running;
 
     VmUiState& GetVmUiState(const std::string& vm_id) {
         return vm_ui_states[vm_id];
@@ -330,6 +337,7 @@ static HMENU BuildMenuBar(bool show_toolbar) {
     AppendMenuW(vm_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(vm_menu, MF_STRING, IDM_SHARED_FOLDERS, i18n::tr_w(S::kToolbarSharedFolders).c_str());
     AppendMenuW(vm_menu, MF_STRING, IDM_PORT_FORWARDS, i18n::tr_w(S::kMenuPortForwards).c_str());
+    AppendMenuW(vm_menu, MF_STRING, IDM_AGENT_TOOLS, i18n::to_wide(i18n::GetCurrentLanguage() == i18n::Lang::kChineseSimplified ? "Agent 急救箱..." : "Agent Toolbox...").c_str());
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(vm_menu), i18n::tr_w(S::kMenuVm).c_str());
 
     HMENU view_menu = CreatePopupMenu();
@@ -764,6 +772,7 @@ static void UpdateCommandStates(Impl* p) {
     EnableCmd(IDM_DELETE,         has_sel && !running);
     EnableCmd(IDM_SHARED_FOLDERS, has_sel);
     EnableCmd(IDM_PORT_FORWARDS, has_sel);
+    EnableCmd(IDM_AGENT_TOOLS, has_sel && running && ga_ok);
 
     SendMessage(p->toolbar, TB_ENABLEBUTTON, IDM_DPI_ZOOM,
                 MAKELONG((has_sel && p->dpi != 96) ? TRUE : FALSE, 0));
@@ -824,6 +833,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     shell->manager_.SetDisplaySize(vm_id, p->pending_display_w, p->pending_display_h);
                 }
             }
+        }
+        if (p && wp == Impl::kAgentBackupTimerId) {
+            shell->RunDueAgentBackups();
         }
         return 0;
 
@@ -997,6 +1009,15 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 break;
             const std::string& vm_id = p->records[p->selected_index].spec.vm_id;
             ShowPortForwardsDialog(hwnd, shell->manager_, vm_id);
+            shell->RefreshVmList();
+            return 0;
+        }
+        case IDM_AGENT_TOOLS: {
+            if (p->selected_index < 0 ||
+                p->selected_index >= static_cast<int>(p->records.size()))
+                break;
+            const std::string& vm_id = p->records[p->selected_index].spec.vm_id;
+            ShowAgentToolsDialog(hwnd, shell->manager_, vm_id);
             shell->RefreshVmList();
             return 0;
         }
@@ -1444,6 +1465,68 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 // ── Lifetime ──
 
+static std::string AgentBackupDateKey(const SYSTEMTIME& st) {
+    char buf[16]{};
+    snprintf(buf, sizeof(buf), "%04u-%02u-%02u", st.wYear, st.wMonth, st.wDay);
+    return buf;
+}
+
+static std::string AgentBackupTimestamp(const SYSTEMTIME& st) {
+    char buf[32]{};
+    snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+    return buf;
+}
+
+void Win32UiShell::RunDueAgentBackups() {
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    const std::string today = AgentBackupDateKey(now);
+    const int now_minutes = static_cast<int>(now.wHour) * 60 + static_cast<int>(now.wMinute);
+
+    std::vector<std::pair<std::string, settings::AgentBackupSchedule>> due;
+    for (const auto& [key, schedule] : manager_.app_settings().agent_backup_schedules) {
+        if (!schedule.enabled || schedule.last_run_date == today) continue;
+        if (now_minutes < schedule.hour * 60 + schedule.minute) continue;
+        if (impl_->scheduled_agent_backups_running.count(key)) continue;
+        due.push_back({key, schedule});
+    }
+
+    for (const auto& [key, schedule] : due) {
+        const auto sep = key.find('|');
+        if (sep == std::string::npos) continue;
+        const std::string vm_id = key.substr(0, sep);
+        const std::string agent_name = key.substr(sep + 1);
+        const auto agent = agent_name == "openclaw"
+            ? agent_tools::AgentKind::kOpenClaw
+            : agent_tools::AgentKind::kHermes;
+        auto vm = manager_.GetVm(vm_id);
+        if (!vm || vm->state != VmPowerState::kRunning || !vm->guest_agent_connected) {
+            auto& s = manager_.app_settings().agent_backup_schedules[key];
+            s.last_attempt_at = AgentBackupTimestamp(now);
+            s.last_attempt_status = "failed";
+            s.last_attempt_message = !vm ? "VM 不存在" : "VM 未运行或 Guest Agent 未连接";
+            manager_.SaveAppSettings();
+            continue;
+        }
+
+        impl_->scheduled_agent_backups_running.insert(key);
+        auto tools = std::make_shared<agent_tools::AgentToolsService>(manager_, manager_.data_dir());
+        tools->SnapshotBackup(vm_id, agent, schedule.keep_count,
+            [this, key, today, now, tools](agent_tools::ToolResult result) {
+                InvokeOnUiThread([this, key, today, now, result = std::move(result)]() mutable {
+                    impl_->scheduled_agent_backups_running.erase(key);
+                    auto& s = manager_.app_settings().agent_backup_schedules[key];
+                    s.last_attempt_at = AgentBackupTimestamp(now);
+                    s.last_attempt_status = result.ok ? "success" : "failed";
+                    s.last_attempt_message = result.ok ? "成功" : result.message;
+                    s.last_run_date = today;
+                    manager_.SaveAppSettings();
+                });
+            });
+    }
+}
+
 Win32UiShell::Win32UiShell(ManagerService& manager)
     : manager_(manager),
       impl_(std::make_unique<Impl>())
@@ -1780,6 +1863,8 @@ Win32UiShell::Win32UiShell(ManagerService& manager)
 
     RefreshVmList();
     LayoutControls(impl_.get());
+    SetTimer(impl_->hwnd, Impl::kAgentBackupTimerId, 60 * 1000, nullptr);
+    RunDueAgentBackups();
 }
 
 Win32UiShell::~Win32UiShell() {
@@ -1813,6 +1898,7 @@ Win32UiShell::~Win32UiShell() {
         impl_->tray_added = false;
     }
     if (impl_->hwnd) {
+        KillTimer(impl_->hwnd, Impl::kAgentBackupTimerId);
         RemoveClipboardFormatListener(impl_->hwnd);
     }
     if (impl_->ui_font) DeleteObject(impl_->ui_font);

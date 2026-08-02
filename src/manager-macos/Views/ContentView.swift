@@ -85,6 +85,12 @@ struct ContentView: View {
 
                     Divider()
 
+                    Button(action: { appState.showAgentToolsSheet = true }) {
+                        Label("Agent急救箱", systemImage: "cross.case")
+                    }
+                    .disabled(vm.state != .running)
+                    .help("打开 Agent 急救箱")
+
                     Button(action: { appState.showSharedFoldersSheet = true }) {
                         ToolbarBadgeLabel(
                             title: "Shared Folders",
@@ -143,6 +149,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $appState.showLlmProxySheet) {
             LlmProxySheet()
+        }
+        .sheet(isPresented: $appState.showAgentToolsSheet) {
+            if let vm = selectedVm {
+                AgentToolsSheet(vmId: vm.id, session: appState.getOrCreateSession(for: vm.id))
+            }
         }
         .alert("Delete VM", isPresented: $appState.showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
