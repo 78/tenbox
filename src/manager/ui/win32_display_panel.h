@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+// Custom messages posted from keyboard hook for fullscreen controls
+#define WM_FS_TOGGLE    (WM_APP + 10)
+#define WM_FS_SWITCH_VM (WM_APP + 11)
+#define WM_FS_SHOW_HINT (WM_APP + 12)
+
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -52,6 +57,11 @@ public:
 
     // Move/resize the window.
     void SetBounds(int x, int y, int w, int h);
+
+    // Reparent to a new parent window. Adjusts style bits and fills parent client area.
+    void Reparent(HWND new_parent);
+    void SetHintOffsetY(int offset) { hint_offset_y_ = offset; }
+    void SetFullscreenMode(bool fs) { in_fullscreen_mode_ = fs; }
 
     HWND Handle() const { return hwnd_; }
     void SetVisible(bool visible);
@@ -101,6 +111,10 @@ private:
     HCURSOR custom_cursor_ = nullptr;
 
     float dpi_zoom_factor_ = 1.0f;
+    int hint_offset_y_ = 0;
+    bool in_fullscreen_mode_ = false;
+    DWORD64 esc_press_tick_ = 0;
+    UINT_PTR esc_exit_timer_ = 0;
 
     KeyEventCallback key_cb_;
     PointerEventCallback pointer_cb_;

@@ -15,6 +15,9 @@ add_executable(tenbox-manager WIN32
     ${CMAKE_SOURCE_DIR}/src/manager/ui/llm_proxy_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/settings_dialog.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_display_panel.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_fullscreen_window.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_floating_toolbar.cpp
+    ${CMAKE_SOURCE_DIR}/src/manager/ui/win32_fullscreen_osd.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/info_tab.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/console_tab.cpp
     ${CMAKE_SOURCE_DIR}/src/manager/ui/vm_listview.cpp

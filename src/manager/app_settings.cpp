@@ -109,6 +109,15 @@ AppSettings LoadSettings(const std::string& data_dir) {
             if (w.contains("width"))  s.window.width  = w["width"].get<int>();
             if (w.contains("height")) s.window.height = w["height"].get<int>();
         }
+        if (j.contains("fullscreen_toolbar") && j["fullscreen_toolbar"].is_object()) {
+            auto& ft = j["fullscreen_toolbar"];
+            if (ft.contains("snap_edge")) s.fullscreen_toolbar.snap_edge = ft["snap_edge"].get<int>();
+            if (ft.contains("offset"))    s.fullscreen_toolbar.offset = ft["offset"].get<int>();
+            if (ft.contains("pinned"))    s.fullscreen_toolbar.pinned = ft["pinned"].get<bool>();
+        }
+        if (j.contains("fullscreen_monitor_index") && j["fullscreen_monitor_index"].is_number()) {
+            s.fullscreen_monitor_index = j["fullscreen_monitor_index"].get<int>();
+        }
         if (j.contains("show_toolbar") && j["show_toolbar"].is_boolean()) {
             s.show_toolbar = j["show_toolbar"].get<bool>();
         }
@@ -199,6 +208,14 @@ void SaveSettings(const std::string& data_dir, const AppSettings& s) {
     j["window"]           = w;
     j["show_toolbar"]     = s.show_toolbar;
     j["close_to_tray"]    = s.close_to_tray;
+    {
+        json ft;
+        ft["snap_edge"] = s.fullscreen_toolbar.snap_edge;
+        ft["offset"]    = s.fullscreen_toolbar.offset;
+        ft["pinned"]    = s.fullscreen_toolbar.pinned;
+        j["fullscreen_toolbar"] = ft;
+    }
+    j["fullscreen_monitor_index"] = s.fullscreen_monitor_index;
     j["vm_paths"]         = vm_paths_json;
     if (!s.vm_storage_dir.empty())
         j["vm_storage_dir"] = s.vm_storage_dir;
