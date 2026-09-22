@@ -3,6 +3,7 @@ import TenBoxBridge
 
 class IpcClientWrapper: ObservableObject {
     private let client = TBIpcClient()
+    private let sendQueue = DispatchQueue(label: "tenbox.ipc.send", qos: .userInitiated)
     @Published var isConnected = false
 
     // Display: (pixelBytes, pixelLength, dirtyW, dirtyH, stride, resourceW, resourceH, dirtyX, dirtyY)
@@ -25,6 +26,7 @@ class IpcClientWrapper: ObservableObject {
     // VM state
     var onRuntimeState: ((String) -> Void)?
     var onGuestAgentState: ((Bool) -> Void)?
+    var onGuestExecResult: ((UInt64, Bool, Int32, String, String, String?) -> Void)?
 
     // Host-forward errors (host ports that failed to bind)
     var onHostForwardError: (([String]) -> Void)?
@@ -73,6 +75,20 @@ class IpcClientWrapper: ObservableObject {
         _ = client.sendSyncTimeCommand()
     }
 
+    func sendGuestExec(command: String, user: String, requestId: UInt64, timeoutMs: UInt32) -> Bool {
+        client.sendGuestExecCommand(command, user: user, requestId: requestId, timeoutMs: timeoutMs)
+    }
+
+    func sendGuestExecAsync(command: String, user: String, requestId: UInt64, timeoutMs: UInt32,
+                            completion: @escaping (Bool) -> Void) {
+        sendQueue.async { [client] in
+            let sent = client.sendGuestExecCommand(command, user: user, requestId: requestId, timeoutMs: timeoutMs)
+            DispatchQueue.main.async {
+                completion(sent)
+            }
+        }
+    }
+
     func sendKey(code: UInt16, pressed: Bool) {
         client.sendKeyEvent(code, pressed: pressed)
     }
@@ -110,7 +126,9 @@ class IpcClientWrapper: ObservableObject {
     }
 
     func sendSharedFoldersUpdate(entries: [String]) {
-        client.sendSharedFoldersUpdate(entries)
+        sendQueue.async { [client, entries] in
+            client.sendSharedFoldersUpdate(entries)
+        }
     }
 
     func sendNetworkUpdate(hostfwdEntries: [String], guestfwdEntries: [String], netEnabled: Bool) {
@@ -151,6 +169,9 @@ class IpcClientWrapper: ObservableObject {
             },
             guestAgentStateHandler: { [weak self] connected in
                 self?.onGuestAgentState?(connected)
+            },
+            guestExecResultHandler: { [weak self] requestId, ok, exitCode, stdoutText, stderrText, error in
+                self?.onGuestExecResult?(requestId, ok, exitCode, stdoutText, stderrText, error)
             },
             displayStateHandler: { [weak self] active, w, h in
                 self?.onDisplayState?(active, w, h)

@@ -21,6 +21,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Push host wall time to guest (qemu-ga guest-set-time) when guest agent is connected.
 - (BOOL)sendSyncTimeCommand;
 
+/// Execute a shell command through qemu-guest-agent guest-exec.
+- (BOOL)sendGuestExecCommand:(NSString *)command user:(NSString *)user requestId:(uint64_t)requestId timeoutMs:(uint32_t)timeoutMs;
+
 // Input events (forwarded to virtio-input)
 - (BOOL)sendKeyEvent:(uint16_t)code pressed:(BOOL)pressed;
 - (BOOL)sendPointerAbsolute:(int32_t)x y:(int32_t)y buttons:(uint32_t)buttons;
@@ -62,6 +65,7 @@ NS_ASSUME_NONNULL_BEGIN
                  clipboardRequestHandler:(void (^)(uint32_t dataType))clipboardRequestHandler
                     runtimeStateHandler:(void (^)(NSString *state))runtimeStateHandler
                   guestAgentStateHandler:(void (^)(BOOL connected))guestAgentStateHandler
+                  guestExecResultHandler:(void (^)(uint64_t requestId, BOOL ok, int32_t exitCode, NSString *stdoutText, NSString *stderrText, NSString * _Nullable error))guestExecResultHandler
                     displayStateHandler:(void (^)(BOOL active, uint32_t width, uint32_t height))displayStateHandler
                        disconnectHandler:(void (^)(void))disconnectHandler;
 - (void)stopReceiveLoop;

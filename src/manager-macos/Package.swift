@@ -45,7 +45,9 @@ let package = Package(
                 "Bridge/VmProcessManager.swift",
                 "Services/ImageSourceService.swift",
                 "Services/LlmProxyService.swift",
+                "Services/AgentToolsService.swift",
                 "Views/LlmProxyView.swift",
+                "Views/AgentToolsView.swift",
             ],
             resources: [
                 .copy("Resources/icon.png"),
