@@ -325,6 +325,17 @@ enum class S {
     kTrayHide,
     kSettingsCloseToTray,
 
+    // Fullscreen
+    kMenuFullscreen,
+    kToolbarFullscreen,
+    kFullscreenExit,
+    kFullscreenPin,
+    kFullscreenUnpin,
+    kFullscreenDpiZoom,
+    kFullscreenSwitchVm,
+    kFullscreenMoveToMonitor,
+    kFullscreenFindToolbar,
+
     kCount  // Must be last
 };
 

@@ -16,6 +16,8 @@ public:
     void Run();
     void Quit();
     void RefreshVmList();
+    void EnterFullscreen();
+    void ExitFullscreen();
 
     static void InvokeOnUiThread(std::function<void()> fn);
     static void SetClipboardFromVm(bool value);
